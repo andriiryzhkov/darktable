@@ -270,6 +270,8 @@ void dtgtk_cairo_paint_masks_ellipse(cairo_t *cr, gint x, gint y, gint w, gint h
 void dtgtk_cairo_paint_masks_gradient(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
 /** Paint a path icon for masks */
 void dtgtk_cairo_paint_masks_path(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
+/** Paint an object icon for masks */
+void dtgtk_cairo_paint_masks_object(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data);
 
 // FLO
 
