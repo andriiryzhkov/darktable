@@ -1526,6 +1526,14 @@ static gboolean _blendop_masks_modes_both_toggled(GtkToggleButton *button,
                                      DEVELOP_MASK_ENABLED | DEVELOP_MASK_MASK_CONDITIONAL);
 }
 
+static gboolean _blendop_masks_modes_object_toggled(GtkToggleButton *button,
+                                                    GdkEventButton *event,
+                                                    dt_iop_module_t *module)
+{
+  return _blendop_masks_modes_toggle(button, module,
+                                     DEVELOP_MASK_ENABLED | DEVELOP_MASK_OBJECT);
+}
+
 static gboolean _blendop_masks_modes_raster_toggled(GtkToggleButton *button,
                                                     GdkEventButton *event,
                                                     dt_iop_module_t *module)
@@ -2334,6 +2342,14 @@ static gboolean _blendop_blendif_key_press(GtkWidget *widget,
   return handled;
 }
 
+static gboolean _blendop_object_reset(GtkButton *button,
+  GdkEventButton *event,
+  dt_iop_module_t *module)
+{
+  // TODO: Implement reset
+  return TRUE;
+}
+
 
 #define COLORSTOPS(gradient) sizeof(gradient) / sizeof(dt_iop_gui_blendif_colorstop_t), \
                              gradient
@@ -2982,6 +2998,31 @@ static void _raster_polarity_callback(GtkToggleButton *togglebutton,
   dt_control_queue_redraw_widget(GTK_WIDGET(togglebutton));
 }
 
+void dt_iop_gui_init_object(GtkWidget *blendw, dt_iop_module_t *module)
+{
+  dt_iop_gui_blend_data_t *bd = module->blend_data;
+
+  bd->object_box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
+  _add_wrapped_box(blendw, bd->object_box, "masks_object");
+
+  /* create and add raster support if module supports it (it's coupled
+   * to masks at the moment) */
+  if(bd->masks_support)
+  {
+    GtkWidget *section = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+    gtk_box_pack_start(GTK_BOX(section),
+                       dt_ui_label_new(_("object mask")), TRUE, TRUE, 0);
+    dt_gui_add_class(section, "dt_section_label");
+
+    dt_iop_togglebutton_new(module, "blend`tools",
+                            N_("reset object mask settings"), NULL,
+                            G_CALLBACK(_blendop_blendif_reset), FALSE, 0, 0,
+                            dtgtk_cairo_paint_reset, section);
+  }
+
+}
+
 void dt_iop_gui_init_raster(GtkWidget *blendw, dt_iop_module_t *module)
 {
   dt_iop_gui_blend_data_t *bd = module->blend_data;
@@ -3516,6 +3557,19 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
     if(bd->masks_support) //DEVELOP_MASK_ENABLED | DEVELOP_MASK_RASTER
     {
       but = dt_iop_togglebutton_new(module, "blend`masks",
+                                    N_("object mask"), NULL,
+                                    G_CALLBACK(_blendop_masks_modes_object_toggled),
+                                    FALSE, 0, 0,
+                                    dtgtk_cairo_paint_masks_object, NULL);
+      bd->masks_modes
+          = g_list_append(bd->masks_modes,
+                          GUINT_TO_POINTER(DEVELOP_MASK_ENABLED | DEVELOP_MASK_OBJECT));
+      bd->masks_modes_toggles = g_list_append(bd->masks_modes_toggles, GTK_WIDGET(but));
+    }
+
+    if(bd->masks_support) //DEVELOP_MASK_ENABLED | DEVELOP_MASK_RASTER
+    {
+      but = dt_iop_togglebutton_new(module, "blend`masks",
                                     N_("raster mask"), NULL,
                                     G_CALLBACK(_blendop_masks_modes_raster_toggled),
                                     FALSE, 0, 0,
@@ -3730,6 +3784,7 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
     dt_iop_gui_init_masks(iopw, module);
     dt_iop_gui_init_raster(iopw, module);
     dt_iop_gui_init_blendif(iopw, module);
+    dt_iop_gui_init_object(iopw, module);
 
     bd->bottom_box = GTK_BOX(dt_gui_vbox
       (bd->masks_combine_combo, hbox,
