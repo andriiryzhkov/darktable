@@ -193,7 +193,7 @@ typedef struct dt_masks_point_gradient_t
 /** structure used to store 1 point for a object */
 typedef struct dt_masks_point_object_t
 {
-  float anchor[2];
+  float point[2];
   int label;
 } dt_masks_point_object_t;
 

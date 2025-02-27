@@ -2291,46 +2291,6 @@ gboolean dt_develop_blend_legacy_params_from_so(dt_iop_module_so_t *module_so,
   return res;
 }
 
-void dt_develop_blend_object_process(dt_iop_module_t *module,
-                                     const float x, const float y,
-                                     float **buffer)
-{
-  dt_dev_pixelpipe_t *pipe = module->dev->preview_pipe;
-  
-  // Find our module's piece in the pipeline
-  dt_dev_pixelpipe_iop_t *piece = NULL;
-  for(GList *nodes = pipe->nodes; nodes; nodes = g_list_next(nodes))
-  {
-      dt_dev_pixelpipe_iop_t *current = (dt_dev_pixelpipe_iop_t *)(nodes->data);
-      if(current->module == module)
-      {
-          piece = current;
-          break;
-      }
-  }
-  
-  if(piece && pipe->backbuf && pipe->processed_width > 0)
-  {
-      // Now you can access the processed buffer
-      // Convert mouse coordinates to image coordinates first
-      float pzx, pzy;
-      dt_dev_get_pointer_zoom_pos(module->dev, x, y, &pzx, &pzy);
-      
-      // Clamp to image coordinates
-      int ix = CLAMP(pzx * pipe->processed_width, 0, pipe->processed_width - 1);
-      int iy = CLAMP(pzy * pipe->processed_height, 0, pipe->processed_height - 1);
-      
-      // Access pixel data (assuming 4 channels)
-      float *pixel = (float *)pipe->backbuf + 4 * (iy * pipe->processed_width + ix);
-      
-      // Do something with pixel data...
-  }
-  
-  return TRUE;
-}
-
-
-
 // tools/update_modelines.sh
 // remove-trailing-space on;
 // clang-format off
