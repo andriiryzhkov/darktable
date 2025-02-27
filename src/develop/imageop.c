@@ -2176,7 +2176,7 @@ void dt_iop_commit_params(dt_iop_module_t *module,
 
   module->commit_params(module, params, pipe, piece);
 
-  dt_hash_t phash = 0;
+  dt_hash_t phash = DT_INVALID_CACHEHASH;
   // 2. compute the hash only if piece is enabled
   if(piece->enabled)
   {
@@ -3039,7 +3039,7 @@ static gboolean _on_drag_motion(GtkWidget *widget, GdkDragContext *dc, gint x, g
     {
       dest_list = above ? dest_list->next : dest_list->prev;
       dest = dest_list->data;
-    } while (!dest->expander || !gtk_widget_get_visible(dest->expander));
+    } while(!dest->expander || !gtk_widget_get_visible(dest->expander));
   }
 
   if(dest == src) return TRUE;

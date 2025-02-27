@@ -452,7 +452,7 @@ static void _event_preview_updated_callback(gpointer instance, dt_iop_module_t *
   DT_CONTROL_SIGNAL_DISCONNECT(_event_preview_updated_callback, self);
 
   // force max size to be recomputed
-  g->clip_max_pipe_hash = 0;
+  g->clip_max_pipe_hash = DT_INVALID_CACHEHASH;
 }
 
 void gui_focus(dt_iop_module_t *self, gboolean in)
@@ -485,7 +485,7 @@ void gui_focus(dt_iop_module_t *self, gboolean in)
       self->dev->gui_module = self;
       _commit_box(self, g, p);
       self->dev->gui_module = old_gui;
-      g->clip_max_pipe_hash = 0;
+      g->clip_max_pipe_hash = DT_INVALID_CACHEHASH;
     }
   }
   else if(in)
@@ -1135,7 +1135,7 @@ void gui_init(dt_iop_module_t *self)
   g->clip_w = g->clip_h = 1.0;
   g->clip_max_x = g->clip_max_y = 0.0;
   g->clip_max_w = g->clip_max_h = 1.0;
-  g->clip_max_pipe_hash = 0;
+  g->clip_max_pipe_hash = DT_INVALID_CACHEHASH;
   g->cropping = GRAB_CENTER;
   g->shift_hold = FALSE;
   g->ctrl_hold = FALSE;
@@ -1684,22 +1684,18 @@ int mouse_moved(dt_iop_module_t *self,
       dt_control_change_cursor(GDK_BOTTOM_LEFT_CORNER);
     else if(grab == GRAB_NONE)
     {
-      dt_control_hinter_message(darktable.control, "");
+      dt_control_hinter_message("");
       dt_control_change_cursor(GDK_LEFT_PTR);
     }
     if(grab != GRAB_NONE)
-      dt_control_hinter_message
-        (darktable.control,
-         _("<b>resize</b>: drag, <b>keep aspect ratio</b>: shift+drag"));
+      dt_control_hinter_message(_("<b>resize</b>: drag, <b>keep aspect ratio</b>: shift+drag"));
     dt_control_queue_redraw_center();
   }
   else
   {
     dt_control_change_cursor(GDK_FLEUR);
     g->cropping = GRAB_CENTER;
-    dt_control_hinter_message
-      (darktable.control,
-       _("<b>move</b>: drag, <b>move vertically</b>: shift+drag, "
+    dt_control_hinter_message(_("<b>move</b>: drag, <b>move vertically</b>: shift+drag, "
          "<b>move horizontally</b>: ctrl+drag"));
     dt_control_queue_redraw_center();
   }

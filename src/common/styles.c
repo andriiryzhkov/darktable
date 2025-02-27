@@ -109,11 +109,11 @@ static void _apply_style_shortcut_callback(dt_action_t *action)
   {
     const dt_imgid_t imgid = GPOINTER_TO_INT(imgs->data);
     g_list_free(imgs);
-    dt_styles_apply_to_dev(action->label, imgid);
+    dt_styles_apply_to_dev(action->id, imgid);
   }
   else
   {
-    GList *styles = g_list_prepend(NULL, g_strdup(action->label));
+    GList *styles = g_list_prepend(NULL, g_strdup(action->id));
     dt_control_apply_styles(imgs, styles, FALSE);
   }
 }
@@ -866,9 +866,9 @@ void _styles_apply_to_image_ext(const char *name,
 
     dt_ioppr_check_iop_order(dev_dest, newimgid, "dt_styles_apply_to_image 1");
 
-    dt_print(DT_DEBUG_IOPORDER,
-             "[styles_apply_to_image_ext] Apply style on image `%s' id %i, history size %i",
-             dev_dest->image_storage.filename, newimgid, dev_dest->history_end);
+    dt_print(DT_DEBUG_IOPORDER | DT_DEBUG_PIPE,
+             "[styles_apply_to_image_ext] Apply `%s' on ID=%i, history size %i",
+             name, newimgid, dev_dest->history_end);
 
     // go through all entries in style
     // clang-format off
@@ -958,12 +958,15 @@ void _styles_apply_to_image_ext(const char *name,
     /* add tag */
     guint tagid = 0;
     gchar ntag[512] = { 0 };
-    g_snprintf(ntag, sizeof(ntag), "darktable|style|%s", name);
+    gchar *local_name = dt_util_localize_segmented_name(name, FALSE);
+    g_snprintf(ntag, sizeof(ntag), "darktable|style|%s", local_name);
+    g_free(local_name);
+
     if(dt_tag_new(ntag, &tagid)) dt_tag_attach(tagid, newimgid, FALSE, FALSE);
     if(dt_tag_new("darktable|changed", &tagid))
     {
       dt_tag_attach(tagid, newimgid, FALSE, FALSE);
-      dt_image_cache_set_change_timestamp(darktable.image_cache, imgid);
+      dt_image_cache_set_change_timestamp(imgid);
     }
 
     /* if current image in develop reload history */
@@ -975,7 +978,7 @@ void _styles_apply_to_image_ext(const char *name,
     }
 
     /* remove old obsolete thumbnails */
-    dt_mipmap_cache_remove(darktable.mipmap_cache, newimgid);
+    dt_mipmap_cache_remove(newimgid);
     dt_image_update_final_size(newimgid);
 
     /* update the aspect ratio. recompute only if really needed for performance reasons */
@@ -1004,6 +1007,8 @@ void dt_styles_apply_to_dev(const char *name, const dt_imgid_t imgid)
 {
   if(!darktable.develop || !dt_is_valid_imgid(darktable.develop->image_storage.id))
     return;
+  dt_print(DT_DEBUG_IOPORDER | DT_DEBUG_PIPE,
+      "[dt_styles_apply_to_dev] Apply `%s' on ID=%d", name, imgid);
 
   /* write current history changes so nothing gets lost */
   dt_dev_write_history(darktable.develop);
@@ -1022,7 +1027,9 @@ void dt_styles_apply_to_dev(const char *name, const dt_imgid_t imgid)
   // rebuild the accelerators (style might have changed order)
   dt_iop_connect_accels_all();
 
-  dt_control_log(_("applied style `%s' on current image"), name);
+  gchar *local_name = dt_util_localize_segmented_name(name, TRUE);
+  dt_control_log(_("applied style `%s' on current image"), local_name);
+  g_free(local_name);
 }
 
 void dt_styles_delete_by_name_adv(const char *name, const gboolean raise, const gboolean shortcut)
@@ -1591,7 +1598,9 @@ static void dt_style_save(StyleData *style)
   if((id = dt_styles_get_id_by_name(style->info->name->str)) != 0)
   {
     g_list_foreach(style->plugins, (GFunc)dt_style_plugin_save, GINT_TO_POINTER(id));
-    dt_control_log(_("style %s was successfully imported"), style->info->name->str);
+    gchar *local_name = dt_util_localize_segmented_name(style->info->name->str, TRUE);
+    dt_control_log(_("style %s was successfully imported"), local_name);
+    g_free(local_name);
   }
 }
 

@@ -751,17 +751,17 @@ void process(dt_iop_module_t *self,
     case DT_SCALE_MAINMENU_ADVANCED:
       wbase = iw;
       hbase = ih;
-      if (data->scale_img == DT_SCALE_IMG_WIDTH)
+      if(data->scale_img == DT_SCALE_IMG_WIDTH)
       {
         sbase = iw;
         scale = (data->scale_svg == DT_SCALE_SVG_WIDTH) ? sbase / dimension.width : sbase / dimension.height;
       }
-      else if (data->scale_img == DT_SCALE_IMG_HEIGHT)
+      else if(data->scale_img == DT_SCALE_IMG_HEIGHT)
       {
         sbase = ih;
         scale = (data->scale_svg == DT_SCALE_SVG_WIDTH) ? sbase / dimension.width : sbase / dimension.height;
       }
-      else if (data->scale_img == DT_SCALE_IMG_LARGER)
+      else if(data->scale_img == DT_SCALE_IMG_LARGER)
       {
         sbase = (iw > ih) ? iw : ih;
         scale = (data->scale_svg == DT_SCALE_SVG_WIDTH) ? sbase / dimension.width : sbase / dimension.height;
@@ -815,17 +815,17 @@ void process(dt_iop_module_t *self,
       svg_calc_heightfromwidth = FALSE;
       break;
     case DT_SCALE_MAINMENU_ADVANCED:
-      if (data->scale_img == DT_SCALE_IMG_WIDTH)
+      if(data->scale_img == DT_SCALE_IMG_WIDTH)
       {
         svg_calc_base = iw * uscale;
         svg_calc_heightfromwidth = (data->scale_svg == DT_SCALE_SVG_WIDTH) ? TRUE : FALSE;
       }
-      else if (data->scale_img == DT_SCALE_IMG_HEIGHT)
+      else if(data->scale_img == DT_SCALE_IMG_HEIGHT)
       {
         svg_calc_base = ih * uscale;
         svg_calc_heightfromwidth = (data->scale_svg == DT_SCALE_SVG_WIDTH) ? TRUE : FALSE;
       }
-      else if (data->scale_img == DT_SCALE_IMG_LARGER)
+      else if(data->scale_img == DT_SCALE_IMG_LARGER)
       {
         svg_calc_base = ((iw > ih) ? iw : ih) * uscale;
         svg_calc_heightfromwidth = (data->scale_svg == DT_SCALE_SVG_WIDTH) ? TRUE : FALSE;
@@ -1328,7 +1328,7 @@ void gui_init(dt_iop_module_t *self)
                                 _("text string, tag: $(WATERMARK_TEXT)\n"
                                   "use $(NL) to insert a line break"),
                                 dt_conf_get_string_const("plugins/darkroom/watermark/text"));
-  dt_gtkentry_setup_completion(GTK_ENTRY(g->text), dt_gtkentry_get_default_path_compl_list());
+  dt_gtkentry_setup_variables_completion(GTK_ENTRY(g->text));
   gtk_entry_set_placeholder_text(GTK_ENTRY(g->text), _("content"));
   gtk_grid_attach(grid, label, 0, line++, 1, 1);
   gtk_grid_attach_next_to(grid, g->text, label, GTK_POS_RIGHT, 2, 1);

@@ -2735,8 +2735,7 @@ static void _dt_dev_image_changed_callback(gpointer instance,
   dt_develop_t *dev = darktable.develop;
   if(!dev || !dt_is_valid_imgid(dev->image_storage.id)) return;
 
-  const dt_image_t *image =
-    dt_image_cache_get(darktable.image_cache, dev->image_storage.id, 'r');
+  const dt_image_t *image = dt_image_cache_get(dev->image_storage.id, 'r');
 
   if(!image) return;
 
@@ -2787,7 +2786,7 @@ static void _dt_dev_image_changed_callback(gpointer instance,
   DT_DEBUG_SQLITE3_BIND_INT(stmt, 11, iformat);
   DT_DEBUG_SQLITE3_BIND_INT(stmt, 12, excluded);
 
-  dt_image_cache_read_release(darktable.image_cache, image);
+  dt_image_cache_read_release(image);
 
   if(sqlite3_step(stmt) == SQLITE_ROW)
   {
@@ -2927,6 +2926,7 @@ void gui_init(dt_lib_module_t *self)
   d->current = dt_conf_get_int("plugins/darkroom/groups");
   if(d->current == DT_MODULEGROUP_NONE) _lib_modulegroups_update_iop_visibility(self);
   gtk_widget_show_all(self->widget);
+  gtk_widget_set_no_show_all(d->deprecated, TRUE);
   gtk_widget_set_no_show_all(d->hbox_buttons, TRUE);
   gtk_widget_set_no_show_all(d->hbox_search_box, TRUE);
 

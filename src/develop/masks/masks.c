@@ -19,10 +19,8 @@
 #include "develop/masks.h"
 #include "bauhaus/bauhaus.h"
 #include "common/debug.h"
-#include "common/mipmap_cache.h"
 #include "control/conf.h"
 #include "control/control.h"
-#include "common/undo.h"
 #include "develop/blend.h"
 #include "develop/imageop.h"
 #include "develop/imageop_gui.h"
@@ -170,7 +168,7 @@ static void _set_hinter_message(dt_masks_form_gui_t *gui,
     sel->functions->set_hint_message(gui, form, opacity, msg, sizeof(msg));
   }
 
-  dt_control_hinter_message(darktable.control, msg);
+  dt_control_hinter_message(msg);
 }
 
 void dt_masks_init_form_gui(dt_masks_form_gui_t *gui)
@@ -227,7 +225,7 @@ void dt_masks_gui_form_remove(dt_masks_form_t *form,
                               const int index)
 {
   dt_masks_form_gui_points_t *gpt = g_list_nth_data(gui->points, index);
-  gui->pipe_hash = 0;
+  gui->pipe_hash = DT_INVALID_CACHEHASH;
   gui->formid = NO_MASKID;
 
   if(gpt)
@@ -247,12 +245,12 @@ void dt_masks_gui_form_test_create(dt_masks_form_t *form,
                                    dt_iop_module_t *module)
 {
   // we test if the image has changed
-  if(gui->pipe_hash > 0)
+  if(gui->pipe_hash != DT_INVALID_CACHEHASH)
   {
     if(gui->pipe_hash != darktable.develop->preview_pipe->backbuf_hash)
     {
       dt_print(DT_DEBUG_EXPOSE, "[dt_masks_gui_form_test_create] refreshes mask visualizer");
-      gui->pipe_hash = 0;
+      gui->pipe_hash = DT_INVALID_CACHEHASH;
       gui->formid = NO_MASKID;
       g_list_free_full(gui->points, dt_masks_form_gui_points_free);
       gui->points = NULL;
@@ -260,7 +258,7 @@ void dt_masks_gui_form_test_create(dt_masks_form_t *form,
   }
 
   // we create the spots if needed
-  if(gui->pipe_hash == 0)
+  if(gui->pipe_hash == DT_INVALID_CACHEHASH)
   {
     if(form->type & DT_MASKS_GROUP)
     {
@@ -1089,7 +1087,7 @@ gboolean dt_masks_events_mouse_leave(dt_iop_module_t *module)
     gui->posx = (.5f + zoom_x) * wd;
     gui->posy = (.5f + zoom_y) * ht;
 
-    dt_control_hinter_message(darktable.control, "");
+    dt_control_hinter_message("");
   }
   return FALSE;
 }
@@ -1108,7 +1106,7 @@ gboolean dt_masks_events_mouse_moved(dt_iop_module_t *module,
 {
   // if the module is disabled, formms aren't being shown, so there's no point
   // in passing along mouse events to them
-  if(!module->enabled)
+  if(!module || !module->enabled)
     return FALSE;
 
   // record mouse position even if there are no masks visible
@@ -1294,7 +1292,8 @@ void dt_masks_clear_form_gui(dt_develop_t *dev)
   dt_masks_dynbuf_free(dev->form_gui->guipoints_payload);
   dev->form_gui->guipoints_payload = NULL;
   dev->form_gui->guipoints_count = 0;
-  dev->form_gui->pipe_hash = dev->form_gui->formid = 0;
+  dev->form_gui->pipe_hash = DT_INVALID_CACHEHASH;
+  dev->form_gui->formid = 0;
   dev->form_gui->dx = dev->form_gui->dy = 0.0f;
   dev->form_gui->scrollx = dev->form_gui->scrolly = 0.0f;
   dev->form_gui->form_selected = dev->form_gui->border_selected =

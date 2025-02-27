@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2009-2024 darktable developers.
+    Copyright (C) 2009-2025 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -1056,8 +1056,7 @@ gboolean dt_imageio_export_with_flags(const dt_imgid_t imgid,
     dt_set_backthumb_time(600.0); // make sure we don't interfere
 
   dt_mipmap_buffer_t buf;
-  dt_mipmap_cache_get(darktable.mipmap_cache, &buf, imgid,
-                        DT_MIPMAP_FULL, DT_MIPMAP_BLOCKING, 'r');
+  dt_mipmap_cache_get(&buf, imgid, DT_MIPMAP_FULL, DT_MIPMAP_BLOCKING, 'r');
 
   const dt_image_t *img = &dev.image_storage;
 
@@ -1486,7 +1485,7 @@ gboolean dt_imageio_export_with_flags(const dt_imgid_t imgid,
 
   dt_dev_pixelpipe_cleanup(&pipe);
   dt_dev_cleanup(&dev);
-  dt_mipmap_cache_release(darktable.mipmap_cache, &buf);
+  dt_mipmap_cache_release(&buf);
 
   if(!thumbnail_export && strcmp(format->mime(format_params), "memory")
     && !(format->flags(format_params) & FORMAT_FLAGS_NO_TMPFILE))
@@ -1525,7 +1524,7 @@ error:
   dt_dev_pixelpipe_cleanup(&pipe);
 error_early:
   dt_dev_cleanup(&dev);
-  dt_mipmap_cache_release(darktable.mipmap_cache, &buf);
+  dt_mipmap_cache_release(&buf);
 
   if(!thumbnail_export)
     dt_set_backthumb_time(5.0);
@@ -1634,9 +1633,6 @@ dt_imageio_retval_t dt_imageio_open(dt_image_t *img,
 
     if(!_image_handled(ret))
       ret = dt_imageio_open_jpeg(img, filename, buf);
-
-    if(!_image_handled(ret))
-      ret = dt_imageio_open_pnm(img, filename, buf);
 
     // final fallback that tries to open file via GraphicsMagick or ImageMagick
     if(!_image_handled(ret))

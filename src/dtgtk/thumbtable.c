@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2024 darktable developers.
+    Copyright (C) 2024-2025 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -1046,8 +1046,14 @@ void dt_thumbtable_zoom_changed(dt_thumbtable_t *table,
 
 static gboolean _event_scroll_compressed(gpointer user_data)
 {
-  if (!user_data) return FALSE;
+  if(!user_data)
+    return FALSE;
+
   dt_thumbtable_t *table = user_data;
+
+  // Thumbtable is empty, nothing to scroll
+  if(table->thumb_size == 0)
+    return FALSE;
 
   if(table->scroll_value != 0)
   {
@@ -1063,7 +1069,7 @@ static gboolean _event_scroll_compressed(gpointer user_data)
 
     // for fractional scrolling, scroll by a number of pixels proportionate to
     // the delta (which is a float value for most touch pads and some mice)
-    if (dt_conf_get_bool("thumbtable_fractional_scrolling"))
+    if(dt_conf_get_bool("thumbtable_fractional_scrolling"))
     {
       // scale scroll increment for an appropriate scroll speed
       delta *= 50;
@@ -1605,7 +1611,7 @@ static gboolean _event_button_release(GtkWidget *widget,
 
   // in some case, image_over_id can get out of sync at the end of dragging
   // this happen esp. if the pointer as been out of the center area during drag
-  if (dt_control_get_mouse_over_id() != table->drag_initial_imgid
+  if(dt_control_get_mouse_over_id() != table->drag_initial_imgid
       && table->drag_thumb)
   {
     dt_control_set_mouse_over_id(table->drag_initial_imgid);
@@ -1719,7 +1725,7 @@ static void _thumbs_ask_for_discard(dt_thumbtable_t *table)
         const dt_imgid_t imgid = sqlite3_column_int(stmt, 0);
         for(int i = max_level - 1; i >= min_level; i--)
         {
-          dt_mipmap_cache_remove_at_size(darktable.mipmap_cache, imgid, i);
+          dt_mipmap_cache_remove_at_size(imgid, i);
         }
       }
       sqlite3_finalize(stmt);
@@ -2293,8 +2299,8 @@ static void _event_dnd_begin(GtkWidget *widget,
       const int id = GPOINTER_TO_INT(table->drag_list->data);
       dt_mipmap_buffer_t buf;
       dt_mipmap_size_t mip =
-        dt_mipmap_cache_get_matching_size(darktable.mipmap_cache, ts, ts);
-      dt_mipmap_cache_get(darktable.mipmap_cache, &buf, id, mip, DT_MIPMAP_BLOCKING, 'r');
+        dt_mipmap_cache_get_matching_size(ts, ts);
+      dt_mipmap_cache_get(&buf, id, mip, DT_MIPMAP_BLOCKING, 'r');
 
       if(buf.buf)
       {
@@ -2320,7 +2326,7 @@ static void _event_dnd_begin(GtkWidget *widget,
           g_object_unref(scaled);
       }
 
-      dt_mipmap_cache_release(darktable.mipmap_cache, &buf);
+      dt_mipmap_cache_release(&buf);
     }
   }
   // if we can reorder, let's update the thumbtable class accordingly
@@ -2727,7 +2733,7 @@ void dt_thumbtable_full_redraw(dt_thumbtable_t *table,
     sqlite3_finalize(stmt);
 
     if(darktable.unmuted & DT_DEBUG_CACHE)
-      dt_mipmap_cache_print(darktable.mipmap_cache);
+      dt_mipmap_cache_print();
   }
 }
 
@@ -2907,8 +2913,7 @@ static void _accel_duplicate(dt_action_t *action)
     dt_history_copy_and_paste_on_image(sourceid, newimgid, FALSE, NULL, TRUE, TRUE, TRUE);
 
   // a duplicate should keep the change time stamp of the original
-  dt_image_cache_set_change_timestamp_from_image(darktable.image_cache,
-                                                 newimgid, sourceid);
+  dt_image_cache_set_change_timestamp_from_image(newimgid, sourceid);
 
   dt_undo_end_group(darktable.undo);
 

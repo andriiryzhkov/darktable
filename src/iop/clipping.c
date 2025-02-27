@@ -902,7 +902,7 @@ void modify_roi_out(dt_iop_module_t *self, dt_dev_pixelpipe_iop_t *piece, dt_iop
   if(roi_out->width < 4 || roi_out->height < 4)
   {
     dt_print_pipe(DT_DEBUG_PIPE,
-      "insane data", piece->pipe, self, DT_DEVICE_NONE, roi_in, roi_out);
+      "safety check", piece->pipe, self, DT_DEVICE_NONE, roi_in, roi_out);
 
     roi_out->x = roi_in->x;
     roi_out->y = roi_in->y;
@@ -1352,7 +1352,7 @@ static void _event_preview_updated_callback(gpointer instance, dt_iop_module_t *
 
   DT_CONTROL_SIGNAL_DISCONNECT(_event_preview_updated_callback, self);
   // force max size to be recomputed
-  g->clip_max_pipe_hash = 0;
+  g->clip_max_pipe_hash = DT_INVALID_CACHEHASH;
 }
 
 void gui_focus(dt_iop_module_t *self, gboolean in)
@@ -1390,7 +1390,7 @@ void gui_focus(dt_iop_module_t *self, gboolean in)
       self->dev->gui_module = self;
       commit_box(self, g, p);
       self->dev->gui_module = old_gui;
-      g->clip_max_pipe_hash = 0;
+      g->clip_max_pipe_hash = DT_INVALID_CACHEHASH;
     }
   }
   else if(in)
@@ -2084,7 +2084,7 @@ void gui_init(dt_iop_module_t *self)
   g->clip_w = g->clip_h = 1.0;
   g->clip_max_x = g->clip_max_y = 0.0;
   g->clip_max_w = g->clip_max_h = 1.0;
-  g->clip_max_pipe_hash = 0;
+  g->clip_max_pipe_hash = DT_INVALID_CACHEHASH;
   g->cropping = 0;
   g->straightening = 0;
   g->applied = 1;
@@ -3014,11 +3014,11 @@ int mouse_moved(dt_iop_module_t *self,
       dt_control_change_cursor(GDK_BOTTOM_LEFT_CORNER);
     else if(grab == GRAB_NONE)
     {
-      dt_control_hinter_message(darktable.control, _("<b>commit</b>: double-click, <b>straighten</b>: right-drag"));
+      dt_control_hinter_message(_("<b>commit</b>: double-click, <b>straighten</b>: right-drag"));
       dt_control_change_cursor(GDK_LEFT_PTR);
     }
     if(grab != GRAB_NONE)
-      dt_control_hinter_message(darktable.control, _("<b>resize</b>: drag, <b>keep aspect ratio</b>: shift+drag\n"
+      dt_control_hinter_message(_("<b>resize</b>: drag, <b>keep aspect ratio</b>: shift+drag\n"
                                                      "<b>straighten</b>: right-drag"));
     dt_control_queue_redraw_center();
   }
@@ -3059,24 +3059,24 @@ int mouse_moved(dt_iop_module_t *self,
       }
       if(g->k_selected >= 0)
       {
-        dt_control_hinter_message(darktable.control, _("<b>move control point</b>: drag"));
+        dt_control_hinter_message(_("<b>move control point</b>: drag"));
         dt_control_change_cursor(GDK_CROSS);
       }
       else if(g->k_selected_segment >= 0)
       {
-        dt_control_hinter_message(darktable.control, _("<b>move line</b>: drag, <b>toggle symmetry</b>: click ꝏ"));
+        dt_control_hinter_message(_("<b>move line</b>: drag, <b>toggle symmetry</b>: click ꝏ"));
         dt_control_change_cursor(GDK_CROSS);
       }
       else
       {
-        dt_control_hinter_message(darktable.control, _("<b>apply</b>: click <tt>ok</tt>, <b>toggle symmetry</b>: click ꝏ\n"
+        dt_control_hinter_message(_("<b>apply</b>: click <tt>ok</tt>, <b>toggle symmetry</b>: click ꝏ\n"
                                                        "<b>move line/control point</b>: drag"));
         dt_control_change_cursor(GDK_FLEUR);
       }
     }
     else
     {
-      dt_control_hinter_message(darktable.control, _("<b>move</b>: drag, <b>move vertically</b>: shift+drag, <b>move horizontally</b>: ctrl+drag\n"
+      dt_control_hinter_message(_("<b>move</b>: drag, <b>move vertically</b>: shift+drag, <b>move horizontally</b>: ctrl+drag\n"
                                                      "<b>straighten</b>: right-drag, <b>commit</b>: double-click"));
     }
     dt_control_queue_redraw_center();

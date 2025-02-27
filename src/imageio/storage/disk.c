@@ -21,6 +21,7 @@
 #include "common/exif.h"
 #include "common/image.h"
 #include "common/image_cache.h"
+#include "common/metadata.h"
 #include "common/utility.h"
 #include "common/variables.h"
 #include "control/conf.h"
@@ -199,7 +200,7 @@ static void button_clicked(GtkWidget *widget,
   gchar *old = g_strdup(gtk_entry_get_text(d->entry));
   gchar *dirname;
   gchar *filename;
-  if (g_file_test(old, G_FILE_TEST_IS_DIR))
+  if(g_file_test(old, G_FILE_TEST_IS_DIR))
   {
     // only a directory was specified, no filename
     // so we use the default $(FILE.NAME) for filename.
@@ -266,10 +267,6 @@ void gui_init(dt_imageio_module_storage_t *self)
 {
   disk_t *d = malloc(sizeof(disk_t));
   self->gui_data = (void *)d;
-  self->widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
-  GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-  gtk_box_pack_start(GTK_BOX(self->widget), GTK_WIDGET(hbox), TRUE, FALSE, 0);
 
   d->entry =
     GTK_ENTRY(dt_action_entry_new
@@ -278,14 +275,12 @@ void gui_init(dt_imageio_module_storage_t *self)
                  " like string manipulation\n"
                  "type '$(' to activate the completion and see the list of variables"),
                dt_conf_get_string_const("plugins/imageio/storage/disk/file_directory")));
-  dt_gtkentry_setup_completion(d->entry, dt_gtkentry_get_default_path_compl_list());
+  dt_gtkentry_setup_variables_completion(d->entry);
   gtk_editable_set_position(GTK_EDITABLE(d->entry), -1);
-  gtk_box_pack_start(GTK_BOX(hbox), GTK_WIDGET(d->entry), TRUE, TRUE, 0);
-
+  
   GtkWidget *widget = dtgtk_button_new(dtgtk_cairo_paint_directory, CPF_NONE, NULL);
   gtk_widget_set_name(widget, "non-flat");
   gtk_widget_set_tooltip_text(widget, _("select directory"));
-  gtk_box_pack_start(GTK_BOX(hbox), widget, FALSE, FALSE, 0);
   g_signal_connect(G_OBJECT(widget), "clicked", G_CALLBACK(button_clicked), self);
 
   DT_BAUHAUS_COMBOBOX_NEW_FULL(d->onsave_action, self, NULL, N_("on conflict"), NULL,
@@ -295,7 +290,8 @@ void gui_init(dt_imageio_module_storage_t *self)
                                N_("overwrite"),
                                N_("overwrite if changed"),
                                N_("skip"));
-  gtk_box_pack_start(GTK_BOX(self->widget), d->onsave_action, TRUE, TRUE, 0);
+
+  self->widget = dt_gui_vbox(dt_gui_hbox(d->entry, widget), d->onsave_action);
 }
 
 void gui_cleanup(dt_imageio_module_storage_t *self)
@@ -465,10 +461,11 @@ try_again:
       if(g_file_test(filename, G_FILE_TEST_EXISTS))
       {
         // get the image data
-        const dt_image_t *img = dt_image_cache_get(darktable.image_cache, imgid, 'r');
-        const GTimeSpan change_timestamp = img->change_timestamp;
-        const GTimeSpan export_timestamp = img->export_timestamp;
-        dt_image_cache_read_release(darktable.image_cache, img);
+        const dt_image_t *img = dt_image_cache_get(imgid, 'r');
+        const GTimeSpan change_timestamp = img ? img->change_timestamp : 0;
+        const GTimeSpan export_timestamp = img ? img->export_timestamp : 0;
+
+        dt_image_cache_read_release(img);
 
         // check if the export timestamp in the database is more recent than the change
         // date, if yes skip the image

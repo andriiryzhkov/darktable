@@ -330,7 +330,7 @@ static void _panel_toggle(dt_ui_border_t border,
         dt_ui_panel_show(ui, DT_UI_PANEL_CENTER_TOP, TRUE, TRUE);
       else
         dt_ui_panel_show(ui, DT_UI_PANEL_TOP, TRUE, TRUE);
-      dt_control_hinter_message(darktable.control, "");
+      dt_control_hinter_message("");
     }
     break;
 
@@ -4355,7 +4355,7 @@ void dt_gui_new_collapsible_section(dt_gui_collapsible_section_t *cs,
 void dt_gui_collapsible_section_set_label(dt_gui_collapsible_section_t *cs,
                                           const char *label)
 {
-  if (!cs || !cs->label || !label)
+  if(!cs || !cs->label || !label)
     return;
   gtk_label_set_text(GTK_LABEL(cs->label), label);
   dt_control_queue_redraw_widget(cs->label);
@@ -4445,7 +4445,7 @@ void dt_gui_simulate_button_event(GtkWidget *widget,
   event.device =
     gdk_seat_get_pointer(gdk_display_get_default_seat(gdk_display_get_default()));
 
-  if (event.window != NULL)
+  if(event.window != NULL)
   {
     g_object_ref(event.window);
   }
@@ -4453,10 +4453,50 @@ void dt_gui_simulate_button_event(GtkWidget *widget,
   // send signal
   g_signal_emit_by_name(G_OBJECT(widget), "button-press-event", &event, &res, NULL);
 
-  if (event.window != NULL)
+  if(event.window != NULL)
   {
     g_object_unref(event.window);
   }
+}
+
+GtkWidget *(dt_gui_box_add)(const char *file, const int line, const char *function, GtkBox *box, gpointer list[])
+{
+  int i = 1;
+  for(; *list != (gpointer)-1; list++, i++)
+  {
+    if(GTK_IS_WIDGET(*list))
+      gtk_container_add(GTK_CONTAINER(box), GTK_WIDGET(*list));
+    else
+      dt_print(DT_DEBUG_ALWAYS, "%s:%d %s: trying to add invalid widget to box (#%d)", file, line, function, i);
+  }
+
+  return GTK_WIDGET(box);
+}
+
+static gboolean _focus_out_commit(GtkCellEditable *editable,
+                                  GdkEvent *event,
+                                  gpointer user_data)
+{
+  gtk_cell_editable_editing_done(editable);
+  gtk_cell_editable_remove_widget(editable);
+  return FALSE;
+}
+
+static void _commit_on_focus_loss_callback(GtkCellRenderer *renderer,
+                                           GtkCellEditable *editable,
+                                           gchar *path,
+                                           gpointer user_data)
+{
+  GtkCellEditable **active_editable = user_data;
+  if(active_editable)
+    g_set_weak_pointer(active_editable, editable);
+  
+  g_signal_connect(editable, "focus-out-event", G_CALLBACK(_focus_out_commit), NULL);
+}
+
+void dt_gui_commit_on_focus_loss(GtkCellRenderer *renderer, GtkCellEditable **active_editable)
+{
+  g_signal_connect(renderer, "editing-started", G_CALLBACK(_commit_on_focus_loss_callback), (gpointer)active_editable);
 }
 
 // clang-format off

@@ -110,8 +110,13 @@ const dt_action_def_t dt_action_def_modifiers
       _action_elements_modifiers,
       NULL, TRUE };
 
-void dt_control_init(dt_control_t *s)
+void dt_control_init(const gboolean withgui)
 {
+  dt_control_t *s = darktable.control = calloc(1, sizeof(dt_control_t));
+  dt_atomic_set_int(&s->running, DT_CONTROL_STATE_DISABLED);
+
+  if(!withgui) return;
+
   s->actions_global = (dt_action_t){ DT_ACTION_TYPE_GLOBAL,
     "global",
     C_("accel", "global"),
@@ -200,7 +205,8 @@ void dt_control_init(dt_control_t *s)
   s->confirm_mapping = TRUE;
   s->widget_definitions = g_ptr_array_new ();
   s->input_drivers = NULL;
-  dt_atomic_set_int(&s->running, DT_CONTROL_STATE_DISABLED);
+  dt_atomic_set_int(&s->quitting, 0);
+  dt_atomic_set_int(&s->pending_jobs, 0);
   s->cups_started = FALSE;
 
   dt_action_define_fallback(DT_ACTION_TYPE_IOP, &dt_action_def_iop);
@@ -240,7 +246,7 @@ void dt_control_init(dt_control_t *s)
   dt_pthread_mutex_init(&s->progress_system.mutex, NULL);
 
   // start threads
-  dt_control_jobs_init(s);
+  dt_control_jobs_init();
 
   s->button_down = 0;
   s->button_down_which = 0;
@@ -288,16 +294,17 @@ void dt_control_change_cursor(dt_cursor_t curs)
 
 gboolean dt_control_running()
 {
-  dt_control_t *dc = darktable.control;
-  const int status = dc ? dt_atomic_get_int(&dc->running) : DT_CONTROL_STATE_DISABLED;
-  return status == DT_CONTROL_STATE_RUNNING;
+  return dt_atomic_get_int(&darktable.control->running) == DT_CONTROL_STATE_RUNNING;
 }
 
 void dt_control_quit()
 {
-  if(dt_control_running())
-  {
-    dt_control_t *dc = darktable.control;
+  // Make sure we proceed further only if control is running
+  if(!dt_control_running()) return;
+
+  dt_control_t *dc = darktable.control;
+  // make sure the rest is done only once
+  if(dt_atomic_exch_int(&dc->quitting, 1) == 1) return;
 
 #ifdef HAVE_PRINT
     dt_printers_abort_discovery();
@@ -311,7 +318,6 @@ void dt_control_quit()
     // set the "pending cleanup work" flag to be handled in dt_control_shutdown()
     dt_atomic_set_int(&dc->running, DT_CONTROL_STATE_CLEANUP);
     dt_pthread_mutex_unlock(&dc->cond_mutex);
-  }
 
   if(g_atomic_int_get(&darktable.gui_running))
   {
@@ -320,11 +326,9 @@ void dt_control_quit()
   }
 }
 
-void dt_control_shutdown(dt_control_t *s)
+void dt_control_shutdown()
 {
-  if(!s)
-    return;
-
+  dt_control_t *s = darktable.control;
   dt_pthread_mutex_lock(&s->cond_mutex);
   const gboolean cleanup = dt_atomic_exch_int(&s->running, DT_CONTROL_STATE_DISABLED) == DT_CONTROL_STATE_CLEANUP;
   pthread_cond_broadcast(&s->cond);
@@ -358,23 +362,27 @@ void dt_control_shutdown(dt_control_t *s)
   }
 }
 
-void dt_control_cleanup(dt_control_t *s)
+void dt_control_cleanup(const gboolean withgui)
 {
-  if(!s)
-    return;
-  // vacuum TODO: optional?
-  // DT_DEBUG_SQLITE3_EXEC(dt_database_get(darktable.db), "PRAGMA incremental_vacuum(0)", NULL, NULL, NULL);
-  // DT_DEBUG_SQLITE3_EXEC(dt_database_get(darktable.db), "vacuum", NULL, NULL, NULL);
-  dt_control_jobs_cleanup(s);
-  dt_pthread_mutex_destroy(&s->queue_mutex);
-  dt_pthread_mutex_destroy(&s->cond_mutex);
-  dt_pthread_mutex_destroy(&s->log_mutex);
-  dt_pthread_mutex_destroy(&s->toast_mutex);
-  dt_pthread_mutex_destroy(&s->res_mutex);
-  dt_pthread_mutex_destroy(&s->progress_system.mutex);
-  if(s->widgets) g_hash_table_destroy(s->widgets);
-  if(s->shortcuts) g_sequence_free(s->shortcuts);
-  if(s->input_drivers) g_slist_free_full(s->input_drivers, g_free);
+  dt_control_t *s = darktable.control;
+  if(withgui)
+  {
+    // vacuum TODO: optional?
+    // DT_DEBUG_SQLITE3_EXEC(dt_database_get(darktable.db), "PRAGMA incremental_vacuum(0)", NULL, NULL, NULL);
+    // DT_DEBUG_SQLITE3_EXEC(dt_database_get(darktable.db), "vacuum", NULL, NULL, NULL);
+    dt_control_jobs_cleanup();
+    dt_pthread_mutex_destroy(&s->queue_mutex);
+    dt_pthread_mutex_destroy(&s->cond_mutex);
+    dt_pthread_mutex_destroy(&s->log_mutex);
+    dt_pthread_mutex_destroy(&s->toast_mutex);
+    dt_pthread_mutex_destroy(&s->res_mutex);
+    dt_pthread_mutex_destroy(&s->progress_system.mutex);
+    if(s->widgets) g_hash_table_destroy(s->widgets);
+    if(s->shortcuts) g_sequence_free(s->shortcuts);
+    if(s->input_drivers) g_slist_free_full(s->input_drivers, g_free);
+  }
+  free(s);
+  darktable.control = NULL;
 }
 
 
@@ -638,6 +646,7 @@ static gboolean _redraw_center(gpointer user_data)
 
 void dt_control_log(const char *msg, ...)
 {
+  if(!dt_control_running()) return;
   dt_control_t *dc = darktable.control;
   dt_pthread_mutex_lock(&dc->log_mutex);
   va_list ap;
@@ -695,6 +704,7 @@ static void _toast_log(const gboolean markup, const char *msg, va_list ap)
 
 void dt_toast_log(const char *msg, ...)
 {
+  if(!dt_control_running()) return;
   va_list ap;
   va_start(ap, msg);
   _toast_log(FALSE, msg, ap);
@@ -703,6 +713,7 @@ void dt_toast_log(const char *msg, ...)
 
 void dt_toast_markup_log(const char *msg, ...)
 {
+  if(!dt_control_running()) return;
   va_list ap;
   va_start(ap, msg);
   _toast_log(TRUE, msg, ap);
@@ -720,6 +731,7 @@ static void _control_log_ack_all()
 
 void dt_control_log_busy_enter()
 {
+  if(!dt_control_running()) return;
   dt_control_t *dc = darktable.control;
   dt_pthread_mutex_lock(&dc->log_mutex);
   dc->log_busy++;
@@ -728,6 +740,7 @@ void dt_control_log_busy_enter()
 
 void dt_control_toast_busy_enter()
 {
+  if(!dt_control_running()) return;
   dt_control_t *dc = darktable.control;
   dt_pthread_mutex_lock(&dc->toast_mutex);
   dc->toast_busy++;
@@ -736,6 +749,7 @@ void dt_control_toast_busy_enter()
 
 void dt_control_log_busy_leave()
 {
+  if(!dt_control_running()) return;
   dt_control_t *dc = darktable.control;
   dt_pthread_mutex_lock(&dc->log_mutex);
   dc->log_busy--;
@@ -746,6 +760,7 @@ void dt_control_log_busy_leave()
 
 void dt_control_toast_busy_leave()
 {
+  if(!dt_control_running()) return;
   dt_control_t *dc = darktable.control;
   dt_pthread_mutex_lock(&dc->toast_mutex);
   dc->toast_busy--;
@@ -795,8 +810,9 @@ void dt_control_queue_redraw_widget(GtkWidget *widget)
   }
 }
 
-int dt_control_key_pressed_override(guint key, guint state)
+gboolean dt_control_key_pressed_override(guint key, guint state)
 {
+  if(!dt_control_running()) return FALSE;
   // TODO: if darkroom mode
   // did a : vim-style command start?
   static GList *autocomplete = NULL;
@@ -887,7 +903,7 @@ int dt_control_key_pressed_override(guint key, guint state)
     {
       // TODO: step history down and copy to vimkey
     }
-    return 1;
+    return TRUE;
   }
   else if(key == ':')
   {
@@ -895,15 +911,16 @@ int dt_control_key_pressed_override(guint key, guint state)
     dc->vimkey[1] = 0;
     dc->vimkey_cnt = 1;
     dt_control_log("%s", dc->vimkey);
-    return 1;
+    return TRUE;
   }
 
-  return 0;
+  return FALSE;
 }
 
-void dt_control_hinter_message(const struct dt_control_t *s, const char *message)
+void dt_control_hinter_message(const char *message)
 {
-  if(s->proxy.hinter.module)
+  dt_control_t *s = darktable.control;
+  if(s && s->proxy.hinter.module)
     return s->proxy.hinter.set_message(s->proxy.hinter.module, message);
 }
 

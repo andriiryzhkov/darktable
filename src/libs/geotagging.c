@@ -535,7 +535,7 @@ static gboolean _refresh_display_track(const gboolean active, const int segid, d
   return grow;
 }
 
-static void _refresh_display_all_tracks(dt_lib_module_t *self)
+static void _refresh_display_all_tracks(GtkWidget *widget, dt_lib_module_t *self)
 {
   dt_lib_geotagging_t *d = self->data;
   GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(d->map.gpx_view));
@@ -556,6 +556,15 @@ static void _refresh_display_all_tracks(dt_lib_module_t *self)
                                                        d->map.map_box.lon2, d->map.map_box.lat2);
   }
   _refresh_displayed_images(self);
+}
+
+static gboolean _click_for_entire_track(GtkEntry *spin, GdkEventButton *event, dt_lib_module_t *self)
+{
+  if(event->button == 1 && event->type == GDK_2BUTTON_PRESS)
+  {
+    _refresh_display_all_tracks(NULL, self);
+  }
+  return FALSE;
 }
 
 static void _track_seg_toggled(GtkCellRendererToggle *cell_renderer, gchar *path_str, dt_lib_module_t *self)
@@ -715,7 +724,7 @@ static void _show_gpx_tracks(dt_lib_module_t *self)
   gtk_tree_view_column_set_clickable(d->map.sel_tracks, TRUE);
   _update_nb_images(self);
   _update_buttons(self);
-  _refresh_display_all_tracks(self);
+  _refresh_display_all_tracks(NULL, self);
 }
 
 static void _apply_gpx(GtkWidget *widget, dt_lib_module_t *self)
@@ -776,10 +785,10 @@ static void _refresh_selected_images_datetime(dt_lib_module_t *self)
   for(GList *i = d->imgs; i; i = g_list_next(i))
   {
     dt_sel_img_t *img = i->data;
-    const dt_image_t *cimg = dt_image_cache_get(darktable.image_cache, img->imgid, 'r');
+    const dt_image_t *cimg = dt_image_cache_get(img->imgid, 'r');
     if(!cimg) continue;
     dt_datetime_img_to_exif(img->dt, sizeof(img->dt), cimg);
-    dt_image_cache_read_release(darktable.image_cache, cimg);
+    dt_image_cache_read_release(cimg);
   }
 }
 
@@ -917,11 +926,11 @@ static void _setup_selected_images_list(dt_lib_module_t *self)
   while(sqlite3_step(stmt) == SQLITE_ROW)
   {
     const dt_imgid_t imgid = sqlite3_column_int(stmt, 0);
-    const dt_image_t *cimg = dt_image_cache_get(darktable.image_cache, imgid, 'r');
+    const dt_image_t *cimg = dt_image_cache_get(imgid, 'r');
     char dt[DT_DATETIME_LENGTH];
     if(!cimg) continue;
     dt_datetime_img_to_exif(dt, sizeof(dt), cimg);
-    dt_image_cache_read_release(darktable.image_cache, cimg);
+    dt_image_cache_read_release(cimg);
 
     dt_sel_img_t *img = g_malloc0(sizeof(dt_sel_img_t));
     if(!img) continue;
@@ -1374,7 +1383,7 @@ static void _refresh_image_datetime(dt_lib_module_t *self)
   _display_datetime(&d->dt0, datetime, FALSE, self);
   if(locked)
   {
-    if (datetime)
+    if(datetime)
     {
       GDateTime *datetime2 = g_date_time_add(datetime, d->offset);
       _new_datetime(datetime2, self);
@@ -1899,13 +1908,27 @@ void gui_init(dt_lib_module_t *self)
 
   g_object_set(G_OBJECT(d->map.gpx_view), "has-tooltip", TRUE, NULL);
   g_signal_connect(G_OBJECT(d->map.gpx_view), "query-tooltip", G_CALLBACK(_row_tooltip_setup), self);
+  g_signal_connect(G_OBJECT(d->map.gpx_view), "button-press-event", G_CALLBACK(_click_for_entire_track), self);
 
   // avoid ugly console pixman messages due to headers
   gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(d->map.gpx_view), FALSE);
   GtkWidget *w = dt_ui_resize_wrap(GTK_WIDGET(d->map.gpx_view), 100, "plugins/lighttable/geotagging/heighttracklist");
   gtk_widget_set_size_request(w, -1, 100);
   gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(d->map.gpx_view), TRUE);
-  gtk_box_pack_start(GTK_BOX(d->map.gpx_section), w, TRUE, TRUE, 0);
+
+  // the gpx_view_button is invisible and the label and tooltip of cannot be displayed on GUI.
+  // but label is use in "shortcuts" dialog.
+  GtkWidget *gpx_view_button = dt_action_button_new(self, N_("view entire track"), _refresh_display_all_tracks, self,
+                                        _("refresh map to view entire selected track segments"), 0, 0);
+  gtk_widget_set_opacity(gpx_view_button, 0);
+  gtk_widget_set_valign(gpx_view_button, GTK_ALIGN_START);
+  gtk_widget_set_margin_start(gpx_view_button, DT_PIXEL_APPLY_DPI(25));
+  gtk_widget_set_size_request(gpx_view_button, -1, DT_PIXEL_APPLY_DPI(25));
+  GtkWidget *overlay = gtk_overlay_new();
+  gtk_container_add(GTK_CONTAINER(overlay), w);
+  gtk_overlay_add_overlay(GTK_OVERLAY(overlay), GTK_WIDGET(gpx_view_button));
+  gtk_container_add(GTK_CONTAINER(d->map.gpx_section),overlay);
+  gtk_box_pack_start(GTK_BOX(d->map.gpx_section), overlay, TRUE, TRUE, 0);
 
   grid = GTK_GRID(gtk_grid_new());
   gtk_grid_set_column_spacing(grid, DT_PIXEL_APPLY_DPI(5));

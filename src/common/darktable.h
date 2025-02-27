@@ -394,6 +394,7 @@ typedef struct darktable_t
   dt_pthread_mutex_t capabilities_threadsafe;
   dt_pthread_mutex_t exiv2_threadsafe;
   dt_pthread_mutex_t readFile_mutex;
+  dt_pthread_mutex_t metadata_threadsafe;
   char *progname;
   char *datadir;
   char *sharedir;
@@ -727,6 +728,7 @@ static inline int dt_get_thread_num()
 }
 
 #define DT_INITHASH 5381
+#define DT_INVALID_CACHEHASH 0
 typedef uint64_t dt_hash_t;
 static inline dt_hash_t dt_hash(dt_hash_t hash, const void *data, const size_t size)
 {

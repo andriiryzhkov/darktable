@@ -23,8 +23,6 @@
 #include "libs/colorpicker.h"
 #include <stdlib.h>
 
-#define INVALID_CACHEHASH 0
-
 static inline int _to_mb(size_t m)
 {
   return (int)((m + 0x80000lu) / 0x400lu / 0x400lu);
@@ -51,7 +49,7 @@ gboolean dt_dev_pixelpipe_cache_init(dt_dev_pixelpipe_t *pipe,
 
   for(int k = 0; k < entries; k++)
   {
-    cache->hash[k] = INVALID_CACHEHASH;
+    cache->hash[k] = DT_INVALID_CACHEHASH;
     cache->used[k] = 64 + k;
   }
   if(!size) return TRUE;
@@ -104,39 +102,38 @@ void dt_dev_pixelpipe_cache_cleanup(dt_dev_pixelpipe_t *pipe)
 
 static dt_hash_t _dev_pixelpipe_cache_basichash(const dt_imgid_t imgid,
                                                 dt_dev_pixelpipe_t *pipe,
-                                                const int order)
+                                                const int position)
 {
   /* What do we use for the basic hash
        1) imgid as all structures using the hash might possibly contain data from other images
-       2) pipe->type as we want to keep status of fast mode included
-       3) pipe->want_detail_mask makes sure old cachelines from before activating details are
+       2) pipe->type for the cache it's important to keep status of fast mode included here
+           also, we might use the hash also for different pipe.
+       3) pipe->want_detail_mask make sure old cachelines from before activating details are
           not valid any more.
-          Do we have to keep the roi of details mask? No, as that is always defined by roi_in
+          Do we have to keep the roi of details mask? No as that is always defined by roi_in
           of the mask writing module (rawprepare or demosaic)
-       4) The piece->hash of modules within the given limit excluding the skipped
+       4) Please note that position is not the iop_order but the n-th node position in the pipe
   */
   const uint32_t hashing_pipemode[3] = {(uint32_t)imgid,
                                         (uint32_t)pipe->type,
                                         (uint32_t)pipe->want_detail_mask };
   dt_hash_t hash = dt_hash(DT_INITHASH, &hashing_pipemode, sizeof(hashing_pipemode));
 
-  // go through all modules up to iop_order and compute a hash using the operation and params.
+  // go through all modules up to position and compute a hash using the operation and params.
   GList *pieces = pipe->nodes;
-  while(pieces)
+  for(int k = 0; k < position && pieces; k++)
   {
-    const dt_dev_pixelpipe_iop_t *piece = pieces->data;
-    const dt_iop_module_t *module = piece->module;
-
-    if(module->iop_order > order) break;
-
+    dt_dev_pixelpipe_iop_t *piece = pieces->data;
+    // As this runs through all pipe nodes - also the ones not commited -
+    // we can safely avoid disabled modules/pieces
+    const gboolean included = piece->module->enabled || piece->enabled;
     // don't take skipped modules into account
-    const gboolean skipped = dt_iop_module_is_skipped(module->dev, module)
-                          && (pipe->type & DT_DEV_PIXELPIPE_BASIC);
-
-    if(!skipped)
+    const gboolean skipped = dt_iop_module_is_skipped(piece->module->dev, piece->module)
+      && (pipe->type & DT_DEV_PIXELPIPE_BASIC);
+    if(!skipped && included)
     {
       hash = dt_hash(hash, &piece->hash, sizeof(piece->hash));
-      if(module->request_color_pick != DT_REQUEST_COLORPICK_OFF)
+      if(piece->module->request_color_pick != DT_REQUEST_COLORPICK_OFF)
       {
         if(darktable.lib->proxy.colorpicker.primary_sample->size == DT_LIB_COLORPICKER_SIZE_BOX)
         {
@@ -156,9 +153,9 @@ static dt_hash_t _dev_pixelpipe_cache_basichash(const dt_imgid_t imgid,
 dt_hash_t dt_dev_pixelpipe_cache_hash(const dt_imgid_t imgid,
                                       const dt_iop_roi_t *roi,
                                       dt_dev_pixelpipe_t *pipe,
-                                      const int order)
+                                      const int position)
 {
-  dt_hash_t hash = _dev_pixelpipe_cache_basichash(imgid, pipe, order);
+  dt_hash_t hash = _dev_pixelpipe_cache_basichash(imgid, pipe, position);
   // also include roi data
   // FIXME include full roi data in cachelines
   hash = dt_hash(hash, roi, sizeof(dt_iop_roi_t));
@@ -171,7 +168,7 @@ gboolean dt_dev_pixelpipe_cache_available(dt_dev_pixelpipe_t *pipe,
 {
   if(pipe->mask_display
      || pipe->nocache
-     || (hash == INVALID_CACHEHASH))
+     || (hash == DT_INVALID_CACHEHASH))
     return FALSE;
 
   dt_dev_pixelpipe_cache_t *cache = &pipe->cache;
@@ -203,7 +200,7 @@ static int _get_oldest_cacheline(dt_dev_pixelpipe_cache_t *cache,
     {
       if(mode == DT_CACHETEST_USED)         older = cache->data[k] != NULL;
       else if(mode == DT_CACHETEST_FREE)    older = cache->data[k] == NULL;
-      else if(mode == DT_CACHETEST_INVALID) older = cache->hash[k] == INVALID_CACHEHASH;
+      else if(mode == DT_CACHETEST_INVALID) older = cache->hash[k] == DT_INVALID_CACHEHASH;
       if(older)
       {
         age = cache->used[k];
@@ -214,7 +211,7 @@ static int _get_oldest_cacheline(dt_dev_pixelpipe_cache_t *cache,
   return id;
 }
 
-static int __get_cacheline(dt_dev_pixelpipe_cache_t *cache)
+static int _get_c_cacheline(dt_dev_pixelpipe_cache_t *cache)
 {
   int oldest = _get_oldest_cacheline(cache, DT_CACHETEST_INVALID);
   if(oldest > 0) return oldest;
@@ -235,7 +232,7 @@ static int _get_cacheline(dt_dev_pixelpipe_t *pipe)
   if((cache->entries == DT_PIPECACHE_MIN) || pipe->mask_display || pipe->nocache)
     return cache->calls & 1;
 
-  cache->lastline = __get_cacheline(cache);
+  cache->lastline = _get_c_cacheline(cache);
   return cache->lastline;
 }
 
@@ -259,14 +256,14 @@ static gboolean _get_by_hash(dt_dev_pixelpipe_t *pipe,
            doesn't reflect the complete status.
            Anyway this has to be accepted as a dt bug so we always report
         */
-        cache->hash[k] = INVALID_CACHEHASH;
+        cache->hash[k] = DT_INVALID_CACHEHASH;
         dt_print_pipe(DT_DEBUG_ALWAYS, "CACHELINE_SIZE ERROR",
           pipe, module, DT_DEVICE_NONE, NULL, NULL);
       }
       else if(pipe->mask_display || pipe->nocache)
       {
         // this should not happen but we make sure
-        cache->hash[k] = INVALID_CACHEHASH;
+        cache->hash[k] = DT_INVALID_CACHEHASH;
       }
       else
       {
@@ -287,7 +284,7 @@ gboolean dt_dev_pixelpipe_cache_get(dt_dev_pixelpipe_t *pipe,
                                     const size_t size,
                                     void **data,
                                     dt_iop_buffer_dsc_t **dsc,
-                                    dt_iop_module_t *module,
+                                    const dt_iop_module_t *module,
                                     const gboolean important)
 {
   dt_dev_pixelpipe_cache_t *cache = &pipe->cache;
@@ -297,7 +294,7 @@ gboolean dt_dev_pixelpipe_cache_get(dt_dev_pixelpipe_t *pipe,
 
   // cache keeps history and we have a cache hit, so no new buffer
   if(cache->entries > DT_PIPECACHE_MIN
-     && (hash != INVALID_CACHEHASH)
+     && (hash != DT_INVALID_CACHEHASH)
      && _get_by_hash(pipe, module, hash, size, data, dsc))
   {
     const dt_iop_buffer_dsc_t *cdsc = *dsc;
@@ -340,7 +337,7 @@ gboolean dt_dev_pixelpipe_cache_get(dt_dev_pixelpipe_t *pipe,
   *dsc = &cache->dsc[cline];
 
   const gboolean masking = pipe->mask_display != DT_DEV_PIXELPIPE_DISPLAY_NONE;
-  cache->hash[cline]      = masking ? INVALID_CACHEHASH : hash;
+  cache->hash[cline]      = masking ? DT_INVALID_CACHEHASH : hash;
 
   const dt_iop_buffer_dsc_t *cdsc = *dsc;
   dt_print_pipe(DT_DEBUG_PIPE | DT_DEBUG_VERBOSE, "pipe cache get",
@@ -359,31 +356,36 @@ gboolean dt_dev_pixelpipe_cache_get(dt_dev_pixelpipe_t *pipe,
 
 static void _mark_invalid_cacheline(const dt_dev_pixelpipe_cache_t *cache, const int k)
 {
-  cache->hash[k] = INVALID_CACHEHASH;
+  cache->hash[k] = DT_INVALID_CACHEHASH;
   cache->ioporder[k] = 0;
 }
 
-void dt_dev_pixelpipe_cache_invalidate_later(const dt_dev_pixelpipe_t *pipe,
+void dt_dev_pixelpipe_cache_invalidate_later(dt_dev_pixelpipe_t *pipe,
                                              const int32_t order)
 {
   const dt_dev_pixelpipe_cache_t *cache = &pipe->cache;
   int invalidated = 0;
   for(int k = DT_PIPECACHE_MIN; k < cache->entries; k++)
   {
-    if((cache->ioporder[k] >= order) && (cache->hash[k] != INVALID_CACHEHASH))
+    if((cache->ioporder[k] >= order) && (cache->hash[k] != DT_INVALID_CACHEHASH))
     {
       _mark_invalid_cacheline(cache, k);
       invalidated++;
     }
   }
-  if(invalidated)
+
+  const gboolean bcache = pipe->bcache_data != NULL && pipe->bcache_hash != DT_INVALID_CACHEHASH;
+  pipe->bcache_hash = DT_INVALID_CACHEHASH;
+
+  if(invalidated || bcache)
     dt_print_pipe(DT_DEBUG_PIPE,
     order ? "pipecache invalidate" : "pipecache flush",
     pipe, NULL, DT_DEVICE_NONE, NULL, NULL,
-    "%i cachelines after ioporder=%i", invalidated, order);
+    "%i cachelines after ioporder=%i%s",
+    invalidated, order, bcache ? ", blend cache" : "");
 }
 
-void dt_dev_pixelpipe_cache_flush(const dt_dev_pixelpipe_t *pipe)
+void dt_dev_pixelpipe_cache_flush(dt_dev_pixelpipe_t *pipe)
 {
   dt_dev_pixelpipe_cache_invalidate_later(pipe, 0);
 }
@@ -397,7 +399,7 @@ void dt_dev_pixelpipe_important_cacheline(const dt_dev_pixelpipe_t *pipe,
   {
     if((cache->data[k] == data)
         && (size == cache->size[k])
-        && (cache->hash[k] != INVALID_CACHEHASH))
+        && (cache->hash[k] != DT_INVALID_CACHEHASH))
       cache->used[k] = -cache->entries;
   }
 }
@@ -430,7 +432,7 @@ static void _cline_stats(dt_dev_pixelpipe_cache_t *cache)
   for(int k = DT_PIPECACHE_MIN; k < cache->entries; k++)
   {
     if(cache->data[k]) cache->lused++;
-    if(cache->data[k] && (cache->hash[k] == INVALID_CACHEHASH)) cache->linvalid++;
+    if(cache->data[k] && (cache->hash[k] == DT_INVALID_CACHEHASH)) cache->linvalid++;
     if(cache->used[k] < 0) cache->limportant++;
   }
 }
@@ -448,7 +450,7 @@ void dt_dev_pixelpipe_cache_checkmem(dt_dev_pixelpipe_t *pipe)
 
   for(int k = DT_PIPECACHE_MIN; k < cache->entries; k++)
   {
-    if((cache->hash[k] == INVALID_CACHEHASH) && cache->data)
+    if((cache->hash[k] == DT_INVALID_CACHEHASH) && cache->data)
       freed += _free_cacheline(cache, k);
   }
 
@@ -480,7 +482,6 @@ void dt_dev_pixelpipe_cache_report(dt_dev_pixelpipe_t *pipe)
     (double)(cache->hits) / fmax(1.0, cache->tests));
 }
 
-#undef INVALID_CACHEHASH
 // clang-format off
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.py
 // vim: shiftwidth=2 expandtab tabstop=2 cindent

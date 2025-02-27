@@ -127,12 +127,8 @@ void gui_init(dt_lib_module_t *self)
   d->record_undo = TRUE;
   d->record_history_level = 0;
 
-  self->widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-  gtk_widget_set_name(self->widget, "history-ui");
-
   d->history_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
-  GtkWidget *hhbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_has_tooltip(d->history_box, FALSE);
 
   d->compress_button = dt_action_button_new
     (self, N_("compress history stack"), _lib_history_compress_clicked_callback, self,
@@ -152,18 +148,10 @@ void gui_init(dt_lib_module_t *self)
                    N_("create style from history"),
                    d->create_button, &dt_action_def_button);
 
-  /* add buttons to buttonbox */
-  gtk_box_pack_start(GTK_BOX(hhbox), d->compress_button, TRUE, TRUE, 0);
-  gtk_box_pack_start(GTK_BOX(hhbox), d->create_button, FALSE, FALSE, 0);
-
-  /* add history list and buttonbox to widget */
-  gtk_box_pack_start(GTK_BOX(self->widget),
-                     dt_ui_resize_wrap(d->history_box, 1,
-                                       "plugins/darkroom/history/windowheight"),
-                     FALSE, FALSE, 0);
-  gtk_widget_set_has_tooltip(d->history_box, FALSE);
-  gtk_box_pack_start(GTK_BOX(self->widget), hhbox, FALSE, FALSE, 0);
-
+  self->widget = dt_gui_vbox
+    (dt_ui_resize_wrap(d->history_box, 1, "plugins/darkroom/history/windowheight"),
+     dt_gui_hbox(dt_gui_expand(d->compress_button), d->create_button));
+  gtk_widget_set_name(self->widget, "history-ui");
   gtk_widget_show_all(self->widget);
 
   /* connect to history change signal for updating the history view */
@@ -1148,7 +1136,7 @@ void gui_update(dt_lib_module_t *self)
   gtk_widget_show_all(d->history_box);
   dt_gui_widget_reallocate_now(d->history_box);
 
-  if (num == darktable.develop->history_end)
+  if(num == darktable.develop->history_end)
   {
     // history has changed, scroll to the top
     GtkWidget *sw = gtk_widget_get_ancestor(d->history_box, GTK_TYPE_SCROLLED_WINDOW);
@@ -1281,8 +1269,11 @@ static gboolean _lib_history_button_clicked_callback(GtkWidget *widget,
     Yet - there are modules that require fresh data for internal visualizing.
     As there is currently no way to know about that we do a brute-force way and simply
     invalidate cachelines.
+    (we might want an additional iop module flag and keep track of that in pixelpipe cache code ???)
+    For raws we have at least rawprepare and demosaic
   */
-  dt_dev_pixelpipe_cache_invalidate_later(darktable.develop->preview_pipe, 0);
+  const int order = dt_image_is_raw(&darktable.develop->image_storage) ? 2 : 0;
+  dt_dev_pixelpipe_cache_invalidate_later(darktable.develop->preview_pipe, order);
 
   /* signal history changed */
   dt_dev_undo_end_record(darktable.develop);

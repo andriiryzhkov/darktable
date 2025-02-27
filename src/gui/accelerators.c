@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2011-2024 darktable developers.
+    Copyright (C) 2011-2025 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,11 +19,9 @@
 #include "gui/accelerators.h"
 #include "common/action.h"
 #include "common/darktable.h"
-#include "common/debug.h"
 #include "common/file_location.h"
 #include "common/utility.h"
 #include "control/control.h"
-#include "develop/blend.h"
 #include "gui/presets.h"
 #include "dtgtk/expander.h"
 #include "bauhaus/bauhaus.h"
@@ -31,9 +29,6 @@
 #include <assert.h>
 #include <gtk/gtk.h>
 #include <math.h>
-#ifdef GDK_WINDOWING_QUARTZ
-#include "osx/osx.h"
-#endif
 
 typedef struct dt_shortcut_t
 {
@@ -2056,6 +2051,8 @@ static gboolean _add_actions_to_tree(GtkTreeIter *parent,
                                      GtkTreeIter *found)
 {
   gboolean any_leaves = FALSE;
+  gchar **prev_split = NULL;
+  GtkTreeIter node = parent ? *parent : (GtkTreeIter){0};
 
   GtkTreeIter iter;
   for(; action; action = action->next)
@@ -2075,7 +2072,17 @@ static gboolean _add_actions_to_tree(GtkTreeIter *parent,
       module_is_needed = module->gui_reset || module->get_params || module->expandable(module);
     }
 
-    gtk_tree_store_insert_with_values(_actions_store, &iter, parent, -1, 0, action, -1);
+    gchar **split = g_strsplit(action->label, " | ", -1), **s = split, **p = prev_split;
+    for(; p && *(p+1) && *(s+1) && !g_strcmp0(*s, *p); p++, s++)
+      ;
+    for(; p && *(p+1); p++, node = iter)
+      gtk_tree_model_iter_parent(GTK_TREE_MODEL(_actions_store), &iter, &node);
+    for(; *(s+1); s++, node = iter)
+      gtk_tree_store_insert_with_values(_actions_store, &iter, &node, -1, 0, action->owner, 1, *s, -1);
+    g_strfreev(prev_split);
+    prev_split = split;
+
+    gtk_tree_store_insert_with_values(_actions_store, &iter, parent ? &node : NULL, -1, 0, action, -1);
 
     if(action->type <= DT_ACTION_TYPE_SECTION &&
        !_add_actions_to_tree(&iter, action->target, find, found) &&
@@ -2088,6 +2095,7 @@ static gboolean _add_actions_to_tree(GtkTreeIter *parent,
     }
   }
 
+  g_strfreev(prev_split);
   return any_leaves;
 }
 
@@ -2098,8 +2106,17 @@ static void _fill_action_fields(GtkTreeViewColumn *column,
                                 gpointer data)
 {
   dt_action_t *action = NULL;
-  gtk_tree_model_get(model, iter, 0, &action, -1);
-  gchar const *text = action->label;
+  gchar *node_label = NULL;
+  gtk_tree_model_get(model, iter, 0, &action, 1, &node_label, -1);
+
+  if(node_label)
+  {
+    g_object_set(cell, "text", node_label, NULL);
+    g_free(node_label);
+    return;
+  }
+
+  gchar const *text = (strrchr(action->label, '|') ?: action->label - 1) + 1;
   if(!data)
   {
     const dt_action_def_t *def = _action_find_definition(action);
@@ -2859,6 +2876,7 @@ GtkWidget *dt_shortcuts_prefs(GtkWidget *widget)
   g_object_set(renderer, "adjustment", gtk_adjustment_new(1, -1000, 1000, .01, 1, 10),
                          "digits", 3, "xalign", 1.0, NULL);
   g_signal_connect(renderer, "edited", G_CALLBACK(_speed_edited), filtered_shortcuts);
+  dt_gui_commit_on_focus_loss(renderer, NULL);
   _add_prefs_column(shortcuts_view, renderer, _("speed"), SHORTCUT_VIEW_SPEED);
 
   renderer = gtk_cell_renderer_combo_new();
@@ -2880,7 +2898,7 @@ GtkWidget *dt_shortcuts_prefs(GtkWidget *widget)
   gtk_paned_pack2(GTK_PANED(container), scroll, TRUE, FALSE);
 
   // Creating the action selection treeview
-  g_set_weak_pointer(&_actions_store, gtk_tree_store_new(1, G_TYPE_POINTER)); // static
+  g_set_weak_pointer(&_actions_store, gtk_tree_store_new(2, G_TYPE_POINTER, G_TYPE_STRING)); // static
   GtkTreeIter found_iter = {};
   if(widget && !_selected_action)
   {
@@ -4724,7 +4742,9 @@ dt_action_t *dt_action_locate(dt_action_t *owner,
 
       dt_action_t *new_action = calloc(1, sizeof(dt_action_t));
       new_action->id = clean_path;
-      new_action->label = g_strdup(needs_translation ? Q_(*path) : *path);
+      new_action->label = needs_translation
+                        ? g_strdup(Q_(*path))
+                        : dt_util_localize_segmented_name(*path, TRUE);
       new_action->type = DT_ACTION_TYPE_SECTION;
 
       dt_action_insert_sorted(owner, new_action);
@@ -5146,6 +5166,7 @@ GtkWidget *dt_action_button_new(dt_lib_module_t *self,
                                 GdkModifierType mods)
 {
   GtkWidget *button = gtk_button_new_with_label(Q_(label));
+  gtk_widget_set_hexpand(button, TRUE);
   gtk_label_set_ellipsize(GTK_LABEL(gtk_bin_get_child(GTK_BIN(button))),
                           PANGO_ELLIPSIZE_END);
   if(tooltip) gtk_widget_set_tooltip_text(button, tooltip);
@@ -5172,6 +5193,7 @@ GtkWidget *dt_action_entry_new(dt_action_t *ac,
                                const gchar *text)
 {
   GtkWidget *entry = dt_ui_entry_new(5);
+  gtk_widget_set_hexpand(entry, TRUE);
   if(text)
     gtk_entry_set_text (GTK_ENTRY(entry), text);
   if(tooltip)
