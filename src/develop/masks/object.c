@@ -53,11 +53,11 @@ static void _object_get_distance(const float x,
   if(!gpt) return;
 
   // we first check if we are inside the source form
-  if(dt_masks_point_in_form_exact(x, y, gpt->source, 1, gpt->source_count))
-  {
-    // Object masks cannot be used with clone, so this should never happen
-    return;
-  }
+  // if(dt_masks_point_in_form_exact(x, y, gpt->source, 1, gpt->source_count))
+  // {
+  //   // Object masks cannot be used with clone, so this should never happen
+  //   return;
+  // }
 
   // Check if we are close to a point
   for(int i = 0; i < num_points; i++)
@@ -131,30 +131,31 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   
   if(which == 1 && type == GDK_BUTTON_PRESS)
   {
-    // Add a new point
+    // we create a new point
     dt_masks_point_object_t *point = malloc(sizeof(dt_masks_point_object_t));
     
-    // Get the point coordinates
+    // we change the point coordinates
     float pts[2] = { pzx * wd, pzy * ht };
     dt_dev_distort_backtransform(darktable.develop, pts, 1);
-    
     point->point[0] = pts[0] / iwidth;
     point->point[1] = pts[1] / iheight;
     
-    // Set the label (1 for positive, 0 for negative)
+    // we set the label (1 for positive, 0 for negative)
     point->label = dt_modifier_is(state, GDK_SHIFT_MASK) ? 0 : 1;
     
-    // Add the point to form
+    // add the point to form
     form->points = g_list_append(form->points, point);
-    
-    // If this is a clone mask, set source position if it's the first point
-    if((form->type & DT_MASKS_CLONE) && g_list_length(form->points) == 1)
+
+    dt_iop_module_t *crea_module = gui->creation_module;
+    dt_masks_gui_form_save_creation(darktable.develop, crea_module, form, gui);
+
+    if(crea_module)
     {
-      dt_masks_set_source_pos_initial_value(gui, DT_MASKS_OBJECT, form, pzx, pzy);
+      // we save the move
+      dt_dev_add_masks_history_item(darktable.develop, module, TRUE);
+  
     }
-    
-    // We save the move
-    dt_dev_add_masks_history_item(darktable.develop, module, TRUE);
+      
     
     // We recreate the form points
     dt_masks_gui_form_create(form, gui, index, module);
@@ -349,7 +350,7 @@ static int _object_get_points(dt_develop_t *dev,
   // This function is needed for the API but isn't actually used for object masks
   // since they don't have a specific geometric shape to calculate
   *points = NULL;
-  points_count = 0;
+  *points_count = 0;
 
   // Return failure to indicate this isn't implemented for object masks
   return 0;
@@ -368,7 +369,44 @@ static void _object_events_post_expose(cairo_t *cr,
   
   // Draw the points
   dt_masks_form_t *form = darktable.develop->form_visible;
+  if(!form) return;
+
   _object_draw_points(cr, zoom_scale, gui, index, form);
+
+  // If we're in creation mode, draw a symbol next to the cursor
+  if(gui->creation)
+  {
+    // Get current modifier keys
+    // const int mods = dt_control_get_dev_mask();
+    // const gboolean is_negative = (mods & GDK_SHIFT_MASK) == GDK_SHIFT_MASK;
+    const gboolean is_negative = FALSE;
+    
+    // Draw plus or minus sign at cursor position
+    const float sign_size = DT_PIXEL_APPLY_DPI(8.0f) / zoom_scale;
+    const float x = gui->posx;
+    const float y = gui->posy;
+    
+    // Set colors
+    dt_draw_set_color_overlay(cr, TRUE, 0.8);
+    cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.0) / zoom_scale);
+    
+    if(!is_negative) // Positive point - draw "+"
+    {
+      cairo_move_to(cr, x - sign_size, y - sign_size - sign_size);
+      cairo_line_to(cr, x + sign_size, y - sign_size - sign_size);
+      cairo_stroke(cr);
+      
+      cairo_move_to(cr, x, y - sign_size - sign_size - sign_size);
+      cairo_line_to(cr, x, y - sign_size - sign_size + sign_size);
+      cairo_stroke(cr);
+    }
+    else // Negative point - draw "-"
+    {
+      cairo_move_to(cr, x - sign_size, y - sign_size - sign_size);
+      cairo_line_to(cr, x + sign_size, y - sign_size - sign_size);
+      cairo_stroke(cr);
+    }
+  }
 }
 
 // static void _bounding_box(const float *const points,
