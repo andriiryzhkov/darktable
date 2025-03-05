@@ -1806,9 +1806,8 @@ void gui_init(dt_lib_module_t *self)
                    d->bt_object, &dt_action_def_toggle);
   g_signal_connect(G_OBJECT(d->bt_object), "button-press-event",
                    G_CALLBACK(_bt_add_shape), GINT_TO_POINTER(DT_MASKS_OBJECT));
-  gtk_widget_set_tooltip_text(d->bt_object, _("add gradient"));
+  gtk_widget_set_tooltip_text(d->bt_object, _("add object"));
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->bt_object), FALSE);
-  gtk_box_pack_end(GTK_BOX(hbox), d->bt_object, FALSE, FALSE, 0);
 
   d->bt_gradient = dtgtk_togglebutton_new(dtgtk_cairo_paint_masks_gradient, 0, NULL);
   dt_action_define(DT_ACTION(self), N_("shapes"), N_("add gradient"),
@@ -1889,7 +1888,7 @@ void gui_init(dt_lib_module_t *self)
   self->widget = dt_gui_vbox
     (dt_gui_hbox
       (dt_gui_expand(dt_ui_label_new(_("created shapes"))),
-       d->bt_brush, d->bt_circle, d->bt_ellipse, d->bt_path, d->bt_gradient),
+       d->bt_brush, d->bt_circle, d->bt_ellipse, d->bt_path, d->bt_gradient, d->bt_object),
      dt_ui_resize_wrap(d->treeview, 200, "plugins/darkroom/masks/heightview"));
 
   dt_gui_new_collapsible_section

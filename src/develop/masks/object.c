@@ -122,6 +122,7 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
                                          dt_masks_form_gui_t *gui,
                                          const int index)
 {
+  if(type == GDK_2BUTTON_PRESS || type == GDK_3BUTTON_PRESS) return 1;
   if(!gui) return 0;
   
   float wd, ht, iwidth, iheight;
@@ -129,41 +130,44 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
 
   // dt_masks_form_gui_points_t *gpt = g_list_nth_data(gui->points, index);
   
-  if(which == 1 && type == GDK_BUTTON_PRESS)
+  if(which == 1)
   {
     // we create a new point
-    dt_masks_point_object_t *point = malloc(sizeof(dt_masks_point_object_t));
+    dt_masks_point_object_t *pt = malloc(sizeof(dt_masks_point_object_t));
     
     // we change the point coordinates
     float pts[2] = { pzx * wd, pzy * ht };
     dt_dev_distort_backtransform(darktable.develop, pts, 1);
-    point->point[0] = pts[0] / iwidth;
-    point->point[1] = pts[1] / iheight;
+    pt->point[0] = pts[0] / iwidth;
+    pt->point[1] = pts[1] / iheight;
     
-    // we set the label (1 for positive, 0 for negative)
-    point->label = dt_modifier_is(state, GDK_SHIFT_MASK) ? 0 : 1;
+    // // we set the label (1 for positive, 0 for negative)
+    pt->label = dt_modifier_is(state, GDK_SHIFT_MASK) ? 0 : 1;
     
-    // add the point to form
-    form->points = g_list_append(form->points, point);
+    // // add the point to form
+    if(pt)
+      form->points = g_list_append(form->points, pt);
 
-    dt_iop_module_t *crea_module = gui->creation_module;
-    dt_masks_gui_form_save_creation(darktable.develop, crea_module, form, gui);
+    // dt_iop_module_t *crea_module = gui->creation_module;
+    // dt_masks_gui_form_save_creation(darktable.develop, crea_module, form, gui);
 
-    if(crea_module)
-    {
-      // we save the move
-      dt_dev_add_masks_history_item(darktable.develop, module, TRUE);
+    // if(crea_module)
+    // {
+    //   // we save the move
+    //   dt_dev_add_masks_history_item(darktable.develop, module, TRUE);
   
-    }
-      
+    // }
+    
+    // we save the move
+    // dt_dev_add_masks_history_item(darktable.develop, module, TRUE);  
     
     // We recreate the form points
-    dt_masks_gui_form_create(form, gui, index, module);
+    // dt_masks_gui_form_create(form, gui, index, module);
     
-    dt_control_queue_redraw_center();
+    // dt_control_queue_redraw_center();
     return 1;
   }
-  else if(which == 3 && type == GDK_BUTTON_PRESS)
+  else if(which == 3)
   {
     // Right click - clear all points
     while(form->points)
