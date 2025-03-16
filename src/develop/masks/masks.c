@@ -1263,7 +1263,8 @@ void dt_masks_events_post_expose(dt_iop_module_t *module,
   // add preview when creating a circle, ellipse and gradient
   if(!(((form->type & DT_MASKS_CIRCLE)
         || (form->type & DT_MASKS_ELLIPSE)
-        || (form->type & DT_MASKS_GRADIENT))
+        || (form->type & DT_MASKS_GRADIENT)
+        || (form->type & DT_MASKS_OBJECT))
        && gui->creation))
     dt_masks_gui_form_test_create(form, gui, module);
 
@@ -1710,6 +1711,11 @@ void dt_masks_iop_value_changed_callback(GtkWidget *widget,
     {
       // add a brush shape
       _menu_add_shape(module, DT_MASKS_BRUSH);
+    }
+    else if(val == -2000128)
+    {
+      // add a object shape
+      _menu_add_shape(module, DT_MASKS_OBJECT);
     }
     else if(val < 0)
     {

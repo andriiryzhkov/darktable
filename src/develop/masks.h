@@ -44,7 +44,8 @@ typedef enum dt_masks_type_t
   DT_MASKS_GRADIENT = 1 << 4,
   DT_MASKS_ELLIPSE = 1 << 5,
   DT_MASKS_BRUSH = 1 << 6,
-  DT_MASKS_NON_CLONE = 1 << 7
+  DT_MASKS_NON_CLONE = 1 << 7,
+  DT_MASKS_OBJECT = 1 << 8
 } dt_masks_type_t;
 
 /**masts states */
@@ -188,6 +189,13 @@ typedef struct dt_masks_point_gradient_t
   float curvature;
   dt_masks_gradient_states_t state;
 } dt_masks_point_gradient_t;
+
+/** structure used to store 1 point for a object */
+typedef struct dt_masks_point_object_t
+{
+  float anchor[2];
+  int label;
+} dt_masks_point_object_t;
 
 /** structure used to store all forms's id for a group */
 typedef struct dt_masks_point_group_t
@@ -440,6 +448,7 @@ extern const dt_masks_functions_t dt_masks_functions_ellipse;
 extern const dt_masks_functions_t dt_masks_functions_brush;
 extern const dt_masks_functions_t dt_masks_functions_path;
 extern const dt_masks_functions_t dt_masks_functions_gradient;
+extern const dt_masks_functions_t dt_masks_functions_object;
 extern const dt_masks_functions_t dt_masks_functions_group;
 
 /** init dt_masks_form_gui_t struct with default values */

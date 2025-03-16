@@ -113,6 +113,7 @@ FILE(GLOB SOURCE_FILES
   "develop/masks/circle.c"
   "develop/masks/ellipse.c"
   "develop/masks/gradient.c"
+  "develop/masks/object.c"
   "develop/masks/group.c"
   "develop/masks/masks.c"
   "develop/masks/path.c"

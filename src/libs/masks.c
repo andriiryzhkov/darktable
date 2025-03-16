@@ -45,7 +45,7 @@ typedef struct dt_lib_masks_t
 {
   /* vbox with managed history items */
   GtkWidget *hbox;
-  GtkWidget *bt_circle, *bt_path, *bt_gradient, *bt_ellipse, *bt_brush;
+  GtkWidget *bt_circle, *bt_path, *bt_gradient, *bt_ellipse, *bt_brush, *bt_object;
   GtkWidget *treeview;
   dt_gui_collapsible_section_t cs;
   GtkWidget *property[DT_MASKS_PROPERTY_LAST];
@@ -1804,6 +1804,15 @@ void gui_init(dt_lib_module_t *self)
   GtkWidget *label = gtk_label_new(_("created shapes"));
   gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
   gtk_box_pack_start(GTK_BOX(hbox), label, FALSE, TRUE, 0);
+
+  d->bt_object = dtgtk_togglebutton_new(dtgtk_cairo_paint_masks_object, 0, NULL);
+  dt_action_define(DT_ACTION(self), N_("shapes"), N_("add object"),
+                   d->bt_object, &dt_action_def_toggle);
+  g_signal_connect(G_OBJECT(d->bt_object), "button-press-event",
+                   G_CALLBACK(_bt_add_shape), GINT_TO_POINTER(DT_MASKS_OBJECT));
+  gtk_widget_set_tooltip_text(d->bt_object, _("add object"));
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->bt_object), FALSE);
+  gtk_box_pack_end(GTK_BOX(hbox), d->bt_object, FALSE, FALSE, 0);
 
   d->bt_gradient = dtgtk_togglebutton_new(dtgtk_cairo_paint_masks_gradient, 0, NULL);
   dt_action_define(DT_ACTION(self), N_("shapes"), N_("add gradient"),

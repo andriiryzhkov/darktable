@@ -614,6 +614,20 @@ void dtgtk_cairo_paint_masks_path(cairo_t *cr, gint x, gint y, gint w, gint h, g
   FINISH
 }
 
+void dtgtk_cairo_paint_masks_object(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
+{
+  PREAMBLE(1.1, 1, 0, 0)
+
+  cairo_move_to(cr, 0.5, 0.1);
+  cairo_line_to(cr, 0.9, 0.5);
+  cairo_line_to(cr, 0.5, 0.9);
+  cairo_line_to(cr, 0.1, 0.5);
+  cairo_close_path(cr);
+  cairo_stroke(cr);
+
+  FINISH
+}
+
 void dtgtk_cairo_paint_masks_vertgradient(cairo_t *cr, gint x, gint y, gint w, gint h, gint flags, void *data)
 {
   PREAMBLE(1, 1, 0, 0)
