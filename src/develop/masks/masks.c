@@ -852,6 +852,8 @@ dt_masks_form_t *dt_masks_create(dt_masks_type_t type)
     form->functions = &dt_masks_functions_path;
   else if(type & DT_MASKS_GRADIENT)
     form->functions = &dt_masks_functions_gradient;
+    else if(type & DT_MASKS_OBJECT)
+    form->functions = &dt_masks_functions_object;
   else if(type & DT_MASKS_GROUP)
     form->functions = &dt_masks_functions_group;
 
