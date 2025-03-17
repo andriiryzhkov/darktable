@@ -93,10 +93,6 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
       gui->guipoints_payload = dt_masks_dynbuf_init(100000, "object guipoints_payload");
     if(!gui->guipoints_payload)
       return 1;
-    if(!gui->guipoints_count)
-      gui->guipoints_count = 0;
-    if(!gui->guipoints_count)
-      return 1;
     dt_masks_dynbuf_add_2(gui->guipoints, pzx * wd, pzy * ht);
     dt_masks_dynbuf_add(gui->guipoints_payload, dt_modifier_is(state, GDK_SHIFT_MASK) ? 0 : 1);
     gui->guipoints_count++;
@@ -199,7 +195,7 @@ static void _object_events_post_expose(cairo_t *cr,
   if(gui->creation)
   {
     const float opacity = 1.0f;
-    const float radius = (gui->guipoints_count + 1) * DT_PIXEL_APPLY_DPI(10.0f) / zoom_scale;
+    const float radius = DT_PIXEL_APPLY_DPI(10.0f) / zoom_scale;
 
     cairo_save(cr);
 
@@ -214,16 +210,16 @@ static void _object_events_post_expose(cairo_t *cr,
       const float *guipoints = dt_masks_dynbuf_buffer(gui->guipoints);
       // const float *guipoints_payload = dt_masks_dynbuf_buffer(gui->guipoints_payload);
 
-      cairo_save(cr);
-
-      for(int i = 1; i < gui->guipoints_count; i++)
+      for(int i = 0; i < gui->guipoints_count; i++)
       {
-        dt_gui_gtk_set_source_rgba(cr, DT_GUI_COLOR_BRUSH_CURSOR, opacity);
+        cairo_save(cr);
+
+        dt_gui_gtk_set_source_rgba(cr, DT_GUI_COLOR_BRUSH_TRACE, opacity);
         cairo_arc(cr, guipoints[i * 2], guipoints[i * 2 + 1], radius, 0, 2.0 * M_PI);
         cairo_fill_preserve(cr);
-      }
 
-      cairo_restore(cr);
+        cairo_restore(cr);
+      }
     }
 
     return;
