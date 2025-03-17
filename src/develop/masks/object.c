@@ -55,7 +55,15 @@ static int _object_events_mouse_scrolled(dt_iop_module_t *module,
                                          dt_masks_form_gui_t *gui,
                                          const int index)
 {
-  return 0;
+  if(dt_modifier_is(state, GDK_CONTROL_MASK))
+  {
+    // we try to change the opacity
+    dt_masks_form_change_opacity(form, parentid, up ? 0.05f : -0.05f);
+
+    return 1;
+  }
+
+return 0;
 }
 
 static int _object_events_button_pressed(dt_iop_module_t *module,
@@ -69,7 +77,51 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
                                          dt_masks_form_gui_t *gui,
                                          const int index)
 {
-  return 0;
+  if(type == GDK_2BUTTON_PRESS || type == GDK_3BUTTON_PRESS) return 1;
+  if(!gui) return 0;
+
+  float wd, ht, iwidth, iheight;
+  dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
+
+  if(gui->creation && which == 1)
+  {
+    if(!gui->guipoints)
+      gui->guipoints = dt_masks_dynbuf_init(200000, "object guipoints");
+    if(!gui->guipoints)
+      return 1;
+    if(!gui->guipoints_payload)
+      gui->guipoints_payload = dt_masks_dynbuf_init(100000, "object guipoints_payload");
+    if(!gui->guipoints_payload)
+      return 1;
+    if(!gui->guipoints_count)
+      gui->guipoints_count = 0;
+    if(!gui->guipoints_count)
+      return 1;
+    dt_masks_dynbuf_add_2(gui->guipoints, pzx * wd, pzy * ht);
+    dt_masks_dynbuf_add(gui->guipoints_payload, dt_modifier_is(state, GDK_SHIFT_MASK) ? 0 : 1);
+    gui->guipoints_count++;
+
+    dt_control_queue_redraw_center();
+    return 1;
+  }
+  else if(gui->creation && which == 3)
+  {
+    dt_masks_dynbuf_free(gui->guipoints);
+    dt_masks_dynbuf_free(gui->guipoints_payload);
+    gui->guipoints = NULL;
+    gui->guipoints_payload = NULL;
+    gui->guipoints_count = 0; 
+
+    gui->creation_continuous = FALSE;
+    gui->creation_continuous_module = NULL;
+
+    dt_masks_set_edit_mode(module, DT_MASKS_EDIT_FULL);
+    dt_masks_iop_update(module);
+    dt_control_queue_redraw_center();
+    return 1;
+  }
+
+ return 0;
 }
 
 static int _object_events_button_released(dt_iop_module_t *module,
@@ -96,7 +148,20 @@ static int _object_events_mouse_moved(dt_iop_module_t *module,
                                       dt_masks_form_gui_t *gui,
                                       const int index)
 {
-  return 0;
+  gui->form_selected = FALSE;
+  gui->border_selected = FALSE;
+  gui->source_selected = FALSE;
+  gui->feather_selected = -1;
+  gui->point_selected = -1;
+  gui->seg_selected = -1;
+  gui->point_border_selected = -1;
+    
+  if(gui->creation)
+  {
+    dt_control_queue_redraw_center();
+  }
+
+  return 1;
 }
 
 static int _object_get_points(dt_develop_t *dev,
@@ -125,9 +190,44 @@ static void _object_events_post_expose(cairo_t *cr,
                                        const int index,
                                        const int num_points)
 {
-  (void)zoom_scale; // unused arg, keep compiler from complaining
-  (void)index;
-  (void)num_points;
+  if(!gui) return;
+
+  float wd, ht, iwidth, iheight;
+  dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
+
+  // in creation mode
+  if(gui->creation)
+  {
+    const float opacity = 1.0f;
+    const float radius = (gui->guipoints_count + 1) * DT_PIXEL_APPLY_DPI(10.0f) / zoom_scale;
+
+    cairo_save(cr);
+
+    dt_gui_gtk_set_source_rgba(cr, DT_GUI_COLOR_BRUSH_CURSOR, opacity);
+    cairo_arc(cr, gui->posx, gui->posy, radius, 0, 2.0 * M_PI);
+    cairo_fill_preserve(cr);
+
+    cairo_restore(cr);
+
+    if(gui->guipoints_count > 0)
+    {
+      const float *guipoints = dt_masks_dynbuf_buffer(gui->guipoints);
+      // const float *guipoints_payload = dt_masks_dynbuf_buffer(gui->guipoints_payload);
+
+      cairo_save(cr);
+
+      for(int i = 1; i < gui->guipoints_count; i++)
+      {
+        dt_gui_gtk_set_source_rgba(cr, DT_GUI_COLOR_BRUSH_CURSOR, opacity);
+        cairo_arc(cr, guipoints[i * 2], guipoints[i * 2 + 1], radius, 0, 2.0 * M_PI);
+        cairo_fill_preserve(cr);
+      }
+
+      cairo_restore(cr);
+    }
+
+    return;
+  } // creation
 }
 
 static int _object_get_points_border(dt_develop_t *dev,
@@ -202,10 +302,6 @@ static GSList *_object_setup_mouse_actions(const struct dt_masks_form_t *const f
 {
   GSList *lm = NULL;
   lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_SCROLL,
-                                     0, _("[OBJECT] change size"));
-  lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_SCROLL,
-                                     GDK_SHIFT_MASK, _("[OBJECT] change feather size"));
-  lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_SCROLL,
                                      GDK_CONTROL_MASK, _("[OBJECT] change opacity"));
   return lm;
 }
@@ -227,10 +323,10 @@ static void _object_set_hint_message(const dt_masks_form_gui_t *const gui,
                                      char *const restrict msgbuf,
                                      const size_t msgbuf_len)
 {
-  // object has same controls on creation and on edit
-  g_snprintf(msgbuf, msgbuf_len,
-             _("<b>size</b>: scroll, <b>feather size</b>: shift+scroll\n"
-               "<b>opacity</b>: ctrl+scroll (%d%%)"), opacity);
+  if(gui->creation)
+    g_snprintf(msgbuf, msgbuf_len,
+              _("<b>add</b>: click, <b>substract</b>: shift+click\n"
+                "<b>opacity</b>: ctrl+scroll (%d%%)"), opacity);
 }
 
 static void _object_duplicate_points(dt_develop_t *dev,
