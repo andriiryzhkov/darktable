@@ -195,7 +195,8 @@ static void _object_events_post_expose(cairo_t *cr,
   if(gui->creation)
   {
     const float opacity = 1.0f;
-    const float radius = DT_PIXEL_APPLY_DPI(10.0f) / zoom_scale;
+    const float radius = DT_PIXEL_APPLY_DPI(5.0f) / zoom_scale;
+    const float sign_size = DT_PIXEL_APPLY_DPI(8.0f) / zoom_scale;
 
     cairo_save(cr);
 
@@ -208,17 +209,29 @@ static void _object_events_post_expose(cairo_t *cr,
     if(gui->guipoints_count > 0)
     {
       const float *guipoints = dt_masks_dynbuf_buffer(gui->guipoints);
-      // const float *guipoints_payload = dt_masks_dynbuf_buffer(gui->guipoints_payload);
+      const float *guipoints_payload = dt_masks_dynbuf_buffer(gui->guipoints_payload);
 
       for(int i = 0; i < gui->guipoints_count; i++)
       {
-        cairo_save(cr);
-
-        dt_gui_gtk_set_source_rgba(cr, DT_GUI_COLOR_BRUSH_TRACE, opacity);
-        cairo_arc(cr, guipoints[i * 2], guipoints[i * 2 + 1], radius, 0, 2.0 * M_PI);
-        cairo_fill_preserve(cr);
-
-        cairo_restore(cr);
+        dt_draw_set_color_overlay(cr, TRUE, 0.8);
+        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.0) / zoom_scale);
+        
+        if(guipoints_payload[i] > 0) // Positive point - draw "+"
+        {
+          cairo_move_to(cr, guipoints[i * 2] - sign_size, guipoints[i * 2 + 1]);
+          cairo_line_to(cr, guipoints[i * 2] + sign_size, guipoints[i * 2 + 1]);
+          cairo_stroke(cr);
+          
+          cairo_move_to(cr, guipoints[i * 2], guipoints[i * 2 + 1] - sign_size);
+          cairo_line_to(cr, guipoints[i * 2], guipoints[i * 2 + 1] + sign_size);
+          cairo_stroke(cr);
+        }
+        else // Negative point - draw "-"
+        {
+          cairo_move_to(cr, guipoints[i * 2] - sign_size, guipoints[i * 2 + 1]);
+          cairo_line_to(cr, guipoints[i * 2] + sign_size, guipoints[i * 2 + 1]);
+          cairo_stroke(cr);
+        }
       }
     }
 
