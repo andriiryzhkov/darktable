@@ -103,8 +103,10 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   }
   else if(gui->creation && which == 3)
   {
+    dt_print(DT_DEBUG_ALWAYS, "[object] right click");
     // get the image preview
     dt_dev_pixelpipe_t *preview = darktable.develop->preview_pipe;
+    dt_print(DT_DEBUG_ALWAYS, "[object] backbuf %ix%i", preview->backbuf_width, preview->backbuf_height);
     seg_image_t img;
     img.nx = preview->backbuf_width;
     img.ny = preview->backbuf_height;
@@ -113,18 +115,19 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
     seg_params_t params;
     int n_masks = 0;
     seg_params_init(&params);
+    params.model = dt_conf_get_string("plugins/darkroom/masks/segmentation/model");
 
     // load the GGML model
-    seg_context_t* ctx = sam_load_model(&params);
+    seg_context_t* ctx = seg_load_model(&params);
     if (!ctx) {
-      dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to load segmentation model");  
+      dt_print(DT_DEBUG_ALWAYS, "[object] failed to load segmentation model");  
       return 1;
     }
 
     // encode image
-    if (!sam_compute_image_embeddings(ctx, &img, params.n_threads)) {
-      dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to encode image");
-      sam_free(ctx);
+    if (!seg_compute_image_embeddings(ctx, &img, params.n_threads)) {
+      dt_print(DT_DEBUG_ALWAYS, "[object] failed to encode image");
+      seg_free(ctx);
       return 1;
     }
 
@@ -139,11 +142,11 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
     }
 
     // decode prompt
-    seg_image_t* masks = sam_compute_masks(ctx, &img, params.n_threads, seg_points,
+    seg_image_t* masks = seg_compute_masks(ctx, &img, params.n_threads, seg_points,
                                            gui->guipoints_count, &n_masks, 255, 0);
     if (!masks || n_masks == 0) {
-      dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to compute masks");
-      sam_free(ctx);
+      dt_print(DT_DEBUG_ALWAYS, "[object] failed to compute masks");
+      seg_free(ctx);
       return 1;
     }
   

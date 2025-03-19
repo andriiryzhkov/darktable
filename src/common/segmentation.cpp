@@ -62,20 +62,15 @@ struct sam_params
   int32_t seed = -1; // RNG seed
   int32_t n_threads = std::min(4, (int32_t)std::thread::hardware_concurrency());
 
-  std::string model = "sam_vit_b-ggml-model-f16.bin"; // model path
-  std::string fname_inp = "img.jpg";
-  std::string fname_out = "img";
+  std::string model = NULL; // model path
   float mask_threshold = 0.f;
   float iou_threshold = 0.88f;
   float stability_score_threshold = 0.95f;
   float stability_score_offset = 1.0f;
   float eps = 1e-6f;
   float eps_decoder_transformer = 1e-5f;
-  sam_point pt = { 414.375f, 162.796875f, 1 };
 };
 
-// struct sam_state;
-// struct sam_model;
 struct sam_ggml_state;
 struct sam_ggml_model;
 struct sam_state
@@ -380,34 +375,35 @@ struct sam_image_f32
 
 void print_t_f32(const char *title, struct ggml_tensor *t, int n = 10)
 {
-  printf("%s\n", title);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s", title);
   float *data = (float *)t->data;
-  printf("dims: % " PRId64 " % " PRId64 " % " PRId64 " % " PRId64 " f32\n", t->ne[0], t->ne[1], t->ne[2], t->ne[3]);
-  printf("First & Last %d elements:\n", n);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] dims: % " PRId64 " % " PRId64 " % " PRId64 " % " PRId64 " f32",
+           t->ne[0], t->ne[1], t->ne[2], t->ne[3]);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] First & Last %d elements:", n);
   for(int i = 0; i < std::min((int)(t->ne[0] * t->ne[1]), n); i++)
   {
-    printf("%.5f ", data[i]);
+    dt_print_nts(DT_DEBUG_ALWAYS, "%.5f ", data[i]);
     if(i != 0 && i % t->ne[0] == 0)
     {
-      printf("\n");
+      dt_print(DT_DEBUG_ALWAYS, "");
     }
   }
-  printf("\n");
+  dt_print(DT_DEBUG_ALWAYS, "");
   for(int i = 0; i < std::min((int)(t->ne[0] * t->ne[1]), n); i++)
   {
-    printf("%.5f ", data[ggml_nelements(t) - n + i]);
+    dt_print_nts(DT_DEBUG_ALWAYS, "%.5f ", data[ggml_nelements(t) - n + i]);
     if((ggml_nelements(t) - n + i) % t->ne[0] == 0)
     {
-      printf("\n");
+      dt_print(DT_DEBUG_ALWAYS, "");
     }
   }
-  printf("\n");
+  dt_print(DT_DEBUG_ALWAYS, "");
   double sum = 0.0;
   for(int i = 0; i < ggml_nelements(t); i++)
   {
     sum += data[i];
   }
-  printf("sum:  %f\n\n", sum);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] sum:  %f\n", sum);
 }
 
 static void ggml_disconnect_node_from_graph(ggml_tensor *t)
@@ -597,13 +593,13 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
 
     const int32_t qntvr = hparams.ftype / GGML_QNT_VERSION_FACTOR;
 
-    printf("%s: n_enc_state      = %d\n", __func__, hparams.n_enc_state);
-    printf("%s: n_enc_layer      = %d\n", __func__, hparams.n_enc_layer);
-    printf("%s: n_enc_head       = %d\n", __func__, hparams.n_enc_head);
-    printf("%s: n_enc_out_chans  = %d\n", __func__, hparams.n_enc_out_chans);
-    printf("%s: n_pt_embd        = %d\n", __func__, hparams.n_pt_embd);
-    printf("%s: ftype            = %d\n", __func__, hparams.ftype);
-    printf("%s: qntvr            = %d\n", __func__, qntvr);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] n_enc_state      = %d", hparams.n_enc_state);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] n_enc_layer      = %d", hparams.n_enc_layer);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] n_enc_head       = %d", hparams.n_enc_head);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] n_enc_out_chans  = %d", hparams.n_enc_out_chans);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] n_pt_embd        = %d", hparams.n_pt_embd);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] ftype            = %d", hparams.ftype);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] qntvr            = %d", qntvr);
 
     hparams.ftype %= GGML_QNT_VERSION_FACTOR;
   }
@@ -1157,7 +1153,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
 
       if(ggml_nelements(tensor) != nelements)
       {
-        dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: tensor '%s' has wrong size in model file: got %d, expected %d",
+        dt_print(DT_DEBUG_ALWAYS, "[segmentation] tensor '%s' has wrong size in model file: got %d, expected %d",
                  name.data(), (int)nelements, (int)ggml_nelements(tensor));
         return false;
       }
@@ -1165,7 +1161,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
       if(tensor->ne[0] != ne[0] || tensor->ne[1] != ne[1] || tensor->ne[2] != ne[2] || tensor->ne[3] != ne[3])
       {
         dt_print(DT_DEBUG_ALWAYS,
-                 "%s: tensor '%s' has wrong shape in model file: got [%d, %d, %d, %d], expected [%d, %d, %d, %d]",
+                 "[segmentation] tensor '%s' has wrong shape in model file: got [%d, %d, %d, %d], expected [%d, %d, %d, %d]",
                  name.data(), (int)ne[0], (int)ne[1], (int)ne[2], (int)ne[3], (int)tensor->ne[0], (int)tensor->ne[1],
                  (int)tensor->ne[2], (int)tensor->ne[3]);
         return false;
@@ -1199,7 +1195,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
       if((nelements * bpe) / ggml_blck_size(tensor->type) != ggml_nbytes(tensor))
       {
         dt_print(DT_DEBUG_ALWAYS,
-                 "[segmentation] %s: tensor '%s' has wrong size in model file: got %zu, expected %zu",
+                 "[segmentation] tensor '%s' has wrong size in model file: got %zu, expected %zu",
                  name.data(), ggml_nbytes(tensor), (size_t)nelements * bpe);
         return false;
       }
@@ -1217,14 +1213,14 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
     if(n_tensors != int(model.tensors.size()))
     {
       dt_print(DT_DEBUG_ALWAYS,
-               "[segmentation] %s: model file has %d tensors, but %d tensors were expected",
+               "[segmentation] model file has %d tensors, but %d tensors were expected",
                n_tensors, (int)model.tensors.size());
       return false;
     }
 
     dt_print(DT_DEBUG_ALWAYS, "[segmentation] done");
 
-    dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: model size = %8.2f MB / num tensors = %d",
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] model size = %8.2f MB / num tensors = %d",
              total_size / 1024.0 / 1024.0, n_tensors);
   }
 
@@ -2114,7 +2110,7 @@ struct ggml_cgraph *sam_build_fast_graph(const sam_ggml_model &model, sam_ggml_s
   prompt_encoder_result enc_res = sam_encode_prompt(model, ctx0, gf, state, points);
   if(!enc_res.embd_prompt_sparse || !enc_res.embd_prompt_dense)
   {
-    dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: failed to encode prompt with %zu points",
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to encode prompt with %zu points",
              points.size());
     return {};
   }
@@ -2200,7 +2196,7 @@ std::shared_ptr<sam_state> sam_load_model(const sam_params &params)
   state.state = std::make_unique<sam_ggml_state>();
   if(!sam_ggml_model_load(params, *state.model))
   {
-    dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: failed to load model from '%s'", params.model.c_str());
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to load model from '%s'", params.model.c_str());
     return {};
   }
 
@@ -2271,7 +2267,7 @@ bool sam_compute_embd_img(sam_image_u8 &img, int n_threads, sam_state &state)
   st.work_buffer.clear();
 
   state.t_compute_img_ms = ggml_time_ms() - t_start_ms;
-  dt_print(DT_DEBUG_ALWAYS, "[segmentation] image encoding time %i ms", state.t_compute_img_ms);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] image encoding time %d ms", state.t_compute_img_ms);
 
   return true;
 }
@@ -2345,7 +2341,7 @@ std::vector<sam_image_u8> sam_compute_masks(sam_image_u8 &img, int n_threads, st
   st.iou_predictions = NULL;
 
   state.t_compute_masks_ms = ggml_time_ms() - t_start_ms;
-  dt_print(DT_DEBUG_ALWAYS, "[segmentation] mask compute time %i ms", state.t_compute_masks_ms);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] mask compute time %d ms", state.t_compute_masks_ms);
 
   return masks;
 }
@@ -2377,16 +2373,13 @@ void seg_params_init(seg_params_t *params)
   sam_params cpp_params;
   params->seed = cpp_params.seed;
   params->n_threads = cpp_params.n_threads;
-  params->model = "ggml-model-f16.bin";
-  params->fname_inp = "img.jpg";
-  params->fname_out = "img";
+  params->model = cpp_params.model.c_str();
   params->mask_threshold = cpp_params.mask_threshold;
   params->iou_threshold = cpp_params.iou_threshold;
   params->stability_score_threshold = cpp_params.stability_score_threshold;
   params->stability_score_offset = cpp_params.stability_score_offset;
   params->eps = cpp_params.eps;
   params->eps_decoder_transformer = cpp_params.eps_decoder_transformer;
-  params->pt = { cpp_params.pt.x, cpp_params.pt.y };
 }
 
 seg_context_t *seg_load_model(const seg_params_t *params)
@@ -2397,15 +2390,12 @@ seg_context_t *seg_load_model(const seg_params_t *params)
   cpp_params.seed = params->seed;
   cpp_params.n_threads = params->n_threads;
   cpp_params.model = params->model ? params->model : cpp_params.model;
-  cpp_params.fname_inp = params->fname_inp ? params->fname_inp : cpp_params.fname_inp;
-  cpp_params.fname_out = params->fname_out ? params->fname_out : cpp_params.fname_out;
   cpp_params.mask_threshold = params->mask_threshold;
   cpp_params.iou_threshold = params->iou_threshold;
   cpp_params.stability_score_threshold = params->stability_score_threshold;
   cpp_params.stability_score_offset = params->stability_score_offset;
   cpp_params.eps = params->eps;
   cpp_params.eps_decoder_transformer = params->eps_decoder_transformer;
-  cpp_params.pt = { params->pt.x, params->pt.y };
 
   auto state = sam_load_model(cpp_params);
   if(!state)
