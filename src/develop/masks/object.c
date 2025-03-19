@@ -19,6 +19,7 @@
 #include "bauhaus/bauhaus.h"
 #include "common/debug.h"
 #include "common/undo.h"
+#include "common/segmentation.h"
 #include "control/conf.h"
 #include "control/control.h"
 #include "develop/blend.h"
@@ -102,6 +103,50 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   }
   else if(gui->creation && which == 3)
   {
+    // get the image preview
+    dt_dev_pixelpipe_t *preview = darktable.develop->preview_pipe;
+    seg_image_t img;
+    img.nx = preview->backbuf_width;
+    img.ny = preview->backbuf_height;
+    img.data = preview->backbuf;
+
+    seg_params_t params;
+    int n_masks = 0;
+    seg_params_init(&params);
+
+    // load the GGML model
+    seg_context_t* ctx = sam_load_model(&params);
+    if (!ctx) {
+      dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to load segmentation model");  
+      return 1;
+    }
+
+    // encode image
+    if (!sam_compute_image_embeddings(ctx, &img, params.n_threads)) {
+      dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to encode image");
+      sam_free(ctx);
+      return 1;
+    }
+
+    // create array of seg_point_t from click_points
+    const float *guipoints = dt_masks_dynbuf_buffer(gui->guipoints);
+    const float *guipoints_payload = dt_masks_dynbuf_buffer(gui->guipoints_payload);
+    seg_point_t* seg_points = malloc(gui->guipoints_count * sizeof(seg_point_t));
+    for (int i = 0; i < gui->guipoints_count; i++) {
+        seg_points[i].x = guipoints[i * 2];
+        seg_points[i].y = guipoints[i * 2 + 1];
+        seg_points[i].label = guipoints_payload[i * 2];
+    }
+
+    // decode prompt
+    seg_image_t* masks = sam_compute_masks(ctx, &img, params.n_threads, seg_points,
+                                           gui->guipoints_count, &n_masks, 255, 0);
+    if (!masks || n_masks == 0) {
+      dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to compute masks");
+      sam_free(ctx);
+      return 1;
+    }
+  
     dt_masks_dynbuf_free(gui->guipoints);
     dt_masks_dynbuf_free(gui->guipoints_payload);
     gui->guipoints = NULL;
