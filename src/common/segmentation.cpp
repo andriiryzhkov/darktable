@@ -137,7 +137,7 @@ struct sam_hparams
         return { 7, 15, 23, 31 };
       default:
       {
-        fprintf(stderr, "%s: unsupported n_enc_state = %d\n", __func__, n_enc_state);
+        dt_print(DT_DEBUG_ALWAYS, "[segmentation] unsupported n_enc_state = %d", n_enc_state);
       }
       break;
     };
@@ -498,7 +498,7 @@ bool sam_image_preprocess(const sam_image_u8 &img, sam_image_f32 &res)
 
   const float scale = std::max(nx, ny) / 1024.0f;
 
-  fprintf(stderr, "%s: scale = %f\n", __func__, scale);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] scale = %f", scale);
 
   const int nx3 = int(nx / scale + 0.5f);
   const int ny3 = int(ny / scale + 0.5f);
@@ -555,12 +555,12 @@ bool sam_image_preprocess(const sam_image_u8 &img, sam_image_f32 &res)
 // load the model's weights from a file
 bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
 {
-  fprintf(stderr, "%s: loading model from '%s' - please wait ...\n", __func__, params.model.c_str());
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] loading model from '%s' - please wait ...", params.model.c_str());
 
   auto fin = std::ifstream(params.model, std::ios::binary);
   if(!fin)
   {
-    fprintf(stderr, "%s: failed to open '%s'\n", __func__, params.model.c_str());
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to open '%s'", params.model.c_str());
     return false;
   }
 
@@ -570,7 +570,8 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
     fin.read((char *)&magic, sizeof(magic));
     if(magic != 0x67676d6c)
     {
-      fprintf(stderr, "%s: invalid model file '%s' (bad magic)\n", __func__, params.model.c_str());
+      dt_print(DT_DEBUG_ALWAYS, "[segmentation] invalid model file '%s' (bad magic)",
+               params.model.c_str());
       return false;
     }
   }
@@ -612,8 +613,8 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
   ggml_type wtype = ggml_ftype_to_ggml_type((ggml_ftype)(model.hparams.ftype));
   if(wtype == GGML_TYPE_COUNT)
   {
-    fprintf(stderr, "%s: invalid model file '%s' (bad ftype value %d)\n", __func__, params.model.c_str(),
-            model.hparams.ftype);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] invalid model file '%s' (bad ftype value %d)",
+             params.model.c_str(), model.hparams.ftype);
     return false;
   }
 
@@ -762,7 +763,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
         result_size += n_pt_embd * n_enc_out_chans * ggml_type_size(GGML_TYPE_F32);
       }
     }
-    fprintf(stderr, "%s: ggml ctx size = %6.2f MB\n", __func__, result_size / (1024.0 * 1024.0));
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] ggml ctx size = %6.2f MB", result_size / (1024.0 * 1024.0));
 
     return result_size;
   }();
@@ -778,7 +779,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
     ctx = ggml_init(ggml_params);
     if(!ctx)
     {
-      fprintf(stderr, "%s: ggml_init() failed\n", __func__);
+      dt_print(DT_DEBUG_ALWAYS, "[segmentation] ggml_init() failed");
       return false;
     }
   }
@@ -1115,7 +1116,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
     int n_tensors = 0;
     size_t total_size = 0;
 
-    fprintf(stderr, "%s: ", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation]");
 
     while(true)
     {
@@ -1147,7 +1148,7 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
 
       if(model.tensors.find(name.data()) == model.tensors.end())
       {
-        fprintf(stderr, "%s: unknown tensor '%s' in model file\n", __func__, name.data());
+        dt_print(DT_DEBUG_ALWAYS, "[segmentation] unknown tensor '%s' in model file", name.data());
         return false;
       }
 
@@ -1156,17 +1157,17 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
 
       if(ggml_nelements(tensor) != nelements)
       {
-        fprintf(stderr, "%s: tensor '%s' has wrong size in model file: got %d, expected %d\n", __func__,
-                name.data(), (int)nelements, (int)ggml_nelements(tensor));
+        dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: tensor '%s' has wrong size in model file: got %d, expected %d",
+                 name.data(), (int)nelements, (int)ggml_nelements(tensor));
         return false;
       }
 
       if(tensor->ne[0] != ne[0] || tensor->ne[1] != ne[1] || tensor->ne[2] != ne[2] || tensor->ne[3] != ne[3])
       {
-        fprintf(stderr,
-                "%s: tensor '%s' has wrong shape in model file: got [%d, %d, %d, %d], expected [%d, %d, %d, %d]\n",
-                __func__, name.data(), (int)ne[0], (int)ne[1], (int)ne[2], (int)ne[3], (int)tensor->ne[0],
-                (int)tensor->ne[1], (int)tensor->ne[2], (int)tensor->ne[3]);
+        dt_print(DT_DEBUG_ALWAYS,
+                 "%s: tensor '%s' has wrong shape in model file: got [%d, %d, %d, %d], expected [%d, %d, %d, %d]",
+                 name.data(), (int)ne[0], (int)ne[1], (int)ne[2], (int)ne[3], (int)tensor->ne[0], (int)tensor->ne[1],
+                 (int)tensor->ne[2], (int)tensor->ne[3]);
         return false;
       }
 
@@ -1190,15 +1191,16 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
           break;
         default:
         {
-          fprintf(stderr, "%s: unknown ftype %d in model file\n", __func__, ftype);
+          dt_print(DT_DEBUG_ALWAYS, "[segmentation] unknown ftype %d in model file", ftype);
           return false;
         }
       };
 
       if((nelements * bpe) / ggml_blck_size(tensor->type) != ggml_nbytes(tensor))
       {
-        fprintf(stderr, "%s: tensor '%s' has wrong size in model file: got %zu, expected %zu\n", __func__,
-                name.data(), ggml_nbytes(tensor), (size_t)nelements * bpe);
+        dt_print(DT_DEBUG_ALWAYS,
+                 "[segmentation] %s: tensor '%s' has wrong size in model file: got %zu, expected %zu",
+                 name.data(), ggml_nbytes(tensor), (size_t)nelements * bpe);
         return false;
       }
 
@@ -1207,22 +1209,23 @@ bool sam_ggml_model_load(const sam_params &params, sam_ggml_model &model)
       total_size += ggml_nbytes(tensor);
       if(++n_tensors % 8 == 0)
       {
-        fprintf(stderr, ".");
+        dt_print(DT_DEBUG_ALWAYS, "[segmentation] ");
         fflush(stdout);
       }
     }
 
     if(n_tensors != int(model.tensors.size()))
     {
-      fprintf(stderr, "%s: model file has %d tensors, but %d tensors were expected\n", __func__, n_tensors,
-              (int)model.tensors.size());
+      dt_print(DT_DEBUG_ALWAYS,
+               "[segmentation] %s: model file has %d tensors, but %d tensors were expected",
+               n_tensors, (int)model.tensors.size());
       return false;
     }
 
-    fprintf(stderr, " done\n");
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] done");
 
-    fprintf(stderr, "%s: model size = %8.2f MB / num tensors = %d\n", __func__, total_size / 1024.0 / 1024.0,
-            n_tensors);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: model size = %8.2f MB / num tensors = %d",
+             total_size / 1024.0 / 1024.0, n_tensors);
   }
 
   fin.close();
@@ -2111,20 +2114,21 @@ struct ggml_cgraph *sam_build_fast_graph(const sam_ggml_model &model, sam_ggml_s
   prompt_encoder_result enc_res = sam_encode_prompt(model, ctx0, gf, state, points);
   if(!enc_res.embd_prompt_sparse || !enc_res.embd_prompt_dense)
   {
-    fprintf(stderr, "%s: failed to encode prompt with %zu points\n", __func__, points.size());
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: failed to encode prompt with %zu points",
+             points.size());
     return {};
   }
 
   struct ggml_tensor *pe_img_dense = sam_fill_dense_pe(model, ctx0, gf, state);
   if(!pe_img_dense)
   {
-    fprintf(stderr, "%s: failed to get dense positional encoding\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to get dense positional encoding");
     return {};
   }
 
   if(!sam_decode_mask(model, enc_res, pe_img_dense, ctx0, gf, state))
   {
-    fprintf(stderr, "%s: failed to decode mask\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to decode mask");
     return {};
   }
 
@@ -2196,7 +2200,7 @@ std::shared_ptr<sam_state> sam_load_model(const sam_params &params)
   state.state = std::make_unique<sam_ggml_state>();
   if(!sam_ggml_model_load(params, *state.model))
   {
-    fprintf(stderr, "%s: failed to load model from '%s'\n", __func__, params.model.c_str());
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] %s: failed to load model from '%s'", params.model.c_str());
     return {};
   }
 
@@ -2219,10 +2223,10 @@ bool sam_compute_embd_img(sam_image_u8 &img, int n_threads, sam_state &state)
   sam_image_f32 img1;
   if(!sam_image_preprocess(img, img1))
   {
-    fprintf(stderr, "%s: failed to preprocess image\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to preprocess image");
     return 1;
   }
-  fprintf(stderr, "%s: preprocessed image (%d x %d)\n", __func__, img1.nx, img1.ny);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] preprocessed image (%d x %d)", img1.nx, img1.ny);
 
   //
   static size_t buf_size = 256u * 1024 * 1024;
@@ -2254,7 +2258,7 @@ bool sam_compute_embd_img(sam_image_u8 &img, int n_threads, sam_state &state)
   struct ggml_cgraph *gf = sam_encode_image(model, st, img1);
   if(!gf)
   {
-    fprintf(stderr, "%s: failed to encode image\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to encode image");
     return false;
   }
 
@@ -2267,7 +2271,7 @@ bool sam_compute_embd_img(sam_image_u8 &img, int n_threads, sam_state &state)
   st.work_buffer.clear();
 
   state.t_compute_img_ms = ggml_time_ms() - t_start_ms;
-  fprintf(stderr, "%s: image encoding time %i ms\n", __func__, state.t_compute_img_ms);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] image encoding time %i ms", state.t_compute_img_ms);
 
   return true;
 }
@@ -2279,13 +2283,13 @@ std::vector<sam_image_u8> sam_compute_masks(sam_image_u8 &img, int n_threads, st
 
   if(!state.model || !state.state)
   {
-    fprintf(stderr, "%s: model or state is not initialized\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] model or state is not initialized");
     return {};
   }
 
   if(points.empty())
   {
-    fprintf(stderr, "%s: no points provided\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] no points provided");
     return {};
   }
 
@@ -2313,15 +2317,14 @@ std::vector<sam_image_u8> sam_compute_masks(sam_image_u8 &img, int n_threads, st
   st.allocr = ggml_gallocr_new(ggml_backend_cpu_buffer_type());
 
   // TODO: more varied prompts
-  fprintf(stderr, "prompt:\n");
   for(const auto &pt : points)
   {
-    fprintf(stderr, "        (%f, %f, %d)\n", pt.x, pt.y, pt.label);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] prompt: (%f, %f, %d)", pt.x, pt.y, pt.label);
   }
   struct ggml_cgraph *gf = sam_build_fast_graph(model, st, img.nx, img.ny, points);
   if(!gf)
   {
-    fprintf(stderr, "%s: failed to build fast graph\n", __func__);
+    dt_print(DT_DEBUG_ALWAYS, "[segmentation] failed to build fast graph");
     return {};
   }
 
@@ -2342,7 +2345,7 @@ std::vector<sam_image_u8> sam_compute_masks(sam_image_u8 &img, int n_threads, st
   st.iou_predictions = NULL;
 
   state.t_compute_masks_ms = ggml_time_ms() - t_start_ms;
-  fprintf(stderr, "%s: mask compute time %i ms\n", __func__, state.t_compute_masks_ms);
+  dt_print(DT_DEBUG_ALWAYS, "[segmentation] mask compute time %i ms", state.t_compute_masks_ms);
 
   return masks;
 }
