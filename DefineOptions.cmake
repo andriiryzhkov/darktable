@@ -37,6 +37,7 @@ option(USE_GMIC "Use G'MIC image processing framework." ON)
 option(USE_ICU "Use ICU - International Components for Unicode." ON)
 option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." OFF)
 option(USE_SDL2 "Enable SDL2 support" ON)
+option(USE_GGML "Enable GGML support" ON)
 
 if (USE_OPENCL)
     option(TESTBUILD_OPENCL_PROGRAMS "Test-compile OpenCL programs (needs LLVM and Clang 7+)" ON)

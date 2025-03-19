@@ -75,6 +75,7 @@ FILE(GLOB SOURCE_FILES
   "common/pwstorage/pwstorage.c"
   "common/ratings.c"
   "common/resource_limits.c"
+  "common/segmentation.cpp"
   "common/selection.c"
   "common/splines.cpp"
   "common/styles.c"
@@ -607,6 +608,23 @@ if(USE_OPENCL)
   add_definitions("-DHAVE_OPENCL")
 endif(USE_OPENCL)
 
+# if(USE_LLAMACPP)
+#   find_package(LLAMACPP)
+#   if(LLAMACPP_FOUND)
+#     add_definitions(-DHAVE_LLAMACPP)
+#     include_directories(SYSTEM ${LLAMACPP_INCLUDE_DIRS})
+#     list(APPEND LIBS ${LLAMACPP_LIBRARIES})
+#   endif(LLAMACPP_FOUND)
+# endif(USE_LLAMACPP)
+
+if(USE_GGML)
+  find_package(GGML)
+  if(GGML_FOUND)
+    add_definitions(-DHAVE_GGML)
+    include_directories(SYSTEM ${GGML_INCLUDE_DIRS})
+    list(APPEND LIBS ${GGML_LIBRARIES})
+  endif(GGML_FOUND)
+endif(USE_GGML)
 
 # Check for __builtin_cpu_supports here due to a bug in clang/llvm. LLVM uses
 # libgcc to provide the symbols, so if clang wasn't compiled with libgcc, the
