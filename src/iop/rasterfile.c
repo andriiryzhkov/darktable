@@ -150,6 +150,44 @@ void modify_roi_in(dt_iop_module_t *self,
   roi_in->height = piece->buf_in.height;
 }
 
+static void _vectorize_button_clicked(GtkWidget *widget,
+                                      dt_iop_module_t *self)
+{
+  dt_develop_t *dev = darktable.develop;
+
+  dt_rasterfile_cache_t *cd = self->data;
+
+  dt_pthread_mutex_lock(&cd->lock);
+
+  const dt_image_t *const image = &(self->dev->image_storage);
+  GList *forms = ras2forms(cd->mask, cd->width, cd->height, image);
+
+  dt_pthread_mutex_unlock(&cd->lock);
+
+  const int nbform = g_list_length(forms);
+  if(nbform == 0)
+  {
+    dt_control_log(_("no mask extracted from the raster file\n"
+                     "make sure the masks have proper contrast"));
+  }
+  else
+  {
+    dt_control_log(ngettext("%d mask extracted from the raster file",
+                            "%d masks extracted from the raster file", nbform), nbform);
+
+    // add all forms into the mask manager
+
+    for(GList *l = forms;
+        l;
+        l = g_list_next(l))
+    {
+      dt_masks_form_t *form = l->data;
+      dev->forms = g_list_append(dev->forms, form);
+      dt_dev_add_masks_history_item(dev, NULL, TRUE);
+    }
+  }
+}
+
 static float *_read_rasterfile(char *filename,
                                const dt_iop_rasterfile_mode_t mode,
                                int *swidth,
