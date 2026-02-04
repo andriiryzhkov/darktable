@@ -1,4 +1,5 @@
 add_subdirectory(external)
+add_subdirectory(ai)
 
 include(CheckCSourceCompiles)
 include(CheckCXXSymbolExists)
@@ -437,6 +438,9 @@ foreach(lib ${OUR_LIBS} GIO GThread GModule PangoCairo Rsvg2 PNG JPEG TIFF LCMS2
   list(APPEND LIBS ${${lib}_LIBRARIES})
   add_definitions(${${lib}_DEFINITIONS})
 endforeach(lib)
+
+# Link against AI library
+list(APPEND LIBS darktable_ai)
 
 if(PNG_VERSION_STRING VERSION_LESS 1.5)
   message(FATAL_ERROR "libpng version 1.5 or newer is required")

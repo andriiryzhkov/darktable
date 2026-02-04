@@ -1118,6 +1118,7 @@ int dt_init(int argc,
           !strcmp(darg, "pipe") ? DT_DEBUG_PIPE :
           !strcmp(darg, "expose") ? DT_DEBUG_EXPOSE :
           !strcmp(darg, "picker") ? DT_DEBUG_PICKER :
+          !strcmp(darg, "ai") ? DT_DEBUG_AI : // AI related stuff.
           0;
         if(dadd)
           darktable.unmuted |= dadd;
