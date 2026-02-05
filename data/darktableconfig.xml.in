@@ -367,6 +367,13 @@
     <shortdescription>tags case sensitivity</shortdescription>
     <longdescription>tags case sensitivity. without the Sqlite ICU extension, insensitivity works only for the 26 latin letters</longdescription>
   </dtconfig>
+  <dtconfig>
+    <name>plugins/lighttable/denoise_ai/model</name>
+    <type>string</type>
+    <default>nafnet-sidd-width32</default>
+    <shortdescription>AI denoise model</shortdescription>
+    <longdescription>model ID for AI denoising</longdescription>
+  </dtconfig>
   <dtconfig prefs="processing" section="opencl" capability="opencl">
     <name>opencl</name>
     <type>bool</type>

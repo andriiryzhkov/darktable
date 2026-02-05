@@ -31,12 +31,9 @@
 
 DT_MODULE(1)
 
-// Accepted model IDs — only these are shown in the module combo box.
-static const char *_accepted_model_ids[] = {
-  "nafnet-sidd-width32",
-  "ffdnet_color",
-  NULL
-};
+// Config key for the model ID to use
+#define CONF_MODEL_KEY "plugins/lighttable/denoise_ai/model"
+#define DEFAULT_MODEL_ID "nafnet-sidd-width32"
 
 /**
  * @struct dt_lib_denoise_ai_t
@@ -44,11 +41,11 @@ static const char *_accepted_model_ids[] = {
  */
 typedef struct dt_lib_denoise_ai_t {
   GtkBox *box;
-  GtkWidget *combo;
   GtkWidget *sigma_slider;
   GtkWidget *button;
   dt_ai_environment_t *env;
-  char *selected_model_id;
+  char *model_id;          // Model ID from config (owned)
+  gboolean model_available; // TRUE if the configured model was found
 } dt_lib_denoise_ai_t;
 
 /**
@@ -496,28 +493,10 @@ static int32_t _process_job_run(dt_job_t *job) {
 
 static void _update_button_sensitivity(dt_lib_denoise_ai_t *d) {
   gboolean sensitive = FALSE;
-  if (d->selected_model_id && darktable.develop->image_storage.id != -1) {
+  if (d->model_available && darktable.develop->image_storage.id != -1) {
     sensitive = TRUE;
   }
   gtk_widget_set_sensitive(d->button, sensitive);
-}
-
-static void _combo_changed(GtkComboBox *combo, dt_lib_module_t *self) {
-  dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
-  const char *id = gtk_combo_box_get_active_id(combo);
-
-  g_free(d->selected_model_id);
-  d->selected_model_id = g_strdup(id);
-  _update_button_sensitivity(d);
-
-  // Show sigma slider only for models with multiple inputs (e.g. FFDNet)
-  gboolean show_sigma = FALSE;
-  if(id && d->env) {
-    const dt_ai_model_info_t *info = dt_ai_get_model_info_by_id(d->env, id);
-    if(info && info->num_inputs >= 2)
-      show_sigma = TRUE;
-  }
-  gtk_widget_set_visible(d->sigma_slider, show_sigma);
 }
 
 static void _image_changed_callback(gpointer instance, dt_lib_module_t *self) {
@@ -530,10 +509,10 @@ static void _button_clicked(GtkWidget *widget, gpointer user_data) {
   dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
   dt_imgid_t imgid = darktable.develop->image_storage.id;
 
-  if (d->selected_model_id && imgid != -1) {
+  if (d->model_available && imgid != -1) {
     dt_denoise_job_t *job_data = g_new0(dt_denoise_job_t, 1);
     job_data->env = d->env;
-    job_data->model_id = g_strdup(d->selected_model_id);
+    job_data->model_id = g_strdup(d->model_id);
     job_data->images = g_list_append(NULL, GINT_TO_POINTER(imgid));
     job_data->sigma = dt_bauhaus_slider_get(d->sigma_slider);
 
@@ -549,36 +528,44 @@ void gui_init(dt_lib_module_t *self) {
   self->data = d;
   d->env = dt_ai_env_init(NULL);
   d->box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 5));
-  d->combo = gtk_combo_box_text_new();
-  int total_count = d->env ? dt_ai_get_model_count(d->env) : 0;
-  if (d->env) {
-    for (int i = 0; i < total_count; i++) {
-      const dt_ai_model_info_t *info = dt_ai_get_model_info_by_index(d->env, i);
-      if (info && strcmp(info->task_type, "denoise") == 0) {
-        gboolean accepted = FALSE;
-        for(const char **id = _accepted_model_ids; *id; id++)
-          if(strcmp(info->id, *id) == 0) { accepted = TRUE; break; }
-        if(accepted)
-          gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(d->combo), info->id,
-                                    info->name);
-      }
+
+  // Read model ID from config (default: nafnet-sidd-width32)
+  if(!dt_conf_key_exists(CONF_MODEL_KEY))
+    dt_conf_set_string(CONF_MODEL_KEY, DEFAULT_MODEL_ID);
+  d->model_id = dt_conf_get_string(CONF_MODEL_KEY);
+
+  // Check if the configured model is available
+  d->model_available = FALSE;
+  if(d->env && d->model_id) {
+    const dt_ai_model_info_t *info = dt_ai_get_model_info_by_id(d->env, d->model_id);
+    if(info && strcmp(info->task_type, "denoise") == 0) {
+      d->model_available = TRUE;
+      dt_print(DT_DEBUG_AI, "[denoise_ai] Using model: %s (%s)", info->name, d->model_id);
+    } else {
+      dt_print(DT_DEBUG_AI, "[denoise_ai] Model not found: %s (module disabled)", d->model_id);
     }
   }
-  gtk_box_pack_start(d->box, d->combo, FALSE, FALSE, 0);
 
-  // Noise sigma slider (used by models like FFDNet that take a noise level input)
+  // Noise sigma slider (only shown for multi-input models like FFDNet)
   d->sigma_slider = dt_bauhaus_slider_new_action(DT_ACTION(self), 0.0, 75.0, 1.0, 25.0, 0);
   dt_bauhaus_widget_set_label(d->sigma_slider, NULL, N_("sigma"));
   gtk_widget_set_tooltip_text(d->sigma_slider,
     _("noise level (0-75). used by models that accept a noise strength parameter"));
   gtk_box_pack_start(d->box, d->sigma_slider, FALSE, FALSE, 0);
-  gtk_widget_set_no_show_all(d->sigma_slider, TRUE);
-  gtk_widget_set_visible(d->sigma_slider, FALSE);
 
-  d->button = gtk_button_new_with_label("Denoise");
+  // Show sigma slider only if the model needs it (num_inputs >= 2)
+  gboolean show_sigma = FALSE;
+  if(d->model_available && d->env) {
+    const dt_ai_model_info_t *info = dt_ai_get_model_info_by_id(d->env, d->model_id);
+    if(info && info->num_inputs >= 2)
+      show_sigma = TRUE;
+  }
+  gtk_widget_set_no_show_all(d->sigma_slider, !show_sigma);
+  gtk_widget_set_visible(d->sigma_slider, show_sigma);
+
+  d->button = gtk_button_new_with_label(_("denoise"));
   gtk_widget_set_sensitive(d->button, FALSE);
   gtk_box_pack_start(d->box, d->button, FALSE, FALSE, 0);
-  g_signal_connect(d->combo, "changed", G_CALLBACK(_combo_changed), self);
   g_signal_connect(d->button, "clicked", G_CALLBACK(_button_clicked), self);
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_IMAGE_CHANGED,
                            _image_changed_callback);
@@ -590,7 +577,7 @@ void gui_init(dt_lib_module_t *self) {
 void gui_cleanup(dt_lib_module_t *self) {
   dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
   if (d) {
-    g_free(d->selected_model_id);
+    g_free(d->model_id);
     if (d->env)
       dt_ai_env_destroy(d->env);
     g_free(d);
