@@ -19,6 +19,7 @@
 #include "ai/darktable_ai.h"
 #include "bauhaus/bauhaus.h"
 #include "control/jobs/control_jobs.h"
+#include "control/signal.h"
 
 #include "common/collection.h"
 #include "develop/develop.h"
@@ -138,8 +139,12 @@ static int _run_patch(dt_ai_context_t *ctx, float *in_patch, int w, int h,
   }
 
   // Image input: BCHW {1, 3, H, W}
+  // Max 4 inputs should cover all known model architectures
+  #define MAX_MODEL_INPUTS 4
+  if(num_inputs > MAX_MODEL_INPUTS) return 1;
   int64_t input_shape[] = {1, 3, h, w};
-  dt_ai_tensor_t inputs[2];
+  dt_ai_tensor_t inputs[MAX_MODEL_INPUTS];
+  memset(inputs, 0, sizeof(inputs));
   inputs[0] = (dt_ai_tensor_t){.data = (void *)in_patch,
                                 .shape = input_shape,
                                 .ndim = 4,
@@ -504,6 +509,26 @@ static void _image_changed_callback(gpointer instance, dt_lib_module_t *self) {
   _update_button_sensitivity(d);
 }
 
+static void _ai_models_changed_callback(gpointer instance, dt_lib_module_t *self) {
+  dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
+
+  // Refresh the AI environment to discover newly downloaded models
+  if(d->env)
+    dt_ai_env_refresh(d->env);
+
+  // Re-check model availability
+  d->model_available = FALSE;
+  if(d->env && d->model_id) {
+    const dt_ai_model_info_t *info = dt_ai_get_model_info_by_id(d->env, d->model_id);
+    if(info && strcmp(info->task_type, "denoise") == 0) {
+      d->model_available = TRUE;
+      dt_print(DT_DEBUG_AI, "[denoise_ai] Model now available: %s (%s)", info->name, d->model_id);
+    }
+  }
+
+  _update_button_sensitivity(d);
+}
+
 static void _button_clicked(GtkWidget *widget, gpointer user_data) {
   dt_lib_module_t *self = (dt_lib_module_t *)user_data;
   dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
@@ -569,6 +594,8 @@ void gui_init(dt_lib_module_t *self) {
   g_signal_connect(d->button, "clicked", G_CALLBACK(_button_clicked), self);
   DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_DEVELOP_IMAGE_CHANGED,
                            _image_changed_callback);
+  DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_AI_MODELS_CHANGED,
+                           _ai_models_changed_callback);
   self->widget = GTK_WIDGET(d->box);
   gtk_widget_show_all(self->widget);
   _update_button_sensitivity(d);
@@ -576,6 +603,10 @@ void gui_init(dt_lib_module_t *self) {
 
 void gui_cleanup(dt_lib_module_t *self) {
   dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
+
+  DT_CONTROL_SIGNAL_DISCONNECT(_image_changed_callback, self);
+  DT_CONTROL_SIGNAL_DISCONNECT(_ai_models_changed_callback, self);
+
   if (d) {
     g_free(d->model_id);
     if (d->env)

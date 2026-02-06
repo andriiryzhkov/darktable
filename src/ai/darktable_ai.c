@@ -17,14 +17,20 @@
 */
 
 #include "darktable_ai.h"
+#include "common/ai_models.h"
 #include "common/darktable.h"
+#include "control/conf.h"
 #include <glib.h>
 #include <json-glib/json-glib.h>
 #include <onnxruntime_c_api.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 // --- Internal Structures ---
 
@@ -34,6 +40,9 @@ struct dt_ai_environment_t {
 
   // To keep pointers in dt_ai_model_info_t valid
   GList *string_storage; // List of char*
+
+  // Remembered for refresh
+  char *search_paths;
 };
 
 struct dt_ai_context_t {
@@ -233,6 +242,7 @@ DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
   dt_ai_environment_t *env = g_new0(dt_ai_environment_t, 1);
   env->model_paths =
       g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+  env->search_paths = g_strdup(search_paths);
 
   // Parse Paths
   if (search_paths) {
@@ -293,6 +303,51 @@ dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id) {
 
 static void _free_model_info(gpointer data) { g_free(data); }
 
+DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
+  if (!env)
+    return;
+
+  dt_print(DT_DEBUG_AI, "[darktable_ai] Refreshing model list");
+
+  // Clear existing data
+  g_list_free_full(env->models, _free_model_info);
+  env->models = NULL;
+
+  g_list_free_full(env->string_storage, g_free);
+  env->string_storage = NULL;
+
+  g_hash_table_remove_all(env->model_paths);
+
+  // Rescan custom paths (if any were provided at init)
+  if (env->search_paths) {
+    char **tokens = g_strsplit(env->search_paths, ";", -1);
+    for (int i = 0; tokens[i] != NULL; i++) {
+      _scan_directory(env, tokens[i]);
+    }
+    g_strfreev(tokens);
+  }
+
+  // Rescan directories (same logic as dt_ai_env_init)
+  // Priority 1: ~/.config/darktable/models (or User Config Dir)
+  const char *config_dir = g_get_user_config_dir();
+  if (config_dir) {
+    char *p = g_build_filename(config_dir, "darktable", "models", NULL);
+    _scan_directory(env, p);
+    g_free(p);
+  }
+
+  // Priority 2: ~/.local/share/darktable/models (or User Data Dir)
+  const char *data_dir = g_get_user_data_dir();
+  if (data_dir) {
+    char *p = g_build_filename(data_dir, "darktable", "models", NULL);
+    _scan_directory(env, p);
+    g_free(p);
+  }
+
+  dt_print(DT_DEBUG_AI, "[darktable_ai] Refresh complete, found %d models",
+           g_list_length(env->models));
+}
+
 DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env) {
   if (!env)
     return;
@@ -300,6 +355,7 @@ DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env) {
   g_list_free_full(env->models, _free_model_info);
   g_list_free_full(env->string_storage, g_free);
   g_hash_table_destroy(env->model_paths);
+  g_free(env->search_paths);
 
   g_free(env);
 }
@@ -355,16 +411,66 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
 
 static void _enable_acceleration(dt_ai_context_t *ctx,
                                  OrtSessionOptions *session_opts) {
+  // Get configured provider from settings
+  dt_ai_provider_t provider = DT_AI_PROVIDER_AUTO;
+  if(darktable.ai_registry)
+    provider = darktable.ai_registry->provider;
+
+  switch(provider)
+  {
+    case DT_AI_PROVIDER_CPU:
+      // CPU only - don't enable any accelerator
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Using CPU only (no hardware acceleration)");
+      break;
+
+    case DT_AI_PROVIDER_COREML:
 #if defined(__APPLE__)
-  _try_provider(session_opts,
-                "OrtSessionOptionsAppendExecutionProvider_CoreML", "CoreML");
-#elif defined(_WIN32)
-  _try_provider(session_opts,
-                "OrtSessionOptionsAppendExecutionProvider_DML", "DirectML");
-#elif defined(__linux__)
-  _try_provider(session_opts,
-                "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA");
+      _try_provider(session_opts,
+                    "OrtSessionOptionsAppendExecutionProvider_CoreML", "CoreML");
+#else
+      dt_print(DT_DEBUG_AI, "[darktable_ai] CoreML not available on this platform");
 #endif
+      break;
+
+    case DT_AI_PROVIDER_CUDA:
+      _try_provider(session_opts,
+                    "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA");
+      break;
+
+    case DT_AI_PROVIDER_ROCM:
+      _try_provider(session_opts,
+                    "OrtSessionOptionsAppendExecutionProvider_ROCM", "ROCm");
+      break;
+
+    case DT_AI_PROVIDER_DIRECTML:
+#if defined(_WIN32)
+      _try_provider(session_opts,
+                    "OrtSessionOptionsAppendExecutionProvider_DML", "DirectML");
+#else
+      dt_print(DT_DEBUG_AI, "[darktable_ai] DirectML not available on this platform");
+#endif
+      break;
+
+    case DT_AI_PROVIDER_AUTO:
+    default:
+      // Auto-detect best provider based on platform
+#if defined(__APPLE__)
+      _try_provider(session_opts,
+                    "OrtSessionOptionsAppendExecutionProvider_CoreML", "CoreML");
+#elif defined(_WIN32)
+      _try_provider(session_opts,
+                    "OrtSessionOptionsAppendExecutionProvider_DML", "DirectML");
+#elif defined(__linux__)
+      // Try CUDA first, then ROCm
+      if(!_try_provider(session_opts,
+                        "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA"))
+      {
+        _try_provider(session_opts,
+                      "OrtSessionOptionsAppendExecutionProvider_ROCM", "ROCm");
+      }
+#endif
+      break;
+  }
 }
 
 // --- Execution ---
@@ -401,6 +507,8 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
       g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &ctx->env);
   if (status) {
     g_ort->ReleaseStatus(status);
+    g_free(onnx_path);
+    dt_ai_unload_model(ctx);
     return NULL;
   }
 
@@ -413,7 +521,13 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   }
 
   // Optimize: Use all available cores (intra-op parallelism)
+#ifdef _WIN32
+  SYSTEM_INFO sysinfo;
+  GetSystemInfo(&sysinfo);
+  long num_cores = sysinfo.dwNumberOfProcessors;
+#else
   long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
   if (num_cores < 1)
     num_cores = 1;
 
@@ -531,6 +645,12 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
       ctx->input_types[i] = DT_AI_INT32;
     else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
       ctx->input_types[i] = DT_AI_INT64;
+    else {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX input type %d for input %zu", type, i);
+      g_ort->ReleaseTypeInfo(typeinfo);
+      dt_ai_unload_model(ctx);
+      return NULL;
+    }
 
     g_ort->ReleaseTypeInfo(typeinfo);
   }
@@ -583,6 +703,12 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
       ctx->output_types[i] = DT_AI_INT32;
     else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
       ctx->output_types[i] = DT_AI_INT64;
+    else {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX output type %d for output %zu", type, i);
+      g_ort->ReleaseTypeInfo(typeinfo);
+      dt_ai_unload_model(ctx);
+      return NULL;
+    }
 
     g_ort->ReleaseTypeInfo(typeinfo);
   }
@@ -611,6 +737,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
 
   // Create Input Tensors
   OrtValue **input_tensors = g_new0(OrtValue *, num_inputs);
+  OrtValue **output_tensors = g_new0(OrtValue *, num_outputs);
   const char **input_names = (const char **)ctx->input_names; // Cast for Run()
 
   for (int i = 0; i < num_inputs; i++) {
@@ -644,9 +771,17 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
         onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
         type_size = sizeof(float);
         break;
+      case DT_AI_FLOAT16:
+        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+        type_size = sizeof(uint16_t);
+        break;
       case DT_AI_UINT8:
         onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
         type_size = sizeof(uint8_t);
+        break;
+      case DT_AI_INT8:
+        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
+        type_size = sizeof(int8_t);
         break;
       case DT_AI_INT64:
         onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
@@ -657,7 +792,10 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
         type_size = sizeof(int32_t);
         break;
       default:
-        break;
+        dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported input type %d for Input[%d]",
+                 inputs[i].type, i);
+        ret = -4;
+        goto cleanup;
       }
     }
 
@@ -675,7 +813,6 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   }
 
   // Create Output Tensors (Pre-allocated)
-  OrtValue **output_tensors = g_new0(OrtValue *, num_outputs);
   const char **output_names = (const char **)ctx->output_names;
 
   for (int i = 0; i < num_outputs; i++) {
@@ -699,9 +836,17 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
       type_size = sizeof(float);
       break;
+    case DT_AI_FLOAT16:
+      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+      type_size = sizeof(uint16_t);
+      break;
     case DT_AI_UINT8:
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
       type_size = sizeof(uint8_t);
+      break;
+    case DT_AI_INT8:
+      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
+      type_size = sizeof(int8_t);
       break;
     case DT_AI_INT64:
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
@@ -712,7 +857,10 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       type_size = sizeof(int32_t);
       break;
     default:
-      break;
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported output type %d for Output[%d]",
+               outputs[i].type, i);
+      ret = -4;
+      goto cleanup;
     }
 
     status = g_ort->CreateTensorWithDataAsOrtValue(

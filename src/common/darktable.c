@@ -53,6 +53,7 @@
 #include "common/undo.h"
 #include "common/gimp.h"
 #include "common/pfm.h"
+#include "common/ai_models.h"
 #include "control/conf.h"
 #include "control/control.h"
 #include "control/crawler.h"
@@ -1626,6 +1627,11 @@ int dt_init(int argc,
   // get the list of color profiles
   darktable.color_profiles = dt_colorspaces_init();
 
+  // initialize AI models registry
+  darktable.ai_registry = dt_ai_models_init();
+  if(darktable.ai_registry)
+    dt_ai_models_load_registry(darktable.ai_registry);
+
   // initialize datetime data
   dt_datetime_init();
 
@@ -2183,6 +2189,8 @@ void dt_cleanup()
   dt_mipmap_cache_cleanup();
 
   dt_colorspaces_cleanup(darktable.color_profiles);
+  dt_ai_models_cleanup(darktable.ai_registry);
+  darktable.ai_registry = NULL;
   dt_conf_cleanup(darktable.conf);
   free(darktable.conf);
   darktable.conf = NULL;

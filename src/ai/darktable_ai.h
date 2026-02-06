@@ -90,6 +90,13 @@ DT_AI_EXPORT const dt_ai_model_info_t *
 dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id);
 
 /**
+ * @brief Refresh the environment by rescanning model directories.
+ * @param env The environment handle to refresh.
+ * @note Call this after downloading new models.
+ */
+DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env);
+
+/**
  * @brief Cleanup the library environment.
  * @param env The environment handle to destroy.
  */

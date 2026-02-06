@@ -27,4 +27,3 @@ CMakeLists.txt.user
 workspace/
 cmake-build-debug/
 .idea/
-src/external/onnxruntime

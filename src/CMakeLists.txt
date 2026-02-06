@@ -23,6 +23,7 @@ FILE(GLOB SOURCE_FILES
   "common/color_vocabulary.c"
   "common/colorlabels.c"
   "common/colorspaces.c"
+  "common/ai_models.c"
   "common/curl_tools.c"
   "common/curve_tools.c"
   "common/custom_primaries.c"
@@ -146,6 +147,7 @@ FILE(GLOB SOURCE_FILES
   "gui/import_metadata.c"
   "gui/metadata_tags.c"
   "gui/preferences.c"
+  "gui/preferences_ai.c"
   "gui/presets.c"
   "gui/splash.c"
   "gui/styles_dialog.c"
@@ -449,6 +451,24 @@ endif()
 # Use imported target for curl
 find_package(CURL 7.56 REQUIRED)
 list(APPEND LIBS CURL::libcurl)
+
+# libarchive for AI model ZIP extraction
+# On macOS with Homebrew, libarchive is keg-only
+if(APPLE)
+  execute_process(
+    COMMAND brew --prefix libarchive
+    OUTPUT_VARIABLE HOMEBREW_LIBARCHIVE_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE HOMEBREW_LIBARCHIVE_RESULT
+  )
+  if(HOMEBREW_LIBARCHIVE_RESULT EQUAL 0 AND EXISTS "${HOMEBREW_LIBARCHIVE_PREFIX}")
+    list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_LIBARCHIVE_PREFIX}")
+  endif()
+endif()
+find_package(LibArchive REQUIRED)
+include_directories(SYSTEM ${LibArchive_INCLUDE_DIRS})
+list(APPEND LIBS ${LibArchive_LIBRARIES})
 
 # Require exiv2 >= 0.27.2 to make sure everything we need is available
 find_package(Exiv2 0.27.2 REQUIRED)

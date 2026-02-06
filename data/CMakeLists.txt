@@ -166,6 +166,12 @@ FILE(COPY wb_presets.json DESTINATION "${DARKTABLE_DATADIR}")
 install(FILES wb_presets.json DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable COMPONENT DTApplication)
 
 #
+# Install AI models registry
+#
+FILE(COPY ai_models.json DESTINATION "${DARKTABLE_DATADIR}")
+install(FILES ai_models.json DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable COMPONENT DTApplication)
+
+#
 # Transform darktableconfig.xml into darktablerc
 #
 

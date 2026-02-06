@@ -31,6 +31,7 @@
 #include "gui/draw.h"
 #include "gui/gtk.h"
 #include "gui/preferences.h"
+#include "gui/preferences_ai.h"
 #include "gui/presets.h"
 #include "libs/lib.h"
 #include "preferences_gen.h"
@@ -605,6 +606,7 @@ void dt_gui_preferences_show()
   init_tab_generated(_preferences_dialog, stack);
   init_tab_accels(stack);
   init_tab_presets(stack);
+  init_tab_ai(_preferences_dialog, stack);
 #ifdef USE_LUA
   GtkGrid* lua_grid = init_tab_lua(_preferences_dialog, stack);
 #endif
