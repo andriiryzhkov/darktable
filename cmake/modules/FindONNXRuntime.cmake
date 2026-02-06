@@ -4,7 +4,7 @@
 # found. Searches two locations:
 #
 #   1. Source tree:  ${CMAKE_SOURCE_DIR}/src/external/onnxruntime/
-#      (populated by tools/download_onnxruntime.sh or a prior auto-download)
+#      (manually pre-installed)
 #   2. Build tree:   ${CMAKE_BINARY_DIR}/_deps/onnxruntime/
 #      (auto-download destination)
 #
@@ -49,7 +49,7 @@ macro(_ort_find_at ROOT)
   endif()
 endmacro()
 
-# Try source tree (populated by tools/download_onnxruntime.sh)
+# Try source tree (manually pre-installed)
 _ort_find_at("${_ORT_SRC_ROOT}")
 
 # Try build tree (populated by prior auto-download)
@@ -66,7 +66,7 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
   if(ONNXRUNTIME_OFFLINE)
     message(FATAL_ERROR
       "ONNX Runtime not found and ONNXRUNTIME_OFFLINE is ON.\n"
-      "Run tools/download_onnxruntime.sh manually or set ONNXRUNTIME_OFFLINE=OFF.")
+      "Please install ONNX Runtime manually to src/external/onnxruntime/ or set ONNXRUNTIME_OFFLINE=OFF.")
   endif()
 
   # -- Determine package name for current platform --
@@ -121,7 +121,7 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
       message(FATAL_ERROR
         "Failed to download ONNX Runtime from ${_ORT_URL}\n"
         "Error: ${_ORT_DL_MSG}\n"
-        "You can download manually: tools/download_onnxruntime.sh")
+        "You can download manually from: https://github.com/microsoft/onnxruntime/releases")
     endif()
   endif()
 
@@ -193,6 +193,20 @@ if(_ORT_HEADER AND _ORT_LIBRARY AND NOT TARGET onnxruntime::onnxruntime)
       message(STATUS "Patched ONNX Runtime CMake config: include/onnxruntime -> include")
     endif()
   endif()
+
+  # Patch the lib64 vs lib path issue in CMake targets
+  file(GLOB _ORT_CMAKE_TARGET_FILES "${_ORT_CMAKE_DIR}/onnxruntimeTargets*.cmake")
+  foreach(_ORT_TARGET_FILE ${_ORT_CMAKE_TARGET_FILES})
+    if(EXISTS "${_ORT_TARGET_FILE}")
+      file(READ "${_ORT_TARGET_FILE}" _ORT_TARGET_CONTENT)
+      if(_ORT_TARGET_CONTENT MATCHES "/lib64/"
+         AND NOT EXISTS "${_ORT_ROOT}/lib64")
+        string(REPLACE "/lib64/" "/lib/" _ORT_TARGET_CONTENT "${_ORT_TARGET_CONTENT}")
+        file(WRITE "${_ORT_TARGET_FILE}" "${_ORT_TARGET_CONTENT}")
+        message(STATUS "Patched ONNX Runtime CMake config: lib64 -> lib")
+      endif()
+    endif()
+  endforeach()
 
   find_package(onnxruntime QUIET
     PATHS "${_ORT_ROOT}"
