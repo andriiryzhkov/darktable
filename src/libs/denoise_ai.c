@@ -16,7 +16,8 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ai/darktable_ai.h"
+#include "ai/onnx_backend.h"
+#include "common/ai_models.h"
 #include "bauhaus/bauhaus.h"
 #include "control/jobs/control_jobs.h"
 #include "control/signal.h"
@@ -69,6 +70,7 @@ typedef struct dt_denoise_job_t {
   dt_job_t *control_job;
   dt_ai_context_t *ctx;
   float sigma;
+  dt_ai_provider_t provider;
 } dt_denoise_job_t;
 
 typedef struct dt_denoise_format_params_t {
@@ -427,7 +429,7 @@ static int32_t _process_job_run(dt_job_t *job) {
   dt_control_job_set_progress_message(job, "Loading AI model...");
 
   j->control_job = job;
-  j->ctx = dt_ai_load_model(j->env, j->model_id);
+  j->ctx = dt_ai_load_model(j->env, j->model_id, j->provider);
 
   if (!j->ctx) {
     dt_control_log(_("failed to load AI model: %s"), j->model_id);
@@ -550,6 +552,7 @@ static void _button_clicked(GtkWidget *widget, gpointer user_data) {
     job_data->model_id = g_strdup(d->model_id);
     job_data->images = g_list_append(NULL, GINT_TO_POINTER(imgid));
     job_data->sigma = dt_bauhaus_slider_get(d->sigma_slider);
+    job_data->provider = darktable.ai_registry->provider;
 
     dt_job_t *job = dt_control_job_create(_process_job_run, "ai denoise");
     dt_control_job_set_params(job, job_data, _job_cleanup);

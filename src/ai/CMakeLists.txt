@@ -5,8 +5,8 @@ project(darktable_ai)
 # Static library - linked into lib_darktable
 # This avoids Windows DLL linking issues while keeping clean separation
 add_library(darktable_ai STATIC
-  darktable_ai.c
-  darktable_ai.h
+  onnx_backend.c
+  onnx_backend.h
 )
 
 # No export macros needed for static library

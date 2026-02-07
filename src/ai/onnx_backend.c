@@ -16,10 +16,8 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "darktable_ai.h"
-#include "common/ai_models.h"
+#include "onnx_backend.h"
 #include "common/darktable.h"
-#include "control/conf.h"
 #include <glib.h>
 #include <json-glib/json-glib.h>
 #include <onnxruntime_c_api.h>
@@ -418,13 +416,8 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
   return ok;
 }
 
-static void _enable_acceleration(dt_ai_context_t *ctx,
-                                 OrtSessionOptions *session_opts) {
-  // Get configured provider from settings
-  dt_ai_provider_t provider = DT_AI_PROVIDER_AUTO;
-  if(darktable.ai_registry)
-    provider = darktable.ai_registry->provider;
-
+static void _enable_acceleration(OrtSessionOptions *session_opts,
+                                 dt_ai_provider_t provider) {
   switch(provider)
   {
     case DT_AI_PROVIDER_CPU:
@@ -485,7 +478,8 @@ static void _enable_acceleration(dt_ai_context_t *ctx,
 // --- Execution ---
 
 DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
-                                               const char *model_id) {
+                                               const char *model_id,
+                                               dt_ai_provider_t provider) {
   if (!env || !model_id)
     return NULL;
 
@@ -558,7 +552,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   }
 
   // Optimize: Enable Hardware Acceleration
-  _enable_acceleration(ctx, session_opts);
+  _enable_acceleration(session_opts, provider);
 
 #ifdef _WIN32
   // On Windows, CreateSession expects a wide character string

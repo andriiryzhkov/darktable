@@ -24,9 +24,20 @@ extern "C" {
 
 #include <stdint.h>
 
-// Static library - symbols exported from lib_darktable
-// No export macros needed
+// Static library - no export macros needed
 #define DT_AI_EXPORT
+
+/**
+ * @brief AI Execution Provider
+ */
+typedef enum {
+  DT_AI_PROVIDER_AUTO = 0,
+  DT_AI_PROVIDER_CPU,
+  DT_AI_PROVIDER_COREML,
+  DT_AI_PROVIDER_CUDA,
+  DT_AI_PROVIDER_ROCM,
+  DT_AI_PROVIDER_DIRECTML,
+} dt_ai_provider_t;
 
 /**
  * @brief Library Environment Handle
@@ -102,10 +113,12 @@ DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env);
  * @brief Load a specific model for execution.
  * @param env Library environment.
  * @param model_id ID of the model to load.
+ * @param provider Execution provider to use for hardware acceleration.
  * @return dt_ai_context_t* Context ready for inference, or NULL.
  */
 DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
-                                               const char *model_id);
+                                               const char *model_id,
+                                               dt_ai_provider_t provider);
 
 /**
  * @brief Tensor Data Types

@@ -19,18 +19,7 @@
 #pragma once
 
 #include <glib.h>
-
-/**
- * @brief AI Execution Provider
- */
-typedef enum dt_ai_provider_t {
-  DT_AI_PROVIDER_AUTO = 0,
-  DT_AI_PROVIDER_CPU,
-  DT_AI_PROVIDER_COREML,
-  DT_AI_PROVIDER_CUDA,
-  DT_AI_PROVIDER_ROCM,
-  DT_AI_PROVIDER_DIRECTML,
-} dt_ai_provider_t;
+#include "ai/onnx_backend.h"  // for dt_ai_provider_t
 
 /**
  * @brief Model download/availability status
