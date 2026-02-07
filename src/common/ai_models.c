@@ -27,7 +27,26 @@
 #include <archive_entry.h>
 #include <curl/curl.h>
 #include <json-glib/json-glib.h>
+#include <stdlib.h>
 #include <string.h>
+
+// Ensure PATH_MAX is defined on Windows
+#ifndef PATH_MAX
+#ifdef _WIN32
+#define PATH_MAX _MAX_PATH
+#else
+#define PATH_MAX 4096
+#endif
+#endif
+
+#ifdef _WIN32
+// Windows doesn't have realpath, use _fullpath instead
+static inline char *realpath(const char *path, char *resolved_path)
+{
+  (void)resolved_path; // ignored, always allocate
+  return _fullpath(NULL, path, _MAX_PATH);
+}
+#endif
 
 // Config keys
 #define CONF_AI_ENABLED "plugins/ai/enabled"
@@ -462,6 +481,7 @@ static gboolean _extract_zip(const char *zippath, const char *destdir)
     archive_write_free(ext);
     return FALSE;
   }
+
   const size_t destdir_len = strlen(real_destdir);
 
   while(archive_read_next_header(a, &entry) == ARCHIVE_OK)

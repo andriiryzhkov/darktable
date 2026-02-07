@@ -2,18 +2,15 @@ cmake_minimum_required(VERSION 3.18)
 
 project(darktable_ai)
 
-# Default to shared library to enforce ABI boundary
-add_library(darktable_ai SHARED
+# Static library - linked into lib_darktable
+# This avoids Windows DLL linking issues while keeping clean separation
+add_library(darktable_ai STATIC
   darktable_ai.c
   darktable_ai.h
 )
 
-# Define export macro when building the library
-target_compile_definitions(darktable_ai PRIVATE DT_AI_EXPORTING)
-
-if(APPLE)
-  target_link_options(darktable_ai PRIVATE "-undefined" "dynamic_lookup")
-endif()
+# No export macros needed for static library
+# Symbols will be exported from lib_darktable.dll on Windows
 
 # Find ONNX Runtime (auto-downloads if not present)
 find_package(ONNXRuntime REQUIRED)
@@ -42,27 +39,14 @@ target_link_directories(darktable_ai PRIVATE
   ${JSON_GLIB_LIBRARY_DIRS}
 )
 
-target_link_libraries(darktable_ai PRIVATE
+target_link_libraries(darktable_ai PUBLIC
   onnxruntime::onnxruntime
   ${GLIB_LIBRARIES}
   ${JSON_GLIB_LIBRARIES}
 )
 
-# Set RPATH so darktable_ai can find libonnxruntime at runtime
-if(APPLE)
-  set_target_properties(darktable_ai PROPERTIES
-    INSTALL_RPATH "@loader_path"
-    BUILD_RPATH "${ONNXRuntime_LIB_DIR}"
-  )
-elseif(UNIX)
-  set_target_properties(darktable_ai PROPERTIES
-    INSTALL_RPATH "$ORIGIN"
-    BUILD_RPATH "${ONNXRuntime_LIB_DIR}"
-  )
-endif()
-
-# Installation rules
-install(TARGETS darktable_ai DESTINATION ${CMAKE_INSTALL_LIBDIR}/darktable)
+# Static libraries don't need RPATH or installation
+# They get linked into lib_darktable
 
 # Install the bundled ONNX Runtime shared library alongside darktable_ai
 if(APPLE)
@@ -76,8 +60,9 @@ if(APPLE)
 elseif(WIN32)
   file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime.dll")
   if(_ORT_DLL)
+    # On Windows, install to bin/ where darktable.exe can find it
     install(FILES ${_ORT_DLL}
-      DESTINATION ${CMAKE_INSTALL_LIBDIR}/darktable
+      DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
   endif()
 elseif(UNIX)

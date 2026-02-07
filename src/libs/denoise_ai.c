@@ -30,6 +30,15 @@
 #include <math.h> // For fmin/fmax
 #include <tiffio.h>
 
+// Ensure PATH_MAX is defined on Windows
+#ifndef PATH_MAX
+#ifdef _WIN32
+#define PATH_MAX _MAX_PATH
+#else
+#define PATH_MAX 4096
+#endif
+#endif
+
 DT_MODULE(1)
 
 // Config key for the model ID to use
@@ -373,6 +382,7 @@ static int _ai_write_image(dt_imageio_module_data_t *data, const char *filename,
                            job->sigma, tile_size);
 
   if (res == 0) {
+      // MSYS2/MinGW libtiff handles UTF-8 paths correctly with TIFFOpen
       TIFF *tif = TIFFOpen(filename, "w");
       if (tif) {
         TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);

@@ -375,8 +375,17 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
            provider_name);
 
 #ifdef _WIN32
-  HMODULE h = GetModuleHandle(NULL);
-  void *func_ptr = (void *)GetProcAddress(h, symbol_name);
+  // On Windows, we need to get the handle to onnxruntime.dll, not the main executable
+  HMODULE h = GetModuleHandleA("onnxruntime.dll");
+  if (!h) {
+    // If not already loaded, try to load it
+    h = LoadLibraryA("onnxruntime.dll");
+  }
+  void *func_ptr = NULL;
+  if (h) {
+    func_ptr = (void *)GetProcAddress(h, symbol_name);
+    // Don't call FreeLibrary - we want to keep onnxruntime.dll loaded
+  }
 #else
   GModule *mod = g_module_open(NULL, 0);
   void *func_ptr = NULL;
@@ -551,8 +560,16 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   // Optimize: Enable Hardware Acceleration
   _enable_acceleration(ctx, session_opts);
 
+#ifdef _WIN32
+  // On Windows, CreateSession expects a wide character string
+  wchar_t *onnx_path_wide = (wchar_t *)g_utf8_to_utf16(onnx_path, -1, NULL, NULL, NULL);
+  status =
+      g_ort->CreateSession(ctx->env, onnx_path_wide, session_opts, &ctx->session);
+  g_free(onnx_path_wide);
+#else
   status =
       g_ort->CreateSession(ctx->env, onnx_path, session_opts, &ctx->session);
+#endif
 
   g_ort->ReleaseSessionOptions(session_opts);
   g_free(onnx_path);

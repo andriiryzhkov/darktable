@@ -996,6 +996,10 @@ add_dependencies(lib_darktable generate_authors_h)
 if(APPLE)
   set_target_properties(lib_darktable PROPERTIES MACOSX_RPATH TRUE)
 endif(APPLE)
+if(WIN32)
+  # Export all symbols on Windows so modules can access darktable_ai functions
+  set_target_properties(lib_darktable PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+endif(WIN32)
 set_target_properties(lib_darktable PROPERTIES OUTPUT_NAME darktable)
 set_target_properties(lib_darktable PROPERTIES LINKER_LANGUAGE C)
 

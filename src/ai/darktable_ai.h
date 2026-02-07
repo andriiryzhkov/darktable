@@ -24,15 +24,9 @@ extern "C" {
 
 #include <stdint.h>
 
-#ifdef _WIN32
-#ifdef DT_AI_EXPORTING
-#define DT_AI_EXPORT __declspec(dllexport)
-#else
-#define DT_AI_EXPORT __declspec(dllimport)
-#endif
-#else
-#define DT_AI_EXPORT __attribute__((visibility("default")))
-#endif
+// Static library - symbols exported from lib_darktable
+// No export macros needed
+#define DT_AI_EXPORT
 
 /**
  * @brief Library Environment Handle
