@@ -21,6 +21,15 @@
 #include <glib.h>
 #include "ai/onnx_backend.h"  // for dt_ai_provider_t
 
+// Ensure PATH_MAX is defined on all platforms
+#ifndef PATH_MAX
+#ifdef _WIN32
+#define PATH_MAX _MAX_PATH
+#else
+#define PATH_MAX 4096
+#endif
+#endif
+
 /**
  * @brief Model download/availability status
  */

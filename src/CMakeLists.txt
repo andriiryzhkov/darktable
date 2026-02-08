@@ -1009,6 +1009,11 @@ add_dependencies(lib_darktable generate_authors_h)
 if(APPLE)
   set_target_properties(lib_darktable PROPERTIES MACOSX_RPATH TRUE)
 endif(APPLE)
+if(NOT WIN32)
+  # lib_darktable and ONNX Runtime are installed to the same directory
+  # (${CMAKE_INSTALL_LIBDIR}/darktable/) — set RPATH so the linker finds it
+  set_target_properties(lib_darktable PROPERTIES INSTALL_RPATH "${RPATH_ORIGIN}")
+endif()
 if(WIN32)
   # Export all symbols on Windows so modules can access library functions
   set_target_properties(lib_darktable PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)

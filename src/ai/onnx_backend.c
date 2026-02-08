@@ -41,6 +41,8 @@ struct dt_ai_environment_t {
 
   // Remembered for refresh
   char *search_paths;
+
+  GMutex lock;             // Thread safety for model list access
 };
 
 struct dt_ai_context_t {
@@ -62,8 +64,18 @@ struct dt_ai_context_t {
   dt_ai_dtype_t *output_types;
 };
 
-// Global pointer to the API struct (loaded once)
+// Global pointer to the API struct (initialized exactly once via g_once)
 static const OrtApi *g_ort = NULL;
+static GOnce g_ort_once = G_ONCE_INIT;
+
+static gpointer _init_ort_api(gpointer data)
+{
+  (void)data;
+  const OrtApi *api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+  if(!api)
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to init ONNX Runtime API");
+  return (gpointer)api;
+}
 
 // --- Helper Functions ---
 
@@ -81,25 +93,25 @@ static uint16_t _float_to_half(float f) {
   uint32_t mant = x & 0x7FFFFF;
 
   // Handle Zero and float32 denormals (too small for float16)
-  if (exp == 0)
+  if(exp == 0)
     return (uint16_t)(sign << 15);
 
   // Handle Infinity / NaN
-  if (exp == 255)
+  if(exp == 255)
     return (uint16_t)((sign << 15) | 0x7C00 | (mant ? 1 : 0));
 
   // Re-bias exponent from float32 (bias 127) to float16 (bias 15)
   int new_exp = (int)exp - 127 + 15;
 
-  if (new_exp <= 0) {
+  if(new_exp <= 0) {
     // Encode as float16 denormal: shift mantissa with implicit leading 1
     // The implicit 1 bit plus 10 mantissa bits, shifted right by (1 - new_exp)
     int shift = 1 - new_exp;
-    if (shift > 24) return (uint16_t)(sign << 15); // too small even for denormal
+    if(shift > 24) return (uint16_t)(sign << 15); // too small even for denormal
     uint32_t full_mant = (1 << 23) | mant; // restore implicit leading 1
     uint16_t half_mant = (uint16_t)(full_mant >> (13 + shift));
     return (uint16_t)((sign << 15) | half_mant);
-  } else if (new_exp >= 31) {
+  } else if(new_exp >= 31) {
     // Overflow to Infinity
     return (uint16_t)((sign << 15) | 0x7C00);
   }
@@ -112,8 +124,8 @@ static float _half_to_float(uint16_t h) {
   uint32_t exp = (h >> 10) & 0x1F;
   uint32_t mant = h & 0x3FF;
 
-  if (exp == 0) {
-    if (mant == 0) {
+  if(exp == 0) {
+    if(mant == 0) {
       // Zero
       uint32_t result = (sign << 31);
       float f;
@@ -124,7 +136,7 @@ static float _half_to_float(uint16_t h) {
     // Convert to float32 by normalizing: find leading 1 and shift
     uint32_t m = mant;
     int e = -1;
-    while (!(m & 0x400)) { // shift until leading 1 reaches bit 10
+    while(!(m & 0x400)) { // shift until leading 1 reaches bit 10
       m <<= 1;
       e--;
     }
@@ -134,7 +146,7 @@ static float _half_to_float(uint16_t h) {
     float f;
     memcpy(&f, &result, 4);
     return f;
-  } else if (exp == 31) {
+  } else if(exp == 31) {
     // Inf / NaN
     uint32_t result = (sign << 31) | 0x7F800000 | (mant << 13);
     float f;
@@ -159,20 +171,20 @@ static void _store_string(dt_ai_environment_t *env, const char *str,
 
 static void _scan_directory(dt_ai_environment_t *env, const char *root_path) {
   GDir *dir = g_dir_open(root_path, 0, NULL);
-  if (!dir)
+  if(!dir)
     return;
 
   const char *entry_name;
-  while ((entry_name = g_dir_read_name(dir))) {
+  while((entry_name = g_dir_read_name(dir))) {
     char *full_path = g_build_filename(root_path, entry_name, NULL);
-    if (g_file_test(full_path, G_FILE_TEST_IS_DIR)) {
+    if(g_file_test(full_path, G_FILE_TEST_IS_DIR)) {
       char *config_path = g_build_filename(full_path, "config.json", NULL);
 
-      if (g_file_test(config_path, G_FILE_TEST_EXISTS)) {
+      if(g_file_test(config_path, G_FILE_TEST_EXISTS)) {
         JsonParser *parser = json_parser_new();
         GError *error = NULL;
 
-        if (json_parser_load_from_file(parser, config_path, &error)) {
+        if(json_parser_load_from_file(parser, config_path, &error)) {
           JsonNode *root = json_parser_get_root(parser);
           JsonObject *obj = json_node_get_object(root);
 
@@ -186,9 +198,9 @@ static void _scan_directory(dt_ai_environment_t *env, const char *root_path) {
                                  ? json_object_get_string_member(obj, "task")
                                  : "general";
 
-          if (id && name) {
+          if(id && name) {
             // Skip duplicate model IDs (first discovered wins)
-            if (g_hash_table_contains(env->model_paths, id)) {
+            if(g_hash_table_contains(env->model_paths, id)) {
               dt_print(DT_DEBUG_AI,
                        "[darktable_ai] Skipping duplicate model ID: %s", id);
             } else {
@@ -228,24 +240,20 @@ static void _scan_directory(dt_ai_environment_t *env, const char *root_path) {
 DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
   dt_print(DT_DEBUG_AI, "[darktable_ai] dt_ai_env_init start.");
 
-  if (!g_ort) {
-    dt_print(DT_DEBUG_AI, "[darktable_ai] Initializing ORT API");
-    g_ort = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-    if (!g_ort) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to init ONNX Runtime API");
-      return NULL;
-    }
-  }
+  g_once(&g_ort_once, _init_ort_api, NULL);
+  g_ort = (const OrtApi *)g_ort_once.retval;
+  if(!g_ort) return NULL;
 
   dt_ai_environment_t *env = g_new0(dt_ai_environment_t, 1);
+  g_mutex_init(&env->lock);
   env->model_paths =
       g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
   env->search_paths = g_strdup(search_paths);
 
   // Parse Paths
-  if (search_paths) {
+  if(search_paths) {
     char **tokens = g_strsplit(search_paths, ";", -1);
-    for (int i = 0; tokens[i] != NULL; i++) {
+    for(int i = 0; tokens[i] != NULL; i++) {
       _scan_directory(env, tokens[i]);
     }
     g_strfreev(tokens);
@@ -254,7 +262,7 @@ DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
   // Default Paths
   // Priority 1: ~/.config/darktable/models (or User Config Dir)
   const char *config_dir = g_get_user_config_dir();
-  if (config_dir) {
+  if(config_dir) {
     char *p = g_build_filename(config_dir, "darktable", "models", NULL);
     _scan_directory(env, p);
     g_free(p);
@@ -262,7 +270,7 @@ DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
 
   // Priority 2: ~/.local/share/darktable/models (or User Data Dir)
   const char *data_dir = g_get_user_data_dir();
-  if (data_dir) {
+  if(data_dir) {
     char *p = g_build_filename(data_dir, "darktable", "models", NULL);
     _scan_directory(env, p);
     g_free(p);
@@ -272,28 +280,28 @@ DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
 }
 
 DT_AI_EXPORT int dt_ai_get_model_count(dt_ai_environment_t *env) {
-  if (!env)
+  if(!env)
     return 0;
   return g_list_length(env->models);
 }
 
 DT_AI_EXPORT const dt_ai_model_info_t *
 dt_ai_get_model_info_by_index(dt_ai_environment_t *env, int index) {
-  if (!env)
+  if(!env)
     return NULL;
   GList *item = g_list_nth(env->models, index);
-  if (!item)
+  if(!item)
     return NULL;
   return (const dt_ai_model_info_t *)item->data;
 }
 
 DT_AI_EXPORT const dt_ai_model_info_t *
 dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id) {
-  if (!env || !id)
+  if(!env || !id)
     return NULL;
-  for (GList *l = env->models; l != NULL; l = l->next) {
+  for(GList *l = env->models; l != NULL; l = l->next) {
     dt_ai_model_info_t *info = (dt_ai_model_info_t *)l->data;
-    if (strcmp(info->id, id) == 0)
+    if(strcmp(info->id, id) == 0)
       return info;
   }
   return NULL;
@@ -302,8 +310,10 @@ dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id) {
 static void _free_model_info(gpointer data) { g_free(data); }
 
 DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
-  if (!env)
+  if(!env)
     return;
+
+  g_mutex_lock(&env->lock);
 
   dt_print(DT_DEBUG_AI, "[darktable_ai] Refreshing model list");
 
@@ -317,9 +327,9 @@ DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
   g_hash_table_remove_all(env->model_paths);
 
   // Rescan custom paths (if any were provided at init)
-  if (env->search_paths) {
+  if(env->search_paths) {
     char **tokens = g_strsplit(env->search_paths, ";", -1);
-    for (int i = 0; tokens[i] != NULL; i++) {
+    for(int i = 0; tokens[i] != NULL; i++) {
       _scan_directory(env, tokens[i]);
     }
     g_strfreev(tokens);
@@ -328,7 +338,7 @@ DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
   // Rescan directories (same logic as dt_ai_env_init)
   // Priority 1: ~/.config/darktable/models (or User Config Dir)
   const char *config_dir = g_get_user_config_dir();
-  if (config_dir) {
+  if(config_dir) {
     char *p = g_build_filename(config_dir, "darktable", "models", NULL);
     _scan_directory(env, p);
     g_free(p);
@@ -336,7 +346,7 @@ DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
 
   // Priority 2: ~/.local/share/darktable/models (or User Data Dir)
   const char *data_dir = g_get_user_data_dir();
-  if (data_dir) {
+  if(data_dir) {
     char *p = g_build_filename(data_dir, "darktable", "models", NULL);
     _scan_directory(env, p);
     g_free(p);
@@ -344,16 +354,19 @@ DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
 
   dt_print(DT_DEBUG_AI, "[darktable_ai] Refresh complete, found %d models",
            g_list_length(env->models));
+
+  g_mutex_unlock(&env->lock);
 }
 
 DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env) {
-  if (!env)
+  if(!env)
     return;
 
   g_list_free_full(env->models, _free_model_info);
   g_list_free_full(env->string_storage, g_free);
   g_hash_table_destroy(env->model_paths);
   g_free(env->search_paths);
+  g_mutex_clear(&env->lock);
 
   g_free(env);
 }
@@ -375,12 +388,12 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
 #ifdef _WIN32
   // On Windows, we need to get the handle to onnxruntime.dll, not the main executable
   HMODULE h = GetModuleHandleA("onnxruntime.dll");
-  if (!h) {
+  if(!h) {
     // If not already loaded, try to load it
     h = LoadLibraryA("onnxruntime.dll");
   }
   void *func_ptr = NULL;
-  if (h) {
+  if(h) {
     func_ptr = (void *)GetProcAddress(h, symbol_name);
     // Don't call FreeLibrary - we want to keep onnxruntime.dll loaded
   }
@@ -390,12 +403,12 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
   g_module_symbol(mod, symbol_name, &func_ptr);
 #endif
 
-  if (func_ptr) {
+  if(func_ptr) {
     // All provider append functions take (OrtSessionOptions*, uint32_t/int)
     typedef OrtStatus *(*ProviderAppender)(OrtSessionOptions *, uint32_t);
     ProviderAppender appender = (ProviderAppender)func_ptr;
     status = appender(session_opts, 0);
-    if (!status) {
+    if(!status) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] %s enabled successfully.",
                provider_name);
       ok = TRUE;
@@ -480,18 +493,24 @@ static void _enable_acceleration(OrtSessionOptions *session_opts,
 DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
                                                const char *model_id,
                                                dt_ai_provider_t provider) {
-  if (!env || !model_id)
+  if(!env || !model_id)
     return NULL;
 
-  const char *model_dir =
+  // Copy model_dir under lock to avoid race with dt_ai_env_refresh
+  g_mutex_lock(&env->lock);
+  const char *model_dir_orig =
       (const char *)g_hash_table_lookup(env->model_paths, model_id);
-  if (!model_dir) {
+  char *model_dir = model_dir_orig ? g_strdup(model_dir_orig) : NULL;
+  g_mutex_unlock(&env->lock);
+
+  if(!model_dir) {
     dt_print(DT_DEBUG_AI, "[darktable_ai] ID not found: %s", model_id);
     return NULL;
   }
 
   char *onnx_path = g_build_filename(model_dir, "model.onnx", NULL);
-  if (!g_file_test(onnx_path, G_FILE_TEST_EXISTS)) {
+  g_free(model_dir);
+  if(!g_file_test(onnx_path, G_FILE_TEST_EXISTS)) {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Model file missing: %s", onnx_path);
     g_free(onnx_path);
     return NULL;
@@ -508,7 +527,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   status =
       g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &ctx->env);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     g_free(onnx_path);
     dt_ai_unload_model(ctx);
@@ -517,8 +536,9 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   OrtSessionOptions *session_opts;
   status = g_ort->CreateSessionOptions(&session_opts);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
+    g_free(onnx_path);
     dt_ai_unload_model(ctx);
     return NULL;
   }
@@ -531,11 +551,11 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 #else
   long num_cores = sysconf(_SC_NPROCESSORS_ONLN);
 #endif
-  if (num_cores < 1)
+  if(num_cores < 1)
     num_cores = 1;
 
   status = g_ort->SetIntraOpNumThreads(session_opts, (int)num_cores);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     g_ort->ReleaseSessionOptions(session_opts);
     dt_ai_unload_model(ctx);
@@ -544,7 +564,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   status =
       g_ort->SetSessionGraphOptimizationLevel(session_opts, ORT_ENABLE_ALL);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     g_ort->ReleaseSessionOptions(session_opts);
     dt_ai_unload_model(ctx);
@@ -568,7 +588,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   g_ort->ReleaseSessionOptions(session_opts);
   g_free(onnx_path);
 
-  if (status) {
+  if(status) {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to create session: %s",
              g_ort->GetErrorMessage(status));
     g_ort->ReleaseStatus(status);
@@ -578,7 +598,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   status = g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault,
                                       &ctx->memory_info);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
@@ -586,21 +606,21 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   // Resolve IO Names
   status = g_ort->GetAllocatorWithDefaultOptions(&ctx->allocator);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
   }
 
   status = g_ort->SessionGetInputCount(ctx->session, &ctx->input_count);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
   }
 
   status = g_ort->SessionGetOutputCount(ctx->session, &ctx->output_count);
-  if (status) {
+  if(status) {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
@@ -608,10 +628,10 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   ctx->input_names = g_new0(char *, ctx->input_count);
   ctx->input_types = g_new0(dt_ai_dtype_t, ctx->input_count);
-  for (size_t i = 0; i < ctx->input_count; i++) {
+  for(size_t i = 0; i < ctx->input_count; i++) {
     status = g_ort->SessionGetInputName(ctx->session, i, ctx->allocator,
                                         &ctx->input_names[i]);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -620,7 +640,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     // Get Input Type
     OrtTypeInfo *typeinfo = NULL;
     status = g_ort->SessionGetInputTypeInfo(ctx->session, i, &typeinfo);
-    if (status) { // Warning: if this fails, we might still proceed or fail?
+    if(status) { // Warning: if this fails, we might still proceed or fail?
                   // Fail safer.
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
@@ -628,7 +648,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     }
     const OrtTensorTypeAndShapeInfo *tensor_info = NULL;
     status = g_ort->CastTypeInfoToTensorInfo(typeinfo, &tensor_info);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -636,7 +656,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     }
     ONNXTensorElementDataType type;
     status = g_ort->GetTensorElementType(tensor_info, &type);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -644,17 +664,17 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     }
 
     // Map ONNX type to internal type
-    if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
+    if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
       ctx->input_types[i] = DT_AI_FLOAT;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
       ctx->input_types[i] = DT_AI_FLOAT16;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8)
       ctx->input_types[i] = DT_AI_UINT8;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8)
       ctx->input_types[i] = DT_AI_INT8;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32)
       ctx->input_types[i] = DT_AI_INT32;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
       ctx->input_types[i] = DT_AI_INT64;
     else {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX input type %d for input %zu", type, i);
@@ -668,10 +688,10 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 
   ctx->output_names = g_new0(char *, ctx->output_count);
   ctx->output_types = g_new0(dt_ai_dtype_t, ctx->output_count);
-  for (size_t i = 0; i < ctx->output_count; i++) {
+  for(size_t i = 0; i < ctx->output_count; i++) {
     status = g_ort->SessionGetOutputName(ctx->session, i, ctx->allocator,
                                          &ctx->output_names[i]);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -680,14 +700,14 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     // Get Output Type
     OrtTypeInfo *typeinfo = NULL;
     status = g_ort->SessionGetOutputTypeInfo(ctx->session, i, &typeinfo);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
     }
     const OrtTensorTypeAndShapeInfo *tensor_info = NULL;
     status = g_ort->CastTypeInfoToTensorInfo(typeinfo, &tensor_info);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -695,24 +715,24 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     }
     ONNXTensorElementDataType type;
     status = g_ort->GetTensorElementType(tensor_info, &type);
-    if (status) {
+    if(status) {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
       return NULL;
     }
 
-    if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
+    if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
       ctx->output_types[i] = DT_AI_FLOAT;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
       ctx->output_types[i] = DT_AI_FLOAT16;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8)
       ctx->output_types[i] = DT_AI_UINT8;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8)
       ctx->output_types[i] = DT_AI_INT8;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32)
       ctx->output_types[i] = DT_AI_INT32;
-    else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
+    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
       ctx->output_types[i] = DT_AI_INT64;
     else {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX output type %d for output %zu", type, i);
@@ -730,9 +750,9 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
 DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
                            int num_inputs, dt_ai_tensor_t *outputs,
                            int num_outputs) {
-  if (!ctx || !ctx->session)
+  if(!ctx || !ctx->session)
     return -1;
-  if (num_inputs != ctx->input_count || num_outputs != ctx->output_count) {
+  if(num_inputs != ctx->input_count || num_outputs != ctx->output_count) {
     dt_print(DT_DEBUG_AI,
              "[darktable_ai] IO count mismatch. Expected %zu/%zu, got %d/%d",
              ctx->input_count, ctx->output_count, num_inputs, num_outputs);
@@ -751,9 +771,9 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   OrtValue **output_tensors = g_new0(OrtValue *, num_outputs);
   const char **input_names = (const char **)ctx->input_names; // Cast for Run()
 
-  for (int i = 0; i < num_inputs; i++) {
+  for(int i = 0; i < num_inputs; i++) {
     int64_t element_count = 1;
-    for (int j = 0; j < inputs[i].ndim; j++)
+    for(int j = 0; j < inputs[i].ndim; j++)
       element_count *= inputs[i].shape[j];
 
     ONNXTensorElementDataType onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
@@ -761,7 +781,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
     void *data_ptr = inputs[i].data;
 
     // Check for Type Mismatch (Float -> Half)
-    if (inputs[i].type == DT_AI_FLOAT && ctx->input_types[i] == DT_AI_FLOAT16) {
+    if(inputs[i].type == DT_AI_FLOAT && ctx->input_types[i] == DT_AI_FLOAT16) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Auto-converting Input[%d] Float32 -> Float16", i);
       // Auto-convert Float32 -> Float16
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
@@ -769,7 +789,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
 
       uint16_t *half_data = g_malloc(element_count * type_size);
       const float *src = (const float *)inputs[i].data;
-      for (int64_t k = 0; k < element_count; k++) {
+      for(int64_t k = 0; k < element_count; k++) {
         half_data[k] = _float_to_half(src[k]);
       }
 
@@ -814,7 +834,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
         ctx->memory_info, data_ptr, element_count * type_size, inputs[i].shape,
         inputs[i].ndim, onnx_type, &input_tensors[i]);
 
-    if (status) {
+    if(status) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] CreateTensor Input[%d] fail: %s", i,
                g_ort->GetErrorMessage(status));
       g_ort->ReleaseStatus(status);
@@ -826,9 +846,9 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   // Create Output Tensors (Pre-allocated)
   const char **output_names = (const char **)ctx->output_names;
 
-  for (int i = 0; i < num_outputs; i++) {
+  for(int i = 0; i < num_outputs; i++) {
     // Check for Type Mismatch (Float16 -> Float)
-    if (outputs[i].type == DT_AI_FLOAT &&
+    if(outputs[i].type == DT_AI_FLOAT &&
         ctx->output_types[i] == DT_AI_FLOAT16) {
       // Let ORT allocate the output tensor (Float16)
       output_tensors[i] = NULL;
@@ -836,7 +856,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
     }
 
     int64_t element_count = 1;
-    for (int j = 0; j < outputs[i].ndim; j++)
+    for(int j = 0; j < outputs[i].ndim; j++)
       element_count *= outputs[i].shape[j];
 
     ONNXTensorElementDataType onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
@@ -878,7 +898,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
         ctx->memory_info, outputs[i].data, element_count * type_size,
         outputs[i].shape, outputs[i].ndim, onnx_type, &output_tensors[i]);
 
-    if (status) {
+    if(status) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] CreateTensor Output[%d] fail: %s",
                i, g_ort->GetErrorMessage(status));
       g_ort->ReleaseStatus(status);
@@ -892,20 +912,20 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
                       (const OrtValue *const *)input_tensors, num_inputs,
                       output_names, num_outputs, output_tensors);
 
-  if (status) {
+  if(status) {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Run error: %s",
              g_ort->GetErrorMessage(status));
     g_ort->ReleaseStatus(status);
     ret = -3;
   } else {
     // Post-Run: Auto-convert Output (Half -> Float)
-    for (int i = 0; i < num_outputs; i++) {
-      if (outputs[i].type == DT_AI_FLOAT &&
+    for(int i = 0; i < num_outputs; i++) {
+      if(outputs[i].type == DT_AI_FLOAT &&
           ctx->output_types[i] == DT_AI_FLOAT16) {
-        if (output_tensors[i]) {
+        if(output_tensors[i]) {
           void *raw_data = NULL;
           status = g_ort->GetTensorMutableData(output_tensors[i], &raw_data);
-          if (status) {
+          if(status) {
             dt_print(DT_DEBUG_AI, "[darktable_ai] GetTensorMutableData failed: %s",
                      g_ort->GetErrorMessage(status));
             g_ort->ReleaseStatus(status);
@@ -914,12 +934,12 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
 
           // Element count
           int64_t element_count = 1;
-          for (int j = 0; j < outputs[i].ndim; j++)
+          for(int j = 0; j < outputs[i].ndim; j++)
             element_count *= outputs[i].shape[j];
 
           uint16_t *half_data = (uint16_t *)raw_data;
           float *dst = (float *)outputs[i].data;
-          for (int64_t k = 0; k < element_count; k++) {
+          for(int64_t k = 0; k < element_count; k++) {
             dst[k] = _half_to_float(half_data[k]);
           }
         }
@@ -929,16 +949,16 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
 
 cleanup:
   // Cleanup OrtValues (Wrappers only, data is owned by caller)
-  for (int i = 0; i < num_inputs; i++)
-    if (input_tensors[i])
+  for(int i = 0; i < num_inputs; i++)
+    if(input_tensors[i])
       g_ort->ReleaseValue(input_tensors[i]);
-  for (int i = 0; i < num_outputs; i++)
-    if (output_tensors[i])
+  for(int i = 0; i < num_outputs; i++)
+    if(output_tensors[i])
       g_ort->ReleaseValue(output_tensors[i]);
 
   // Free temp input buffers
-  for (int i = 0; i < num_inputs; i++) {
-    if (temp_input_buffers[i])
+  for(int i = 0; i < num_inputs; i++) {
+    if(temp_input_buffers[i])
       g_free(temp_input_buffers[i]);
   }
   g_free(temp_input_buffers);
@@ -959,49 +979,49 @@ DT_AI_EXPORT int dt_ai_get_output_count(dt_ai_context_t *ctx) {
 
 DT_AI_EXPORT const char *dt_ai_get_input_name(dt_ai_context_t *ctx,
                                                int index) {
-  if (!ctx || index < 0 || (size_t)index >= ctx->input_count)
+  if(!ctx || index < 0 || (size_t)index >= ctx->input_count)
     return NULL;
   return ctx->input_names[index];
 }
 
 DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
                                                   int index) {
-  if (!ctx || index < 0 || (size_t)index >= ctx->input_count)
+  if(!ctx || index < 0 || (size_t)index >= ctx->input_count)
     return DT_AI_FLOAT;
   return ctx->input_types[index];
 }
 
 DT_AI_EXPORT const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
                                                 int index) {
-  if (!ctx || index < 0 || (size_t)index >= ctx->output_count)
+  if(!ctx || index < 0 || (size_t)index >= ctx->output_count)
     return NULL;
   return ctx->output_names[index];
 }
 
 DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
                                                    int index) {
-  if (!ctx || index < 0 || (size_t)index >= ctx->output_count)
+  if(!ctx || index < 0 || (size_t)index >= ctx->output_count)
     return DT_AI_FLOAT;
   return ctx->output_types[index];
 }
 
 DT_AI_EXPORT void dt_ai_unload_model(dt_ai_context_t *ctx) {
-  if (ctx) {
-    if (ctx->session)
+  if(ctx) {
+    if(ctx->session)
       g_ort->ReleaseSession(ctx->session);
-    if (ctx->env)
+    if(ctx->env)
       g_ort->ReleaseEnv(ctx->env);
-    if (ctx->memory_info)
+    if(ctx->memory_info)
       g_ort->ReleaseMemoryInfo(ctx->memory_info);
 
     // Release IO names using the allocator that created them
-    if (ctx->allocator) {
-      for (size_t i = 0; i < ctx->input_count; i++) {
-        if (ctx->input_names[i])
+    if(ctx->allocator) {
+      for(size_t i = 0; i < ctx->input_count; i++) {
+        if(ctx->input_names[i])
           ctx->allocator->Free(ctx->allocator, ctx->input_names[i]);
       }
-      for (size_t i = 0; i < ctx->output_count; i++) {
-        if (ctx->output_names[i])
+      for(size_t i = 0; i < ctx->output_count; i++) {
+        if(ctx->output_names[i])
           ctx->allocator->Free(ctx->allocator, ctx->output_names[i]);
       }
       // Allocator itself usually doesn't need explicit release if retrieved via

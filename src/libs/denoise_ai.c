@@ -23,6 +23,7 @@
 #include "control/signal.h"
 
 #include "common/collection.h"
+#include "common/film.h"
 #include "develop/develop.h"
 #include "imageio/imageio_module.h"
 #include <stdio.h>
@@ -30,15 +31,6 @@
 #include <string.h>
 #include <math.h> // For fmin/fmax
 #include <tiffio.h>
-
-// Ensure PATH_MAX is defined on Windows
-#ifndef PATH_MAX
-#ifdef _WIN32
-#define PATH_MAX _MAX_PATH
-#else
-#define PATH_MAX 4096
-#endif
-#endif
 
 DT_MODULE(1)
 
@@ -100,14 +92,14 @@ static const char *_ai_get_mime(dt_imageio_module_data_t *data) {
 
 // sRGB transfer functions for model input/output conversion
 static inline float _linear_to_srgb(float v) {
-  if (v <= 0.0f) return 0.0f;
-  if (v >= 1.0f) return 1.0f;
+  if(v <= 0.0f) return 0.0f;
+  if(v >= 1.0f) return 1.0f;
   return (v <= 0.0031308f) ? 12.92f * v : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
 }
 
 static inline float _srgb_to_linear(float v) {
-  if (v <= 0.0f) return 0.0f;
-  if (v >= 1.0f) return 1.0f;
+  if(v <= 0.0f) return 0.0f;
+  if(v >= 1.0f) return 1.0f;
   return (v <= 0.04045f) ? v / 12.92f : powf((v + 0.055f) / 1.055f, 2.4f);
 }
 
@@ -120,8 +112,8 @@ static int _run_patch(dt_ai_context_t *ctx, float *in_patch, int w, int h,
   // Clip and convert linear -> sRGB (model expects sRGB)
   for(int i = 0; i < total_pixels; i++) {
     float v = in_patch[i];
-    if (v < 0.0f) v = 0.0f;
-    if (v > 1.0f) v = 1.0f;
+    if(v < 0.0f) v = 0.0f;
+    if(v > 1.0f) v = 1.0f;
     in_patch[i] = _linear_to_srgb(v);
   }
 
@@ -166,7 +158,7 @@ static int _run_patch(dt_ai_context_t *ctx, float *in_patch, int w, int h,
   int64_t noise_shape[] = {1, 1, h, w};
   if(num_inputs >= 2) {
     const size_t map_size = (size_t)w * h;
-    noise_map = g_malloc(map_size * sizeof(float));
+    noise_map = g_try_malloc(map_size * sizeof(float));
     if(!noise_map) return 1;
     const float sigma_norm = sigma / 255.0f;
     for(size_t i = 0; i < map_size; i++)
@@ -185,7 +177,7 @@ static int _run_patch(dt_ai_context_t *ctx, float *in_patch, int w, int h,
 
   int ret = dt_ai_run(ctx, inputs, num_inputs, &output, 1);
   g_free(noise_map);
-  if (ret != 0) return ret;
+  if(ret != 0) return ret;
 
   // Undo brightness boost on the output, then convert sRGB -> linear
   const float inv_boost = 1.0f / boost;
@@ -198,10 +190,10 @@ static int _run_patch(dt_ai_context_t *ctx, float *in_patch, int w, int h,
 }
 
 static inline int _mirror(int v, int max) {
-  if (v < 0) v = -v;
-  if (v >= max) v = 2 * max - 2 - v;
-  if (v < 0) return 0;
-  if (v >= max) return max - 1;
+  if(v < 0) v = -v;
+  if(v >= max) v = 2 * max - 2 - v;
+  if(v < 0) return 0;
+  if(v >= max) return max - 1;
   return v;
 }
 
@@ -267,17 +259,17 @@ static int _process_tiled(dt_ai_context_t *ctx, const float *in_data, int width,
   int res = 0;
   int tile_count = 0;
 
-  float *tile_in = g_malloc(tile_buf_size);
-  float *tile_out = g_malloc(tile_buf_size);
-  if (!tile_in || !tile_out) {
+  float *tile_in = g_try_malloc(tile_buf_size);
+  float *tile_out = g_try_malloc(tile_buf_size);
+  if(!tile_in || !tile_out) {
     g_free(tile_in);
     g_free(tile_out);
     return 1;
   }
 
-  for (int ty = 0; ty < rows; ty++) {
-    for (int tx = 0; tx < cols; tx++) {
-      if (dt_control_job_get_state(control_job) == DT_JOB_STATE_CANCELLED) {
+  for(int ty = 0; ty < rows; ty++) {
+    for(int tx = 0; tx < cols; tx++) {
+      if(dt_control_job_get_state(control_job) == DT_JOB_STATE_CANCELLED) {
         dt_print(DT_DEBUG_AI, "[denoise_ai] Cancelled at tile %d/%d", tile_count, total_tiles);
         res = 1;
         goto cleanup;
@@ -294,10 +286,10 @@ static int _process_tiled(dt_ai_context_t *ctx, const float *in_data, int width,
                                 || in_y_start + T > height);
 
       // Extract patch: interleaved RGBx -> planar RGB
-      if (needs_mirror) {
-        for (int dy = 0; dy < T; ++dy) {
+      if(needs_mirror) {
+        for(int dy = 0; dy < T; ++dy) {
           const int src_y = _mirror(in_y_start + dy, height);
-          for (int dx = 0; dx < T; ++dx) {
+          for(int dx = 0; dx < T; ++dx) {
             const int src_x = _mirror(in_x_start + dx, width);
             const size_t pixel_offset = (size_t)dy * T + dx;
             const size_t idx = ((size_t)src_y * width + src_x) * 4;
@@ -308,11 +300,11 @@ static int _process_tiled(dt_ai_context_t *ctx, const float *in_data, int width,
         }
       } else {
         // Fast path: no mirroring needed, row-sequential access
-        for (int dy = 0; dy < T; ++dy) {
+        for(int dy = 0; dy < T; ++dy) {
           const int src_y = in_y_start + dy;
           const float *row = in_data + (size_t)src_y * width * 4 + in_x_start * 4;
           const size_t row_offset = (size_t)dy * T;
-          for (int dx = 0; dx < T; ++dx) {
+          for(int dx = 0; dx < T; ++dx) {
             tile_in[row_offset + dx]                       = row[dx * 4 + 0];
             tile_in[row_offset + dx + tile_plane_size]     = row[dx * 4 + 1];
             tile_in[row_offset + dx + 2 * tile_plane_size] = row[dx * 4 + 2];
@@ -321,7 +313,7 @@ static int _process_tiled(dt_ai_context_t *ctx, const float *in_data, int width,
       }
 
       // Run inference
-      if (_run_patch(ctx, tile_in, T, T, tile_out, tile_count, sigma) != 0) {
+      if(_run_patch(ctx, tile_in, T, T, tile_out, tile_count, sigma) != 0) {
         dt_print(DT_DEBUG_AI, "[denoise_ai] Inference failed for tile %d,%d", x, y);
         res = 1;
         goto cleanup;
@@ -331,10 +323,10 @@ static int _process_tiled(dt_ai_context_t *ctx, const float *in_data, int width,
       const int valid_w = (x + step > width) ? width - x : step;
       const int valid_h = (y + step > height) ? height - y : step;
 
-      for (int dy = 0; dy < valid_h; ++dy) {
+      for(int dy = 0; dy < valid_h; ++dy) {
         const size_t tile_row = (size_t)(O + dy) * T + O;
         const size_t dst_row = ((size_t)(y + dy) * width + x) * 3;
-        for (int dx = 0; dx < valid_w; ++dx) {
+        for(int dx = 0; dx < valid_w; ++dx) {
           rgb_out[dst_row + dx * 3 + 0] = tile_out[tile_row + dx];
           rgb_out[dst_row + dx * 3 + 1] = tile_out[tile_row + dx + tile_plane_size];
           rgb_out[dst_row + dx * 3 + 2] = tile_out[tile_row + dx + 2 * tile_plane_size];
@@ -342,7 +334,7 @@ static int _process_tiled(dt_ai_context_t *ctx, const float *in_data, int width,
       }
 
       tile_count++;
-      if (control_job) {
+      if(control_job) {
         dt_control_job_set_progress(control_job, (double)tile_count / total_tiles);
       }
     }
@@ -364,7 +356,7 @@ static int _ai_write_image(dt_imageio_module_data_t *data, const char *filename,
   dt_denoise_format_params_t *params = (dt_denoise_format_params_t *)data;
   dt_denoise_job_t *job = params->job;
 
-  if (!job->ctx)
+  if(!job->ctx)
     return 1;
 
   int width = params->parent.width;
@@ -373,8 +365,8 @@ static int _ai_write_image(dt_imageio_module_data_t *data, const char *filename,
 
   dt_print(DT_DEBUG_AI, "[denoise_ai] Processing image %dx%d", width, height);
 
-  float *rgb_out = g_malloc((size_t)width * height * 3 * sizeof(float));
-  if (!rgb_out)
+  float *rgb_out = g_try_malloc((size_t)width * height * 3 * sizeof(float));
+  if(!rgb_out)
     return 1;
 
   const int num_inputs = dt_ai_get_input_count(job->ctx);
@@ -383,10 +375,15 @@ static int _ai_write_image(dt_imageio_module_data_t *data, const char *filename,
   int res = _process_tiled(job->ctx, in_data, width, height, rgb_out, job->control_job,
                            job->sigma, tile_size);
 
-  if (res == 0) {
-      // MSYS2/MinGW libtiff handles UTF-8 paths correctly with TIFFOpen
+  if(res == 0) {
+#ifdef _WIN32
+      wchar_t *wfilename = g_utf8_to_utf16(filename, -1, NULL, NULL, NULL);
+      TIFF *tif = TIFFOpenW(wfilename, "w");
+      g_free(wfilename);
+#else
       TIFF *tif = TIFFOpen(filename, "w");
-      if (tif) {
+#endif
+      if(tif) {
         TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, width);
         TIFFSetField(tif, TIFFTAG_IMAGELENGTH, height);
         TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, 3);
@@ -396,8 +393,8 @@ static int _ai_write_image(dt_imageio_module_data_t *data, const char *filename,
         TIFFSetField(tif, TIFFTAG_SAMPLEFORMAT, SAMPLEFORMAT_IEEEFP);
         TIFFSetField(tif, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(tif, 0));
         
-        for (int y = 0; y < height; y++) {
-             if (TIFFWriteScanline(tif, rgb_out + (y * width * 3), y, 0) < 0) {
+        for(int y = 0; y < height; y++) {
+             if(TIFFWriteScanline(tif, rgb_out + (y * width * 3), y, 0) < 0) {
                 dt_control_log(_("error writing denoised TIFF at row %d: %s"), y, filename);
                 res = 1;
                 break;
@@ -416,7 +413,7 @@ static int _ai_write_image(dt_imageio_module_data_t *data, const char *filename,
 
 static void _job_cleanup(void *param) {
   dt_denoise_job_t *job = (dt_denoise_job_t *)param;
-  if (job->ctx)
+  if(job->ctx)
     dt_ai_unload_model(job->ctx);
   g_free(job->model_id);
   g_list_free(job->images);
@@ -431,7 +428,7 @@ static int32_t _process_job_run(dt_job_t *job) {
   j->control_job = job;
   j->ctx = dt_ai_load_model(j->env, j->model_id, j->provider);
 
-  if (!j->ctx) {
+  if(!j->ctx) {
     dt_control_log(_("failed to load AI model: %s"), j->model_id);
     return 1;
   }
@@ -450,8 +447,8 @@ static int32_t _process_job_run(dt_job_t *job) {
   int count = 0;
 
   GList *iter = j->images;
-  while (iter) {
-    if (dt_control_job_get_state(job) == DT_JOB_STATE_CANCELLED)
+  while(iter) {
+    if(dt_control_job_get_state(job) == DT_JOB_STATE_CANCELLED)
       break;
 
     dt_imgid_t imgid = GPOINTER_TO_INT(iter->data);
@@ -459,37 +456,47 @@ static int32_t _process_job_run(dt_job_t *job) {
     dt_image_full_path(imgid, filename, sizeof(filename), NULL);
 
     char *ext = strrchr(filename, '.');
-    if (ext)
+    if(ext)
       *ext = '\0';
     g_strlcat(filename, "_denoised.tif", sizeof(filename));
 
     // Avoid overwriting existing denoised files: append _1, _2, etc.
-    if (g_file_test(filename, G_FILE_TEST_EXISTS)) {
+    if(g_file_test(filename, G_FILE_TEST_EXISTS)) {
       char base[PATH_MAX];
       g_strlcpy(base, filename, sizeof(base));
       char *tif_ext = strrchr(base, '.');
-      if (tif_ext) *tif_ext = '\0'; // strip ".tif"
+      if(tif_ext) *tif_ext = '\0'; // strip ".tif"
 
-      for (int suffix = 1; ; suffix++) {
+      for(int suffix = 1; suffix < 10000; suffix++) {
         snprintf(filename, sizeof(filename), "%s_%d.tif", base, suffix);
-        if (!g_file_test(filename, G_FILE_TEST_EXISTS)) break;
+        if(!g_file_test(filename, G_FILE_TEST_EXISTS)) break;
       }
     }
 
     dt_print(DT_DEBUG_AI, "[denoise_ai] Denoising imgid %d -> %s", imgid, filename);
     dt_control_job_set_progress_message(job, "Denoising image...");
 
-    dt_imageio_export_with_flags(
+    const int export_err = dt_imageio_export_with_flags(
         imgid, filename, &fmt, (dt_imageio_module_data_t *)&fmt_params, TRUE,
         FALSE, TRUE, TRUE, FALSE, 1.0, FALSE, NULL, FALSE, FALSE,
         DT_COLORSPACE_LIN_REC709,
         NULL, DT_INTENT_PERCEPTUAL, NULL, NULL, count, total, NULL, -1);
+
+    if(export_err)
+    {
+      dt_print(DT_DEBUG_AI, "[denoise_ai] Export failed for imgid %d", imgid);
+      dt_control_log(_("AI denoise export failed for image"));
+      dt_control_job_set_progress(job, (double)++count / total);
+      iter = g_list_next(iter);
+      continue;
+    }
 
     dt_film_t film;
     char *dir = g_path_get_dirname(filename);
     dt_filmid_t filmid = dt_film_new(&film, dir);
     g_free(dir);
     const dt_imgid_t newid = dt_image_import(filmid, filename, TRUE, TRUE);
+    dt_film_cleanup(&film);
 
     if(dt_is_valid_imgid(newid))
     {
@@ -510,7 +517,7 @@ static int32_t _process_job_run(dt_job_t *job) {
 
 static void _update_button_sensitivity(dt_lib_denoise_ai_t *d) {
   gboolean sensitive = FALSE;
-  if (d->model_available && darktable.develop->image_storage.id != -1) {
+  if(d->model_available && darktable.develop->image_storage.id != -1) {
     sensitive = TRUE;
   }
   gtk_widget_set_sensitive(d->button, sensitive);
@@ -546,7 +553,7 @@ static void _button_clicked(GtkWidget *widget, gpointer user_data) {
   dt_lib_denoise_ai_t *d = (dt_lib_denoise_ai_t *)self->data;
   dt_imgid_t imgid = darktable.develop->image_storage.id;
 
-  if (d->model_available && imgid != -1) {
+  if(d->model_available && imgid != -1) {
     dt_denoise_job_t *job_data = g_new0(dt_denoise_job_t, 1);
     job_data->env = d->env;
     job_data->model_id = g_strdup(d->model_id);
@@ -620,9 +627,9 @@ void gui_cleanup(dt_lib_module_t *self) {
   DT_CONTROL_SIGNAL_DISCONNECT(_image_changed_callback, self);
   DT_CONTROL_SIGNAL_DISCONNECT(_ai_models_changed_callback, self);
 
-  if (d) {
+  if(d) {
     g_free(d->model_id);
-    if (d->env)
+    if(d->env)
       dt_ai_env_destroy(d->env);
     g_free(d);
   }

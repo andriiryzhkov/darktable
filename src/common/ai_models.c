@@ -30,15 +30,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Ensure PATH_MAX is defined on Windows
-#ifndef PATH_MAX
-#ifdef _WIN32
-#define PATH_MAX _MAX_PATH
-#else
-#define PATH_MAX 4096
-#endif
-#endif
-
 #ifdef _WIN32
 // Windows doesn't have realpath, use _fullpath instead
 static inline char *realpath(const char *path, char *resolved_path)
@@ -729,6 +720,8 @@ static gboolean _extract_zip(const char *zippath, const char *destdir)
     }
 
     g_free(full_path);
+
+    if(!success) break;
   }
 
   free(real_destdir);
