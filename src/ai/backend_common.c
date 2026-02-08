@@ -145,7 +145,7 @@ static void _scan_all_paths(dt_ai_environment_t *env) {
 
 // --- API Implementation ---
 
-DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
+dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
   dt_print(DT_DEBUG_AI, "[darktable_ai] dt_ai_env_init start.");
 
   dt_ai_environment_t *env = g_new0(dt_ai_environment_t, 1);
@@ -159,13 +159,13 @@ DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
   return env;
 }
 
-DT_AI_EXPORT int dt_ai_get_model_count(dt_ai_environment_t *env) {
+int dt_ai_get_model_count(dt_ai_environment_t *env) {
   if(!env)
     return 0;
   return g_list_length(env->models);
 }
 
-DT_AI_EXPORT const dt_ai_model_info_t *
+const dt_ai_model_info_t *
 dt_ai_get_model_info_by_index(dt_ai_environment_t *env, int index) {
   if(!env)
     return NULL;
@@ -175,7 +175,7 @@ dt_ai_get_model_info_by_index(dt_ai_environment_t *env, int index) {
   return (const dt_ai_model_info_t *)item->data;
 }
 
-DT_AI_EXPORT const dt_ai_model_info_t *
+const dt_ai_model_info_t *
 dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id) {
   if(!env || !id)
     return NULL;
@@ -189,7 +189,7 @@ dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id) {
 
 static void _free_model_info(gpointer data) { g_free(data); }
 
-DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
+void dt_ai_env_refresh(dt_ai_environment_t *env) {
   if(!env)
     return;
 
@@ -214,7 +214,7 @@ DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
   g_mutex_unlock(&env->lock);
 }
 
-DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env) {
+void dt_ai_env_destroy(dt_ai_environment_t *env) {
   if(!env)
     return;
 
@@ -235,7 +235,7 @@ extern dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
 
 // --- Model Loading with Backend Dispatch ---
 
-DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
+dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
                                                const char *model_id,
                                                dt_ai_provider_t provider) {
   if(!env || !model_id)
@@ -278,3 +278,9 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   g_free(backend_copy);
   return ctx;
 }
+
+// clang-format off
+// modelines: These editor modelines have been set for all relevant files by tools/update_modelines.py
+// vim: shiftwidth=2 expandtab tabstop=2 cindent
+// kate: tab-indents: off; indent-width 2; replace-tabs on; indent-mode cstyle; remove-trailing-spaces modified;
+// clang-format on

@@ -18,14 +18,7 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdint.h>
-
-// Static library - no export macros needed
-#define DT_AI_EXPORT
 
 /**
  * @brief AI Execution Provider
@@ -70,12 +63,12 @@ typedef struct dt_ai_model_info_t {
  * @param search_paths Semicolon-separated list of paths to scan.
  * @return dt_ai_environment_t* Handle, or NULL on error.
  */
-DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths);
+dt_ai_environment_t *dt_ai_env_init(const char *search_paths);
 
 /**
  * @brief Get the number of discovered models.
  */
-DT_AI_EXPORT int dt_ai_get_model_count(dt_ai_environment_t *env);
+int dt_ai_get_model_count(dt_ai_environment_t *env);
 
 /**
  * @brief Get model details by index.
@@ -83,7 +76,7 @@ DT_AI_EXPORT int dt_ai_get_model_count(dt_ai_environment_t *env);
  * @param index Index 0 to count-1.
  * @return const dt_ai_model_info_t* Pointer to info struct.
  */
-DT_AI_EXPORT const dt_ai_model_info_t *
+const dt_ai_model_info_t *
 dt_ai_get_model_info_by_index(dt_ai_environment_t *env, int index);
 
 /**
@@ -92,7 +85,7 @@ dt_ai_get_model_info_by_index(dt_ai_environment_t *env, int index);
  * @param id The unique ID of the model.
  * @return const dt_ai_model_info_t* Pointer to info struct.
  */
-DT_AI_EXPORT const dt_ai_model_info_t *
+const dt_ai_model_info_t *
 dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id);
 
 /**
@@ -100,13 +93,13 @@ dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id);
  * @param env The environment handle to refresh.
  * @note Call this after downloading new models.
  */
-DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env);
+void dt_ai_env_refresh(dt_ai_environment_t *env);
 
 /**
  * @brief Cleanup the library environment.
  * @param env The environment handle to destroy.
  */
-DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env);
+void dt_ai_env_destroy(dt_ai_environment_t *env);
 
 /* --- Execution --- */
 
@@ -117,7 +110,7 @@ DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env);
  * @param provider Execution provider to use for hardware acceleration.
  * @return dt_ai_context_t* Context ready for inference, or NULL.
  */
-DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
+dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
                                                const char *model_id,
                                                dt_ai_provider_t provider);
 
@@ -152,7 +145,7 @@ typedef struct dt_ai_tensor_t {
  * @param num_outputs Number of output tensors.
  * @return int 0 on success, <0 on error.
  */
-DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
+int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
                            int num_inputs, dt_ai_tensor_t *outputs,
                            int num_outputs);
 
@@ -161,14 +154,14 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
  * @param ctx The AI context.
  * @return Number of inputs, or 0 if ctx is NULL.
  */
-DT_AI_EXPORT int dt_ai_get_input_count(dt_ai_context_t *ctx);
+int dt_ai_get_input_count(dt_ai_context_t *ctx);
 
 /**
  * @brief Get the number of model outputs.
  * @param ctx The AI context.
  * @return Number of outputs, or 0 if ctx is NULL.
  */
-DT_AI_EXPORT int dt_ai_get_output_count(dt_ai_context_t *ctx);
+int dt_ai_get_output_count(dt_ai_context_t *ctx);
 
 /**
  * @brief Get the name of a model input by index.
@@ -176,7 +169,7 @@ DT_AI_EXPORT int dt_ai_get_output_count(dt_ai_context_t *ctx);
  * @param index Input index (0-based).
  * @return Input name string (owned by ctx, do not free), or NULL.
  */
-DT_AI_EXPORT const char *dt_ai_get_input_name(dt_ai_context_t *ctx, int index);
+const char *dt_ai_get_input_name(dt_ai_context_t *ctx, int index);
 
 /**
  * @brief Get the data type of a model input by index.
@@ -184,7 +177,7 @@ DT_AI_EXPORT const char *dt_ai_get_input_name(dt_ai_context_t *ctx, int index);
  * @param index Input index (0-based).
  * @return Data type, or DT_AI_FLOAT as fallback.
  */
-DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
+dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
                                                  int index);
 
 /**
@@ -193,7 +186,7 @@ DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
  * @param index Output index (0-based).
  * @return Output name string (owned by ctx, do not free), or NULL.
  */
-DT_AI_EXPORT const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
+const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
                                                 int index);
 
 /**
@@ -202,15 +195,11 @@ DT_AI_EXPORT const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
  * @param index Output index (0-based).
  * @return Data type, or DT_AI_FLOAT as fallback.
  */
-DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
+dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
                                                   int index);
 
 /**
  * @brief Unload a model and free execution context.
  * @param ctx The AI context to unload.
  */
-DT_AI_EXPORT void dt_ai_unload_model(dt_ai_context_t *ctx);
-
-#ifdef __cplusplus
-}
-#endif
+void dt_ai_unload_model(dt_ai_context_t *ctx);

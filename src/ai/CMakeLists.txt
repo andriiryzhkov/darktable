@@ -2,16 +2,11 @@ cmake_minimum_required(VERSION 3.18)
 
 project(darktable_ai)
 
-# Static library - linked into lib_darktable
-# This avoids Windows DLL linking issues while keeping clean separation
 add_library(darktable_ai STATIC
   backend.h
   backend_common.c
   backend_onnx.c
 )
-
-# No export macros needed for static library
-# Symbols will be exported from lib_darktable.dll on Windows
 
 # Find ONNX Runtime (auto-downloads if not present)
 find_package(ONNXRuntime REQUIRED)
@@ -46,9 +41,6 @@ target_link_libraries(darktable_ai PUBLIC
   ${JSON_GLIB_LIBRARIES}
 )
 
-# Static libraries don't need RPATH or installation
-# They get linked into lib_darktable
-
 # Install the bundled ONNX Runtime shared library alongside darktable_ai
 if(APPLE)
   file(GLOB _ORT_DYLIB "${ONNXRuntime_LIB_DIR}/libonnxruntime.*.dylib")
@@ -74,5 +66,3 @@ elseif(UNIX)
     )
   endif()
 endif()
-
-

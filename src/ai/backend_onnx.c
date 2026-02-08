@@ -511,7 +511,7 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
   return ctx;
 }
 
-DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
+int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
                            int num_inputs, dt_ai_tensor_t *outputs,
                            int num_outputs) {
   if(!ctx || !ctx->session)
@@ -733,43 +733,43 @@ cleanup:
   return ret;
 }
 
-DT_AI_EXPORT int dt_ai_get_input_count(dt_ai_context_t *ctx) {
+int dt_ai_get_input_count(dt_ai_context_t *ctx) {
   return ctx ? (int)ctx->input_count : 0;
 }
 
-DT_AI_EXPORT int dt_ai_get_output_count(dt_ai_context_t *ctx) {
+int dt_ai_get_output_count(dt_ai_context_t *ctx) {
   return ctx ? (int)ctx->output_count : 0;
 }
 
-DT_AI_EXPORT const char *dt_ai_get_input_name(dt_ai_context_t *ctx,
+const char *dt_ai_get_input_name(dt_ai_context_t *ctx,
                                                int index) {
   if(!ctx || index < 0 || (size_t)index >= ctx->input_count)
     return NULL;
   return ctx->input_names[index];
 }
 
-DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
+dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
                                                   int index) {
   if(!ctx || index < 0 || (size_t)index >= ctx->input_count)
     return DT_AI_FLOAT;
   return ctx->input_types[index];
 }
 
-DT_AI_EXPORT const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
+const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
                                                 int index) {
   if(!ctx || index < 0 || (size_t)index >= ctx->output_count)
     return NULL;
   return ctx->output_names[index];
 }
 
-DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
+dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
                                                    int index) {
   if(!ctx || index < 0 || (size_t)index >= ctx->output_count)
     return DT_AI_FLOAT;
   return ctx->output_types[index];
 }
 
-DT_AI_EXPORT void dt_ai_unload_model(dt_ai_context_t *ctx) {
+void dt_ai_unload_model(dt_ai_context_t *ctx) {
   if(ctx) {
     if(ctx->session)
       g_ort->ReleaseSession(ctx->session);
@@ -797,3 +797,9 @@ DT_AI_EXPORT void dt_ai_unload_model(dt_ai_context_t *ctx) {
     g_free(ctx);
   }
 }
+
+// clang-format off
+// modelines: These editor modelines have been set for all relevant files by tools/update_modelines.py
+// vim: shiftwidth=2 expandtab tabstop=2 cindent
+// kate: tab-indents: off; indent-width 2; replace-tabs on; indent-mode cstyle; remove-trailing-spaces modified;
+// clang-format on
