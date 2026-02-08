@@ -404,13 +404,6 @@
     <shortdescription>AI models GitHub repository</shortdescription>
     <longdescription>GitHub repository for downloading AI models (format: owner/repo)</longdescription>
   </dtconfig>
-  <dtconfig>
-    <name>plugins/ai/release</name>
-    <type>string</type>
-    <default>latest</default>
-    <shortdescription>AI models release tag</shortdescription>
-    <longdescription>GitHub release tag to download models from. Use 'latest' for the most recent release.</longdescription>
-  </dtconfig>
   <dtconfig prefs="processing" section="opencl" capability="opencl">
     <name>opencl</name>
     <type>bool</type>

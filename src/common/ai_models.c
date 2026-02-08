@@ -52,7 +52,6 @@ static inline char *realpath(const char *path, char *resolved_path)
 #define CONF_AI_ENABLED "plugins/ai/enabled"
 #define CONF_AI_PROVIDER "plugins/ai/provider"
 #define CONF_AI_REPOSITORY "plugins/ai/repository"
-#define CONF_AI_RELEASE "plugins/ai/release"
 #define CONF_MODEL_ENABLED_PREFIX "plugins/ai/models/"
 
 // --- Internal Helpers ---
@@ -108,6 +107,162 @@ dt_ai_provider_t dt_ai_provider_from_string(const char *str)
   if(g_ascii_strcasecmp(str, "ROCm") == 0) return DT_AI_PROVIDER_ROCM;
   if(g_ascii_strcasecmp(str, "DirectML") == 0) return DT_AI_PROVIDER_DIRECTML;
   return DT_AI_PROVIDER_AUTO;
+}
+
+// --- Version Helpers ---
+
+// Curl write callback that appends to a GString
+static size_t _curl_write_string(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+  GString *buf = (GString *)userdata;
+  g_string_append_len(buf, (const char *)ptr, size * nmemb);
+  return size * nmemb;
+}
+
+/**
+ * @brief Extract "major.minor.patch" from darktable_package_version.
+ *
+ * darktable_package_version looks like "5.5.0+156~gabcdef-dirty" or "5.4.0".
+ * We extract the leading "X.Y.Z" portion.
+ *
+ * @return Newly allocated string "X.Y.Z", or NULL on parse failure.
+ */
+static char *_get_darktable_version_prefix(void)
+{
+  int major = 0, minor = 0, patch = 0;
+  if(sscanf(darktable_package_version, "%d.%d.%d", &major, &minor, &patch) == 3)
+    return g_strdup_printf("%d.%d.%d", major, minor, patch);
+  return NULL;
+}
+
+/**
+ * @brief Query the GitHub API to find the latest model release compatible
+ *        with the current darktable version.
+ *
+ * Looks for releases tagged "vX.Y.Z" or "vX.Y.Z.N" where X.Y.Z matches
+ * the darktable version. Returns the tag with the highest revision number.
+ *
+ * @param repository  GitHub "owner/repo" string
+ * @return Newly allocated tag string (e.g. "v5.5.0.2"), or NULL if none found.
+ */
+static char *_find_latest_compatible_release(const char *repository)
+{
+  char *dt_version = _get_darktable_version_prefix();
+  if(!dt_version) return NULL;
+
+  char *api_url = g_strdup_printf(
+    "https://api.github.com/repos/%s/releases?per_page=100", repository);
+
+  CURL *curl = curl_easy_init();
+  if(!curl)
+  {
+    g_free(api_url);
+    g_free(dt_version);
+    return NULL;
+  }
+  dt_curl_init(curl, FALSE);
+
+  GString *response = g_string_new(NULL);
+  curl_easy_setopt(curl, CURLOPT_URL, api_url);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _curl_write_string);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+
+  struct curl_slist *headers = NULL;
+  headers = curl_slist_append(headers, "Accept: application/vnd.github+json");
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+  CURLcode res = curl_easy_perform(curl);
+  long http_code = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+  g_free(api_url);
+
+  if(res != CURLE_OK || http_code != 200)
+  {
+    dt_print(DT_DEBUG_AI,
+      "[ai_models] GitHub API request failed: curl=%d, http=%ld", res, http_code);
+    g_string_free(response, TRUE);
+    g_free(dt_version);
+    return NULL;
+  }
+
+  // Parse JSON array of releases
+  JsonParser *parser = json_parser_new();
+  if(!json_parser_load_from_data(parser, response->str, response->len, NULL))
+  {
+    g_object_unref(parser);
+    g_string_free(response, TRUE);
+    g_free(dt_version);
+    return NULL;
+  }
+  g_string_free(response, TRUE);
+
+  JsonNode *root = json_parser_get_root(parser);
+  if(!root || !JSON_NODE_HOLDS_ARRAY(root))
+  {
+    g_object_unref(parser);
+    g_free(dt_version);
+    return NULL;
+  }
+
+  // Build prefix to match: "vX.Y.Z"
+  char *tag_prefix = g_strdup_printf("v%s", dt_version);
+  size_t prefix_len = strlen(tag_prefix);
+
+  char *best_tag = NULL;
+  int best_revision = -1;  // -1 means no revision suffix (e.g., "v5.5.0" itself)
+
+  JsonArray *releases = json_node_get_array(root);
+  guint len = json_array_get_length(releases);
+  for(guint i = 0; i < len; i++)
+  {
+    JsonNode *node = json_array_get_element(releases, i);
+    if(!JSON_NODE_HOLDS_OBJECT(node)) continue;
+    JsonObject *rel = json_node_get_object(node);
+
+    if(!json_object_has_member(rel, "tag_name")) continue;
+    const char *tag = json_object_get_string_member(rel, "tag_name");
+    if(!tag || strncmp(tag, tag_prefix, prefix_len) != 0) continue;
+
+    // Tag matches prefix. Check what follows:
+    // "vX.Y.Z" (exact) -> revision = 0
+    // "vX.Y.Z.N"       -> revision = N
+    const char *suffix = tag + prefix_len;
+    int revision = 0;
+    if(suffix[0] == '\0')
+    {
+      revision = 0;
+    }
+    else if(suffix[0] == '.' && suffix[1] >= '0' && suffix[1] <= '9')
+    {
+      revision = atoi(suffix + 1);
+    }
+    else
+    {
+      continue;  // doesn't match pattern
+    }
+
+    if(revision > best_revision)
+    {
+      best_revision = revision;
+      g_free(best_tag);
+      best_tag = g_strdup(tag);
+    }
+  }
+
+  g_free(tag_prefix);
+  g_free(dt_version);
+  g_object_unref(parser);
+
+  if(best_tag)
+    dt_print(DT_DEBUG_AI, "[ai_models] Found compatible release: %s", best_tag);
+  else
+    dt_print(DT_DEBUG_AI, "[ai_models] No compatible release found for darktable %s",
+             darktable_package_version);
+
+  return best_tag;
 }
 
 // --- Core API ---
@@ -211,34 +366,15 @@ gboolean dt_ai_models_load_registry(dt_ai_registry_t *registry)
   g_list_free_full(registry->models, (GDestroyNotify)_model_free);
   registry->models = NULL;
 
-  // Parse repository and release - config overrides JSON defaults
+  // Parse repository - config overrides JSON default
   g_free(registry->repository);
-  g_free(registry->release);
   registry->repository = NULL;
-  registry->release = NULL;
 
-  // Get defaults from JSON
-  const char *json_repository = NULL;
-  const char *json_release = NULL;
-  if(json_object_has_member(root_obj, "repository"))
-    json_repository = json_object_get_string_member(root_obj, "repository");
-  if(json_object_has_member(root_obj, "release"))
-    json_release = json_object_get_string_member(root_obj, "release");
-
-  // Use config values if set, otherwise use JSON defaults
   if(dt_conf_key_exists(CONF_AI_REPOSITORY))
     registry->repository = dt_conf_get_string(CONF_AI_REPOSITORY);
-  else if(json_repository)
-    registry->repository = g_strdup(json_repository);
 
-  if(dt_conf_key_exists(CONF_AI_RELEASE))
-    registry->release = dt_conf_get_string(CONF_AI_RELEASE);
-  else if(json_release)
-    registry->release = g_strdup(json_release);
-
-  dt_print(DT_DEBUG_AI, "[ai_models] Using repository: %s, release: %s",
-           registry->repository ? registry->repository : "(none)",
-           registry->release ? registry->release : "(none)");
+  dt_print(DT_DEBUG_AI, "[ai_models] Using repository: %s",
+           registry->repository ? registry->repository : "(none)");
 
   // Parse models array
   if(json_object_has_member(root_obj, "models"))
@@ -326,7 +462,6 @@ void dt_ai_models_cleanup(dt_ai_registry_t *registry)
   g_mutex_clear(&registry->lock);
 
   g_free(registry->repository);
-  g_free(registry->release);
   g_free(registry->models_dir);
   g_free(registry->cache_dir);
   g_free(registry);
@@ -601,29 +736,34 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
   g_mutex_unlock(&registry->lock);
 
   // Validate repository format (must be "owner/repo" with safe characters)
-  if(!registry->repository || !registry->release
-     || !g_regex_match_simple("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", registry->repository, 0, 0)
-     || !g_regex_match_simple("^[a-zA-Z0-9._-]+$", registry->release, 0, 0))
+  if(!registry->repository
+     || !g_regex_match_simple("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", registry->repository, 0, 0))
   {
     g_mutex_lock(&registry->lock);
     model->status = DT_AI_MODEL_ERROR;
     g_mutex_unlock(&registry->lock);
-    return g_strdup(_("invalid repository or release format"));
+    return g_strdup(_("invalid repository format"));
+  }
+
+  // Find the latest compatible release for this darktable version
+  char *release_tag = _find_latest_compatible_release(registry->repository);
+  if(!release_tag)
+  {
+    char *dt_ver = _get_darktable_version_prefix();
+    char *err = g_strdup_printf(_("no compatible AI model release found for darktable %s"),
+                                dt_ver ? dt_ver : darktable_package_version);
+    g_free(dt_ver);
+    g_mutex_lock(&registry->lock);
+    model->status = DT_AI_MODEL_ERROR;
+    g_mutex_unlock(&registry->lock);
+    return err;
   }
 
   // Build GitHub download URL
-  char *url = NULL;
-  if(g_strcmp0(registry->release, "latest") == 0)
-  {
-    url = g_strdup_printf("https://github.com/%s/releases/latest/download/%s",
-                          registry->repository, model->github_asset);
-  }
-  else
-  {
-    url = g_strdup_printf("https://github.com/%s/releases/download/%s/%s",
-                          registry->repository, registry->release,
-                          model->github_asset);
-  }
+  char *url = g_strdup_printf("https://github.com/%s/releases/download/%s/%s",
+                              registry->repository, release_tag,
+                              model->github_asset);
+  g_free(release_tag);
 
   if(!url)
   {

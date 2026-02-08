@@ -1,11 +1,9 @@
 {
   "version": 1,
-  "repository": "darktable-org/darktable-ai-models",
-  "release": "latest",
   "models": [
     {
       "id": "nafnet-sidd-width32",
-      "name": "NAFNet Denoise (SIDD)",
+      "name": "Denoise NAFNet (SIDD)",
       "description": "General-purpose image denoising trained on SIDD dataset",
       "task": "denoise",
       "github_asset": "nafnet-sidd-width32.zip",

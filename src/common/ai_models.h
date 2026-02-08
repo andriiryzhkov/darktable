@@ -62,8 +62,7 @@ typedef void (*dt_ai_progress_callback)(const char *model_id, double progress,
  */
 typedef struct dt_ai_registry_t {
   GList *models;           // List of dt_ai_model_t*
-  char *repository;        // GitHub repository (e.g. "darktable-org/darktable-ai-models")
-  char *release;           // Release tag (e.g. "latest" or "v1.0.0")
+  char *repository;        // GitHub repository (e.g. "darktable-org/darktable-ai")
   char *models_dir;        // Path to user's models directory
   char *cache_dir;         // Path to download cache directory
   gboolean ai_enabled;     // Global AI enable/disable
