@@ -161,6 +161,7 @@ static void _refresh_model_list(dt_prefs_ai_data_t *data)
                        COL_REQUIRED, model->required ? _("yes") : _("no"),
                        COL_ID, model->id,
                        -1);
+    dt_ai_model_free(model);
   }
 
   // Reset select-all toggle
@@ -389,8 +390,9 @@ static gboolean _download_model_with_dialog(dt_prefs_ai_data_t *data, const char
   gtk_container_set_border_width(GTK_CONTAINER(content), 10);
   gtk_box_set_spacing(GTK_BOX(content), 10);
 
-  // Model name label
+  // Model name label (use fields from copy, then free it)
   char *title = g_strdup_printf(_("Downloading: %s"), model->name ? model->name : model->id);
+  dt_ai_model_free(model);
   GtkWidget *title_label = gtk_label_new(title);
   g_free(title);
   gtk_box_pack_start(GTK_BOX(content), title_label, FALSE, FALSE, 0);
@@ -463,11 +465,13 @@ static void _on_download_selected(GtkButton *button, gpointer user_data)
   GList *ids = _get_selected_model_ids(data);
   for(GList *l = ids; l; l = g_list_next(l))
   {
-    const char *model_id = (const char *)l->data;
-    dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, model_id);
-    if(model && model->status == DT_AI_MODEL_NOT_DOWNLOADED)
+    const char *id = (const char *)l->data;
+    dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, id);
+    if(model)
     {
-      if(!_download_model_with_dialog(data, model_id))
+      gboolean need_download = (model->status == DT_AI_MODEL_NOT_DOWNLOADED);
+      dt_ai_model_free(model);
+      if(need_download && !_download_model_with_dialog(data, id))
         break;  // Stop on error or cancel
     }
   }
@@ -484,10 +488,18 @@ static void _on_download_required(GtkButton *button, gpointer user_data)
   for(int i = 0; i < count; i++)
   {
     dt_ai_model_t *model = dt_ai_models_get_by_index(darktable.ai_registry, i);
-    if(model && model->required && model->status == DT_AI_MODEL_NOT_DOWNLOADED)
+    if(!model) continue;
+    gboolean need_download = (model->required && model->status == DT_AI_MODEL_NOT_DOWNLOADED);
+    char *id = need_download ? g_strdup(model->id) : NULL;
+    dt_ai_model_free(model);
+    if(need_download)
     {
-      if(!_download_model_with_dialog(data, model->id))
+      if(!_download_model_with_dialog(data, id))
+      {
+        g_free(id);
         break;  // Stop on error or cancel
+      }
+      g_free(id);
     }
   }
   _refresh_model_list(data);
@@ -502,10 +514,18 @@ static void _on_download_all(GtkButton *button, gpointer user_data)
   for(int i = 0; i < count; i++)
   {
     dt_ai_model_t *model = dt_ai_models_get_by_index(darktable.ai_registry, i);
-    if(model && model->status == DT_AI_MODEL_NOT_DOWNLOADED)
+    if(!model) continue;
+    gboolean need_download = (model->status == DT_AI_MODEL_NOT_DOWNLOADED);
+    char *id = need_download ? g_strdup(model->id) : NULL;
+    dt_ai_model_free(model);
+    if(need_download)
     {
-      if(!_download_model_with_dialog(data, model->id))
+      if(!_download_model_with_dialog(data, id))
+      {
+        g_free(id);
         break;  // Stop on error or cancel
+      }
+      g_free(id);
     }
   }
   _refresh_model_list(data);
@@ -522,12 +542,16 @@ static void _on_delete_selected(GtkButton *button, gpointer user_data)
 
   for(GList *l = ids; l; l = g_list_next(l))
   {
-    const char *model_id = (const char *)l->data;
-    dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, model_id);
-    if(model && model->status == DT_AI_MODEL_DOWNLOADED)
+    const char *id = (const char *)l->data;
+    dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, id);
+    if(model)
     {
-      to_delete = g_list_append(to_delete, g_strdup(model_id));
-      delete_count++;
+      if(model->status == DT_AI_MODEL_DOWNLOADED)
+      {
+        to_delete = g_list_append(to_delete, g_strdup(id));
+        delete_count++;
+      }
+      dt_ai_model_free(model);
     }
   }
   g_list_free_full(ids, g_free);

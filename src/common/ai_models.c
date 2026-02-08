@@ -68,6 +68,28 @@ static void _model_free(dt_ai_model_t *model)
   g_free(model);
 }
 
+static dt_ai_model_t *_model_copy(const dt_ai_model_t *src)
+{
+  if(!src) return NULL;
+  dt_ai_model_t *copy = g_new0(dt_ai_model_t, 1);
+  copy->id = g_strdup(src->id);
+  copy->name = g_strdup(src->name);
+  copy->description = g_strdup(src->description);
+  copy->task = g_strdup(src->task);
+  copy->github_asset = g_strdup(src->github_asset);
+  copy->checksum = g_strdup(src->checksum);
+  copy->required = src->required;
+  copy->enabled = src->enabled;
+  copy->status = src->status;
+  copy->download_progress = src->download_progress;
+  return copy;
+}
+
+void dt_ai_model_free(dt_ai_model_t *model)
+{
+  _model_free(model);
+}
+
 static dt_ai_model_t *_model_new(void)
 {
   dt_ai_model_t *model = g_new0(dt_ai_model_t, 1);
@@ -469,6 +491,19 @@ void dt_ai_models_cleanup(dt_ai_registry_t *registry)
 
 // --- Model Access ---
 
+// Internal: find model by ID without locking. Caller must hold registry->lock.
+// Returns direct pointer to registry-owned model (not a copy).
+static dt_ai_model_t *_find_model_unlocked(dt_ai_registry_t *registry, const char *model_id)
+{
+  for(GList *l = registry->models; l; l = g_list_next(l))
+  {
+    dt_ai_model_t *model = (dt_ai_model_t *)l->data;
+    if(g_strcmp0(model->id, model_id) == 0)
+      return model;
+  }
+  return NULL;
+}
+
 int dt_ai_models_get_count(dt_ai_registry_t *registry)
 {
   if(!registry) return 0;
@@ -483,34 +518,26 @@ dt_ai_model_t *dt_ai_models_get_by_index(dt_ai_registry_t *registry, int index)
   if(!registry || index < 0) return NULL;
   g_mutex_lock(&registry->lock);
   dt_ai_model_t *model = g_list_nth_data(registry->models, index);
+  dt_ai_model_t *copy = _model_copy(model);
   g_mutex_unlock(&registry->lock);
-  return model;
+  return copy;
 }
 
 dt_ai_model_t *dt_ai_models_get_by_id(dt_ai_registry_t *registry, const char *model_id)
 {
   if(!registry || !model_id) return NULL;
-
   g_mutex_lock(&registry->lock);
-  dt_ai_model_t *result = NULL;
-  for(GList *l = registry->models; l; l = g_list_next(l))
-  {
-    dt_ai_model_t *model = (dt_ai_model_t *)l->data;
-    if(g_strcmp0(model->id, model_id) == 0)
-    {
-      result = model;
-      break;
-    }
-  }
+  dt_ai_model_t *model = _find_model_unlocked(registry, model_id);
+  dt_ai_model_t *copy = _model_copy(model);
   g_mutex_unlock(&registry->lock);
-  return result;
+  return copy;
 }
 
 // --- Download Implementation ---
 
 typedef struct dt_ai_download_data_t {
   dt_ai_registry_t *registry;
-  dt_ai_model_t *model;
+  char *model_id;              // Owned copy of model ID (safe to use without lock)
   dt_ai_progress_callback callback;
   gpointer user_data;
   FILE *file;
@@ -535,9 +562,15 @@ static int _curl_progress_callback(void *clientp, curl_off_t dltotal, curl_off_t
   if(dltotal > 0)
   {
     double progress = (double)dlnow / (double)dltotal;
-    dl->model->download_progress = progress;
+
+    // Update model progress under lock
+    g_mutex_lock(&dl->registry->lock);
+    dt_ai_model_t *m = _find_model_unlocked(dl->registry, dl->model_id);
+    if(m) m->download_progress = progress;
+    g_mutex_unlock(&dl->registry->lock);
+
     if(dl->callback)
-      dl->callback(dl->model->id, progress, dl->user_data);
+      dl->callback(dl->model_id, progress, dl->user_data);
   }
   return 0;
 }
@@ -712,20 +745,30 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
   if(!registry || !model_id)
     return g_strdup(_("invalid parameters"));
 
-  dt_ai_model_t *model = dt_ai_models_get_by_id(registry, model_id);
+  // Lock once to validate, copy immutable fields, and set status
+  g_mutex_lock(&registry->lock);
+  dt_ai_model_t *model = _find_model_unlocked(registry, model_id);
   if(!model)
+  {
+    g_mutex_unlock(&registry->lock);
     return g_strdup(_("model not found in registry"));
+  }
 
   if(!model->github_asset)
+  {
+    g_mutex_unlock(&registry->lock);
     return g_strdup(_("model has no download asset defined"));
+  }
 
   // Validate asset filename: reject path separators and query strings
   if(strchr(model->github_asset, '/') || strchr(model->github_asset, '\\')
      || strchr(model->github_asset, '?') || strchr(model->github_asset, '#')
      || strstr(model->github_asset, ".."))
+  {
+    g_mutex_unlock(&registry->lock);
     return g_strdup(_("invalid asset filename"));
+  }
 
-  g_mutex_lock(&registry->lock);
   if(model->status == DT_AI_MODEL_DOWNLOADING)
   {
     g_mutex_unlock(&registry->lock);
@@ -733,16 +776,30 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
   }
   model->status = DT_AI_MODEL_DOWNLOADING;
   model->download_progress = 0.0;
+
+  // Copy immutable fields we need outside the lock
+  char *asset = g_strdup(model->github_asset);
+  char *checksum_copy = g_strdup(model->checksum);
   g_mutex_unlock(&registry->lock);
+
+  // Helper macro: set model status under lock and return error
+  // Uses _find_model_unlocked to avoid keeping a stale pointer
+  #define SET_STATUS_AND_RETURN(status_val, err_expr) \
+    do { \
+      g_mutex_lock(&registry->lock); \
+      dt_ai_model_t *_m = _find_model_unlocked(registry, model_id); \
+      if(_m) _m->status = (status_val); \
+      g_mutex_unlock(&registry->lock); \
+      g_free(asset); \
+      g_free(checksum_copy); \
+      return (err_expr); \
+    } while(0)
 
   // Validate repository format (must be "owner/repo" with safe characters)
   if(!registry->repository
      || !g_regex_match_simple("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", registry->repository, 0, 0))
   {
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return g_strdup(_("invalid repository format"));
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("invalid repository format")));
   }
 
   // Find the latest compatible release for this darktable version
@@ -753,30 +810,23 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
     char *err = g_strdup_printf(_("no compatible AI model release found for darktable %s"),
                                 dt_ver ? dt_ver : darktable_package_version);
     g_free(dt_ver);
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return err;
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, err);
   }
 
-  // Build GitHub download URL
+  // Build GitHub download URL using local copies (not model pointer)
   char *url = g_strdup_printf("https://github.com/%s/releases/download/%s/%s",
-                              registry->repository, release_tag,
-                              model->github_asset);
+                              registry->repository, release_tag, asset);
   g_free(release_tag);
 
   if(!url)
   {
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return g_strdup(_("failed to build download URL"));
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("failed to build download URL")));
   }
 
   dt_print(DT_DEBUG_AI, "[ai_models] Downloading: %s", url);
 
-  // Prepare download path
-  char *download_path = g_build_filename(registry->cache_dir, model->github_asset, NULL);
+  // Prepare download path using local copy
+  char *download_path = g_build_filename(registry->cache_dir, asset, NULL);
 
   FILE *file = g_fopen(download_path, "wb");
   if(!file)
@@ -784,16 +834,13 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
     char *err = g_strdup_printf(_("failed to create file: %s"), download_path);
     g_free(download_path);
     g_free(url);
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return err;
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, err);
   }
 
-  // Set up download data
+  // Set up download data (uses model_id copy, not model pointer)
   dt_ai_download_data_t dl = {
     .registry = registry,
-    .model = model,
+    .model_id = (char *)model_id,
     .callback = callback,
     .user_data = user_data,
     .file = file,
@@ -807,10 +854,7 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
     fclose(file);
     g_free(download_path);
     g_free(url);
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return g_strdup(_("failed to initialize download"));
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("failed to initialize download")));
   }
   dt_curl_init(curl, FALSE);
 
@@ -854,21 +898,15 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
   if(error)
   {
     g_free(download_path);
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return error;
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, error);
   }
 
-  // Verify checksum
-  if(!_verify_checksum(download_path, model->checksum))
+  // Verify checksum using local copy
+  if(!_verify_checksum(download_path, checksum_copy))
   {
     g_unlink(download_path);
     g_free(download_path);
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return g_strdup(_("checksum verification failed"));
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("checksum verification failed")));
   }
 
   // Extract to models directory (ZIP already contains model_id folder)
@@ -876,26 +914,33 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
   {
     g_unlink(download_path);
     g_free(download_path);
-    g_mutex_lock(&registry->lock);
-    model->status = DT_AI_MODEL_ERROR;
-    g_mutex_unlock(&registry->lock);
-    return g_strdup(_("failed to extract archive"));
+    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("failed to extract archive")));
   }
 
   // Clean up downloaded zip
   g_unlink(download_path);
   g_free(download_path);
 
+  // Mark success
   g_mutex_lock(&registry->lock);
-  model->status = DT_AI_MODEL_DOWNLOADED;
-  model->download_progress = 1.0;
+  dt_ai_model_t *m = _find_model_unlocked(registry, model_id);
+  if(m)
+  {
+    m->status = DT_AI_MODEL_DOWNLOADED;
+    m->download_progress = 1.0;
+  }
   g_mutex_unlock(&registry->lock);
 
-  dt_print(DT_DEBUG_AI, "[ai_models] Download complete: %s", model->id);
+  dt_print(DT_DEBUG_AI, "[ai_models] Download complete: %s", model_id);
 
   // Final callback
   if(callback)
     callback(model_id, 1.0, user_data);
+
+  g_free(asset);
+  g_free(checksum_copy);
+
+  #undef SET_STATUS_AND_RETURN
 
   return NULL;  // Success
 }
@@ -999,16 +1044,27 @@ gboolean dt_ai_models_delete(dt_ai_registry_t *registry, const char *model_id)
 {
   if(!registry || !model_id) return FALSE;
 
-  dt_ai_model_t *model = dt_ai_models_get_by_id(registry, model_id);
-  if(!model) return FALSE;
+  // Check model exists
+  g_mutex_lock(&registry->lock);
+  dt_ai_model_t *model = _find_model_unlocked(registry, model_id);
+  if(!model)
+  {
+    g_mutex_unlock(&registry->lock);
+    return FALSE;
+  }
+  g_mutex_unlock(&registry->lock);
 
   char *model_dir = g_build_filename(registry->models_dir, model_id, NULL);
   _rmdir_recursive(model_dir);
   g_free(model_dir);
 
   g_mutex_lock(&registry->lock);
-  model->status = DT_AI_MODEL_NOT_DOWNLOADED;
-  model->download_progress = 0.0;
+  model = _find_model_unlocked(registry, model_id);
+  if(model)
+  {
+    model->status = DT_AI_MODEL_NOT_DOWNLOADED;
+    model->download_progress = 0.0;
+  }
   g_mutex_unlock(&registry->lock);
 
   return TRUE;
@@ -1021,12 +1077,12 @@ void dt_ai_models_set_enabled(dt_ai_registry_t *registry, const char *model_id,
 {
   if(!registry || !model_id) return;
 
-  dt_ai_model_t *model = dt_ai_models_get_by_id(registry, model_id);
-  if(!model) return;
-
   g_mutex_lock(&registry->lock);
-  model->enabled = enabled;
+  dt_ai_model_t *model = _find_model_unlocked(registry, model_id);
+  if(model) model->enabled = enabled;
   g_mutex_unlock(&registry->lock);
+
+  if(!model) return;
 
   // Persist to config
   char *conf_key = g_strdup_printf("%s%s/enabled", CONF_MODEL_ENABLED_PREFIX, model_id);
@@ -1038,9 +1094,12 @@ char *dt_ai_models_get_path(dt_ai_registry_t *registry, const char *model_id)
 {
   if(!registry || !model_id) return NULL;
 
-  dt_ai_model_t *model = dt_ai_models_get_by_id(registry, model_id);
-  if(!model || model->status != DT_AI_MODEL_DOWNLOADED)
-    return NULL;
+  g_mutex_lock(&registry->lock);
+  dt_ai_model_t *model = _find_model_unlocked(registry, model_id);
+  gboolean downloaded = model && model->status == DT_AI_MODEL_DOWNLOADED;
+  g_mutex_unlock(&registry->lock);
+
+  if(!downloaded) return NULL;
 
   return g_build_filename(registry->models_dir, model_id, NULL);
 }

@@ -98,6 +98,14 @@ void dt_ai_models_refresh_status(dt_ai_registry_t *registry);
 void dt_ai_models_cleanup(dt_ai_registry_t *registry);
 
 // --- Model Access ---
+// All get functions return a COPY of the model. Caller must free with dt_ai_model_free().
+// This ensures thread safety: no lock is exposed to callers, preventing deadlocks.
+
+/**
+ * @brief Free a model copy returned by get_by_index/get_by_id
+ * @param model The model to free (may be NULL)
+ */
+void dt_ai_model_free(dt_ai_model_t *model);
 
 /**
  * @brief Get number of models in registry
@@ -107,18 +115,18 @@ void dt_ai_models_cleanup(dt_ai_registry_t *registry);
 int dt_ai_models_get_count(dt_ai_registry_t *registry);
 
 /**
- * @brief Get model by index
+ * @brief Get model by index (returns a copy, caller must free with dt_ai_model_free)
  * @param registry The registry
  * @param index Index 0 to count-1
- * @return Model pointer (owned by registry), or NULL
+ * @return Model copy (caller owns), or NULL
  */
 dt_ai_model_t *dt_ai_models_get_by_index(dt_ai_registry_t *registry, int index);
 
 /**
- * @brief Get model by ID
+ * @brief Get model by ID (returns a copy, caller must free with dt_ai_model_free)
  * @param registry The registry
  * @param model_id The unique model ID
- * @return Model pointer (owned by registry), or NULL
+ * @return Model copy (caller owns), or NULL
  */
 dt_ai_model_t *dt_ai_models_get_by_id(dt_ai_registry_t *registry,
                                        const char *model_id);
