@@ -16,10 +16,9 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "onnx_backend.h"
+#include "backend.h"
 #include "common/darktable.h"
 #include <glib.h>
-#include <json-glib/json-glib.h>
 #include <onnxruntime_c_api.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,24 +31,8 @@
 
 // --- Internal Structures ---
 
-struct dt_ai_environment_t {
-  GList *models;           // List of dt_ai_model_info_t*
-  GHashTable *model_paths; // ID -> Path (string)
-
-  // To keep pointers in dt_ai_model_info_t valid
-  GList *string_storage; // List of char*
-
-  // Remembered for refresh
-  char *search_paths;
-
-  GMutex lock;             // Thread safety for model list access
-};
-
 struct dt_ai_context_t {
-  char *loaded_model_id;
-
   // ONNX Runtime C Objects
-  const OrtApi *ort_api;
   OrtSession *session;
   OrtEnv *env;
   OrtMemoryInfo *memory_info;
@@ -162,215 +145,6 @@ static float _half_to_float(uint16_t h) {
   return f;
 }
 
-static void _store_string(dt_ai_environment_t *env, const char *str,
-                          const char **out_ptr) {
-  char *copy = g_strdup(str);
-  env->string_storage = g_list_prepend(env->string_storage, copy);
-  *out_ptr = copy;
-}
-
-static void _scan_directory(dt_ai_environment_t *env, const char *root_path) {
-  GDir *dir = g_dir_open(root_path, 0, NULL);
-  if(!dir)
-    return;
-
-  const char *entry_name;
-  while((entry_name = g_dir_read_name(dir))) {
-    char *full_path = g_build_filename(root_path, entry_name, NULL);
-    if(g_file_test(full_path, G_FILE_TEST_IS_DIR)) {
-      char *config_path = g_build_filename(full_path, "config.json", NULL);
-
-      if(g_file_test(config_path, G_FILE_TEST_EXISTS)) {
-        JsonParser *parser = json_parser_new();
-        GError *error = NULL;
-
-        if(json_parser_load_from_file(parser, config_path, &error)) {
-          JsonNode *root = json_parser_get_root(parser);
-          JsonObject *obj = json_node_get_object(root);
-
-          const char *id = json_object_get_string_member(obj, "id");
-          const char *name = json_object_get_string_member(obj, "name");
-          const char *desc =
-              json_object_has_member(obj, "description")
-                  ? json_object_get_string_member(obj, "description")
-                  : "";
-          const char *task = json_object_has_member(obj, "task")
-                                 ? json_object_get_string_member(obj, "task")
-                                 : "general";
-
-          if(id && name) {
-            // Skip duplicate model IDs (first discovered wins)
-            if(g_hash_table_contains(env->model_paths, id)) {
-              dt_print(DT_DEBUG_AI,
-                       "[darktable_ai] Skipping duplicate model ID: %s", id);
-            } else {
-              dt_ai_model_info_t *info = g_new0(dt_ai_model_info_t, 1);
-              _store_string(env, id, &info->id);
-              _store_string(env, name, &info->name);
-              _store_string(env, desc, &info->description);
-              _store_string(env, task, &info->task_type);
-              info->num_inputs = json_object_has_member(obj, "num_inputs")
-                  ? (int)json_object_get_int_member(obj, "num_inputs")
-                  : 1;
-
-              env->models = g_list_append(env->models, info);
-              g_hash_table_insert(env->model_paths, g_strdup(info->id),
-                                  g_strdup(full_path));
-
-              dt_print(DT_DEBUG_AI, "[darktable_ai] Discovered: %s (%s)", name,
-                       id);
-            }
-          }
-        } else {
-          dt_print(DT_DEBUG_AI, "[darktable_ai] Parse error: %s",
-                   error->message);
-          g_error_free(error);
-        }
-        g_object_unref(parser);
-      }
-      g_free(config_path);
-    }
-    g_free(full_path);
-  }
-  g_dir_close(dir);
-}
-
-// --- API Implementation ---
-
-DT_AI_EXPORT dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
-  dt_print(DT_DEBUG_AI, "[darktable_ai] dt_ai_env_init start.");
-
-  g_once(&g_ort_once, _init_ort_api, NULL);
-  g_ort = (const OrtApi *)g_ort_once.retval;
-  if(!g_ort) return NULL;
-
-  dt_ai_environment_t *env = g_new0(dt_ai_environment_t, 1);
-  g_mutex_init(&env->lock);
-  env->model_paths =
-      g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
-  env->search_paths = g_strdup(search_paths);
-
-  // Parse Paths
-  if(search_paths) {
-    char **tokens = g_strsplit(search_paths, ";", -1);
-    for(int i = 0; tokens[i] != NULL; i++) {
-      _scan_directory(env, tokens[i]);
-    }
-    g_strfreev(tokens);
-  }
-
-  // Default Paths
-  // Priority 1: ~/.config/darktable/models (or User Config Dir)
-  const char *config_dir = g_get_user_config_dir();
-  if(config_dir) {
-    char *p = g_build_filename(config_dir, "darktable", "models", NULL);
-    _scan_directory(env, p);
-    g_free(p);
-  }
-
-  // Priority 2: ~/.local/share/darktable/models (or User Data Dir)
-  const char *data_dir = g_get_user_data_dir();
-  if(data_dir) {
-    char *p = g_build_filename(data_dir, "darktable", "models", NULL);
-    _scan_directory(env, p);
-    g_free(p);
-  }
-
-  return env;
-}
-
-DT_AI_EXPORT int dt_ai_get_model_count(dt_ai_environment_t *env) {
-  if(!env)
-    return 0;
-  return g_list_length(env->models);
-}
-
-DT_AI_EXPORT const dt_ai_model_info_t *
-dt_ai_get_model_info_by_index(dt_ai_environment_t *env, int index) {
-  if(!env)
-    return NULL;
-  GList *item = g_list_nth(env->models, index);
-  if(!item)
-    return NULL;
-  return (const dt_ai_model_info_t *)item->data;
-}
-
-DT_AI_EXPORT const dt_ai_model_info_t *
-dt_ai_get_model_info_by_id(dt_ai_environment_t *env, const char *id) {
-  if(!env || !id)
-    return NULL;
-  for(GList *l = env->models; l != NULL; l = l->next) {
-    dt_ai_model_info_t *info = (dt_ai_model_info_t *)l->data;
-    if(strcmp(info->id, id) == 0)
-      return info;
-  }
-  return NULL;
-}
-
-static void _free_model_info(gpointer data) { g_free(data); }
-
-DT_AI_EXPORT void dt_ai_env_refresh(dt_ai_environment_t *env) {
-  if(!env)
-    return;
-
-  g_mutex_lock(&env->lock);
-
-  dt_print(DT_DEBUG_AI, "[darktable_ai] Refreshing model list");
-
-  // Clear existing data
-  g_list_free_full(env->models, _free_model_info);
-  env->models = NULL;
-
-  g_list_free_full(env->string_storage, g_free);
-  env->string_storage = NULL;
-
-  g_hash_table_remove_all(env->model_paths);
-
-  // Rescan custom paths (if any were provided at init)
-  if(env->search_paths) {
-    char **tokens = g_strsplit(env->search_paths, ";", -1);
-    for(int i = 0; tokens[i] != NULL; i++) {
-      _scan_directory(env, tokens[i]);
-    }
-    g_strfreev(tokens);
-  }
-
-  // Rescan directories (same logic as dt_ai_env_init)
-  // Priority 1: ~/.config/darktable/models (or User Config Dir)
-  const char *config_dir = g_get_user_config_dir();
-  if(config_dir) {
-    char *p = g_build_filename(config_dir, "darktable", "models", NULL);
-    _scan_directory(env, p);
-    g_free(p);
-  }
-
-  // Priority 2: ~/.local/share/darktable/models (or User Data Dir)
-  const char *data_dir = g_get_user_data_dir();
-  if(data_dir) {
-    char *p = g_build_filename(data_dir, "darktable", "models", NULL);
-    _scan_directory(env, p);
-    g_free(p);
-  }
-
-  dt_print(DT_DEBUG_AI, "[darktable_ai] Refresh complete, found %d models",
-           g_list_length(env->models));
-
-  g_mutex_unlock(&env->lock);
-}
-
-DT_AI_EXPORT void dt_ai_env_destroy(dt_ai_environment_t *env) {
-  if(!env)
-    return;
-
-  g_list_free_full(env->models, _free_model_info);
-  g_list_free_full(env->string_storage, g_free);
-  g_hash_table_destroy(env->model_paths);
-  g_free(env->search_paths);
-  g_mutex_clear(&env->lock);
-
-  g_free(env);
-}
-
 // --- Optimization Helpers ---
 
 // Try to find and call an ORT execution provider function at runtime via
@@ -400,7 +174,8 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
 #else
   GModule *mod = g_module_open(NULL, 0);
   void *func_ptr = NULL;
-  g_module_symbol(mod, symbol_name, &func_ptr);
+  if(mod)
+    g_module_symbol(mod, symbol_name, &func_ptr);
 #endif
 
   if(func_ptr) {
@@ -423,7 +198,8 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
   }
 
 #ifndef _WIN32
-  g_module_close(mod);
+  if(mod)
+    g_module_close(mod);
 #endif
 
   return ok;
@@ -488,28 +264,17 @@ static void _enable_acceleration(OrtSessionOptions *session_opts,
   }
 }
 
-// --- Execution ---
+// --- ONNX Model Loading ---
 
-DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
-                                               const char *model_id,
-                                               dt_ai_provider_t provider) {
-  if(!env || !model_id)
-    return NULL;
-
-  // Copy model_dir under lock to avoid race with dt_ai_env_refresh
-  g_mutex_lock(&env->lock);
-  const char *model_dir_orig =
-      (const char *)g_hash_table_lookup(env->model_paths, model_id);
-  char *model_dir = model_dir_orig ? g_strdup(model_dir_orig) : NULL;
-  g_mutex_unlock(&env->lock);
-
-  if(!model_dir) {
-    dt_print(DT_DEBUG_AI, "[darktable_ai] ID not found: %s", model_id);
-    return NULL;
-  }
+dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
+                                  dt_ai_provider_t provider,
+                                  const char *model_id) {
+  // Lazy init ORT API on first load
+  g_once(&g_ort_once, _init_ort_api, NULL);
+  g_ort = (const OrtApi *)g_ort_once.retval;
+  if(!g_ort) return NULL;
 
   char *onnx_path = g_build_filename(model_dir, "model.onnx", NULL);
-  g_free(model_dir);
   if(!g_file_test(onnx_path, G_FILE_TEST_EXISTS)) {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Model file missing: %s", onnx_path);
     g_free(onnx_path);
@@ -519,8 +284,6 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   dt_print(DT_DEBUG_AI, "[darktable_ai] Loading (C): %s", onnx_path);
 
   dt_ai_context_t *ctx = g_new0(dt_ai_context_t, 1);
-  ctx->loaded_model_id = g_strdup(model_id);
-  ctx->ort_api = g_ort;
 
   // ONNX Init
   OrtStatus *status;
@@ -558,6 +321,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   if(status) {
     g_ort->ReleaseStatus(status);
     g_ort->ReleaseSessionOptions(session_opts);
+    g_free(onnx_path);
     dt_ai_unload_model(ctx);
     return NULL;
   }
@@ -567,6 +331,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   if(status) {
     g_ort->ReleaseStatus(status);
     g_ort->ReleaseSessionOptions(session_opts);
+    g_free(onnx_path);
     dt_ai_unload_model(ctx);
     return NULL;
   }
@@ -640,8 +405,7 @@ DT_AI_EXPORT dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
     // Get Input Type
     OrtTypeInfo *typeinfo = NULL;
     status = g_ort->SessionGetInputTypeInfo(ctx->session, i, &typeinfo);
-    if(status) { // Warning: if this fails, we might still proceed or fail?
-                  // Fail safer.
+    if(status) {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -797,7 +561,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       temp_input_buffers[i] = half_data;
     } else {
       // Standard Mapping
-      switch (inputs[i].type) {
+      switch(inputs[i].type) {
       case DT_AI_FLOAT:
         onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
         type_size = sizeof(float);
@@ -862,7 +626,7 @@ DT_AI_EXPORT int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
     ONNXTensorElementDataType onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     size_t type_size = sizeof(float);
 
-    switch (outputs[i].type) {
+    switch(outputs[i].type) {
     case DT_AI_FLOAT:
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
       type_size = sizeof(float);
@@ -1024,16 +788,12 @@ DT_AI_EXPORT void dt_ai_unload_model(dt_ai_context_t *ctx) {
         if(ctx->output_names[i])
           ctx->allocator->Free(ctx->allocator, ctx->output_names[i]);
       }
-      // Allocator itself usually doesn't need explicit release if retrieved via
-      // GetAllocatorWithDefaultOptions but if we created it, we might. Default
-      // options allocator is usually global/shared.
     }
 
     g_free(ctx->input_names);
     g_free(ctx->output_names);
     g_free(ctx->input_types);
     g_free(ctx->output_types);
-    g_free(ctx->loaded_model_id);
     g_free(ctx);
   }
 }

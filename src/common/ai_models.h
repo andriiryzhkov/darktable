@@ -19,7 +19,7 @@
 #pragma once
 
 #include <glib.h>
-#include "ai/onnx_backend.h"  // for dt_ai_provider_t
+#include "ai/backend.h"
 
 // Ensure PATH_MAX is defined on all platforms
 #ifndef PATH_MAX

@@ -59,6 +59,7 @@ typedef struct dt_ai_model_info_t {
   const char *name;        ///< Display name
   const char *description; ///< Short description
   const char *task_type;   ///< e.g. "denoise", "inpainting"
+  const char *backend;     ///< Backend type (e.g. "onnx")
   int num_inputs;          ///< Number of model inputs (default 1)
 } dt_ai_model_info_t;
 
@@ -143,7 +144,7 @@ typedef struct dt_ai_tensor_t {
 } dt_ai_tensor_t;
 
 /**
- * @brief Run inference through the ONNX model.
+ * @brief Run inference through the loaded model.
  * @param ctx The AI context.
  * @param inputs Array of input tensors.
  * @param num_inputs Number of input tensors.
@@ -170,7 +171,7 @@ DT_AI_EXPORT int dt_ai_get_input_count(dt_ai_context_t *ctx);
 DT_AI_EXPORT int dt_ai_get_output_count(dt_ai_context_t *ctx);
 
 /**
- * @brief Get the ONNX name of a model input by index.
+ * @brief Get the name of a model input by index.
  * @param ctx The AI context.
  * @param index Input index (0-based).
  * @return Input name string (owned by ctx, do not free), or NULL.
@@ -187,7 +188,7 @@ DT_AI_EXPORT dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
                                                  int index);
 
 /**
- * @brief Get the ONNX name of a model output by index.
+ * @brief Get the name of a model output by index.
  * @param ctx The AI context.
  * @param index Output index (0-based).
  * @return Output name string (owned by ctx, do not free), or NULL.

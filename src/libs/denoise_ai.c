@@ -16,7 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ai/onnx_backend.h"
+#include "ai/backend.h"
 #include "common/ai_models.h"
 #include "bauhaus/bauhaus.h"
 #include "control/jobs/control_jobs.h"
