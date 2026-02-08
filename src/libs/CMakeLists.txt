@@ -6,7 +6,7 @@ add_definitions(-include common/module_api.h)
 add_definitions(-include libs/lib_api.h)
 
 # The modules
-set(MODULES import export copy_history styles tagging image select collect recentcollect filtering metadata metadata_view navigation histogram history snapshots modulegroups backgroundjobs colorpicker masks session duplicate ioporder denoise_ai)
+set(MODULES import export copy_history styles tagging image select collect recentcollect filtering metadata metadata_view navigation histogram history snapshots modulegroups backgroundjobs colorpicker masks session duplicate ioporder)
 
 # The tools
 set(MODULES ${MODULES} viewswitcher)
@@ -47,8 +47,12 @@ add_library(masks MODULE "masks.c")
 add_library(session MODULE "session.c")
 add_library(duplicate MODULE "duplicate.c")
 add_library(ioporder MODULE "ioporder.c")
-add_library(denoise_ai MODULE "denoise_ai.c")
-target_link_libraries(denoise_ai darktable_ai TIFF::TIFF)
+
+if(BUILD_AI)
+  add_library(denoise_ai MODULE "denoise_ai.c")
+  target_link_libraries(denoise_ai darktable_ai TIFF::TIFF)
+  set(MODULES ${MODULES} denoise_ai)
+endif(BUILD_AI)
 
 # tools
 add_library(viewswitcher MODULE "tools/viewswitcher.c")

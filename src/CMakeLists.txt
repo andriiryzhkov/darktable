@@ -1,5 +1,7 @@
 add_subdirectory(external)
-add_subdirectory(ai)
+if(BUILD_AI)
+  add_subdirectory(ai)
+endif(BUILD_AI)
 
 include(CheckCSourceCompiles)
 include(CheckCXXSymbolExists)
@@ -23,7 +25,6 @@ FILE(GLOB SOURCE_FILES
   "common/color_vocabulary.c"
   "common/colorlabels.c"
   "common/colorspaces.c"
-  "common/ai_models.c"
   "common/curl_tools.c"
   "common/curve_tools.c"
   "common/custom_primaries.c"
@@ -147,7 +148,6 @@ FILE(GLOB SOURCE_FILES
   "gui/import_metadata.c"
   "gui/metadata_tags.c"
   "gui/preferences.c"
-  "gui/preferences_ai.c"
   "gui/presets.c"
   "gui/splash.c"
   "gui/styles_dialog.c"
@@ -441,8 +441,19 @@ foreach(lib ${OUR_LIBS} GIO GThread GModule PangoCairo Rsvg2 PNG JPEG TIFF LCMS2
   add_definitions(${${lib}_DEFINITIONS})
 endforeach(lib)
 
-# Link against AI library
-list(APPEND LIBS darktable_ai)
+if(BUILD_AI)
+  list(APPEND LIBS darktable_ai)
+
+  FILE(GLOB SOURCE_FILES_AI
+    "common/ai_models.c"
+    "gui/preferences_ai.c"
+  )
+  set(SOURCES ${SOURCES} ${SOURCE_FILES_AI})
+  add_definitions("-DHAVE_AI")
+  message(STATUS "AI features: enabled")
+else(BUILD_AI)
+  message(STATUS "AI features: disabled")
+endif(BUILD_AI)
 
 if(PNG_VERSION_STRING VERSION_LESS 1.5)
   message(FATAL_ERROR "libpng version 1.5 or newer is required")
@@ -452,23 +463,25 @@ endif()
 find_package(CURL 7.56 REQUIRED)
 list(APPEND LIBS CURL::libcurl)
 
-# libarchive for AI model ZIP extraction
-# On macOS with Homebrew, libarchive is keg-only
-if(APPLE)
-  execute_process(
-    COMMAND brew --prefix libarchive
-    OUTPUT_VARIABLE HOMEBREW_LIBARCHIVE_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-    RESULT_VARIABLE HOMEBREW_LIBARCHIVE_RESULT
-  )
-  if(HOMEBREW_LIBARCHIVE_RESULT EQUAL 0 AND EXISTS "${HOMEBREW_LIBARCHIVE_PREFIX}")
-    list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_LIBARCHIVE_PREFIX}")
+if(BUILD_AI)
+  # libarchive for AI model ZIP extraction
+  # On macOS with Homebrew, libarchive is keg-only
+  if(APPLE)
+    execute_process(
+      COMMAND brew --prefix libarchive
+      OUTPUT_VARIABLE HOMEBREW_LIBARCHIVE_PREFIX
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET
+      RESULT_VARIABLE HOMEBREW_LIBARCHIVE_RESULT
+    )
+    if(HOMEBREW_LIBARCHIVE_RESULT EQUAL 0 AND EXISTS "${HOMEBREW_LIBARCHIVE_PREFIX}")
+      list(APPEND CMAKE_PREFIX_PATH "${HOMEBREW_LIBARCHIVE_PREFIX}")
+    endif()
   endif()
-endif()
-find_package(LibArchive REQUIRED)
-include_directories(SYSTEM ${LibArchive_INCLUDE_DIRS})
-list(APPEND LIBS ${LibArchive_LIBRARIES})
+  find_package(LibArchive REQUIRED)
+  include_directories(SYSTEM ${LibArchive_INCLUDE_DIRS})
+  list(APPEND LIBS ${LibArchive_LIBRARIES})
+endif(BUILD_AI)
 
 # Require exiv2 >= 0.27.2 to make sure everything we need is available
 find_package(Exiv2 0.27.2 REQUIRED)
@@ -997,7 +1010,7 @@ if(APPLE)
   set_target_properties(lib_darktable PROPERTIES MACOSX_RPATH TRUE)
 endif(APPLE)
 if(WIN32)
-  # Export all symbols on Windows so modules can access darktable_ai functions
+  # Export all symbols on Windows so modules can access library functions
   set_target_properties(lib_darktable PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
 endif(WIN32)
 set_target_properties(lib_darktable PROPERTIES OUTPUT_NAME darktable)

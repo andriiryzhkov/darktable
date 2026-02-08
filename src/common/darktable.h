@@ -277,7 +277,9 @@ struct dt_bauhaus_t;
 struct dt_undo_t;
 struct dt_colorspaces_t;
 struct dt_l10n_t;
+#ifdef HAVE_AI
 struct dt_ai_registry_t;
+#endif
 
 typedef float dt_boundingbox_t[4];  //(x,y) of upperleft, then (x,y) of lowerright
 typedef float dt_pickerbox_t[8];
@@ -417,7 +419,9 @@ typedef struct darktable_t
   struct dt_sys_resources_t dtresources;
   struct dt_backthumb_t backthumbs;
   struct dt_gimp_t gimp;
+#ifdef HAVE_AI
   struct dt_ai_registry_t *ai_registry;
+#endif
 } darktable_t;
 
 typedef struct
