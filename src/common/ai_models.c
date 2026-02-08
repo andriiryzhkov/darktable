@@ -427,10 +427,12 @@ gboolean dt_ai_models_load_registry(dt_ai_registry_t *registry)
   // Reverse to restore original JSON order (we used prepend for O(1) insertion)
   registry->models = g_list_reverse(registry->models);
 
+  const int model_count = g_list_length(registry->models);
+
   g_mutex_unlock(&registry->lock);
 
   dt_print(DT_DEBUG_AI, "[ai_models] Registry loaded: %d models from %s",
-           g_list_length(registry->models), registry_path);
+           model_count, registry_path);
 
   g_object_unref(parser);
   g_free(registry_path);
