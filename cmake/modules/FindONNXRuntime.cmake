@@ -104,16 +104,84 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
   set(_ORT_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps")
   set(_ORT_ARCHIVE "${_ORT_DOWNLOAD_DIR}/${_ORT_PACKAGE}")
 
+  # -- Fetch SHA256 digest from GitHub Releases API --
+  # GitHub provides a "digest" field (sha256:...) for every release asset.
+  set(_ORT_HASH "")
+  set(_ORT_API_JSON "${_ORT_DOWNLOAD_DIR}/ort-release-${_ORT_VER}.json")
+  set(_ORT_API_URL "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v${_ORT_VER}")
+
+  if(NOT EXISTS "${_ORT_API_JSON}")
+    message(STATUS "Fetching ONNX Runtime v${_ORT_VER} release metadata from GitHub API...")
+    file(MAKE_DIRECTORY "${_ORT_DOWNLOAD_DIR}")
+    file(DOWNLOAD
+      "${_ORT_API_URL}"
+      "${_ORT_API_JSON}"
+      STATUS _ORT_API_STATUS
+      HTTPHEADER "Accept: application/vnd.github+json"
+    )
+    list(GET _ORT_API_STATUS 0 _ORT_API_CODE)
+    if(NOT _ORT_API_CODE EQUAL 0)
+      file(REMOVE "${_ORT_API_JSON}")
+    endif()
+  endif()
+
+  if(EXISTS "${_ORT_API_JSON}")
+    file(READ "${_ORT_API_JSON}" _ORT_API_CONTENT)
+    # Two-step extraction: locate the package name, then find the first
+    # "digest" field that follows it within the same asset JSON object.
+    string(FIND "${_ORT_API_CONTENT}" "\"name\":\"${_ORT_PACKAGE}\"" _ORT_NAME_POS)
+    if(_ORT_NAME_POS EQUAL -1)
+      # Try with spaces around colon (GitHub API may format either way)
+      string(FIND "${_ORT_API_CONTENT}" "\"name\": \"${_ORT_PACKAGE}\"" _ORT_NAME_POS)
+    endif()
+    if(NOT _ORT_NAME_POS EQUAL -1)
+      string(SUBSTRING "${_ORT_API_CONTENT}" ${_ORT_NAME_POS} 2000 _ORT_ASSET_TAIL)
+      string(REGEX MATCH "\"digest\" *: *\"sha256:([a-f0-9]+)\"" _ORT_DIGEST_MATCH "${_ORT_ASSET_TAIL}")
+      if(_ORT_DIGEST_MATCH)
+        set(_ORT_HASH "${CMAKE_MATCH_1}")
+        message(STATUS "ONNX Runtime ${_ORT_PACKAGE} SHA256: ${_ORT_HASH}")
+      endif()
+    endif()
+    if(NOT _ORT_HASH)
+      message(WARNING
+        "Could not find SHA256 digest for ${_ORT_PACKAGE} in GitHub API response. "
+        "Download will proceed without integrity verification.")
+    endif()
+  else()
+    message(WARNING
+      "Could not fetch release metadata from GitHub API. "
+      "Download will proceed without integrity verification.")
+  endif()
+
+  # -- Verify cached archive if it exists --
+  if(EXISTS "${_ORT_ARCHIVE}" AND _ORT_HASH)
+    file(SHA256 "${_ORT_ARCHIVE}" _ORT_CACHED_HASH)
+    if(NOT _ORT_CACHED_HASH STREQUAL "${_ORT_HASH}")
+      message(STATUS "Cached ONNX Runtime archive has wrong checksum, re-downloading...")
+      file(REMOVE "${_ORT_ARCHIVE}")
+    endif()
+  endif()
+
   # -- Download --
   if(NOT EXISTS "${_ORT_ARCHIVE}")
     message(STATUS "Downloading ONNX Runtime ${_ORT_VER} (${_ORT_PACKAGE})...")
     file(MAKE_DIRECTORY "${_ORT_DOWNLOAD_DIR}")
-    file(DOWNLOAD
-      "${_ORT_URL}"
-      "${_ORT_ARCHIVE}"
-      STATUS _ORT_DL_STATUS
-      SHOW_PROGRESS
-    )
+    if(_ORT_HASH)
+      file(DOWNLOAD
+        "${_ORT_URL}"
+        "${_ORT_ARCHIVE}"
+        STATUS _ORT_DL_STATUS
+        SHOW_PROGRESS
+        EXPECTED_HASH "SHA256=${_ORT_HASH}"
+      )
+    else()
+      file(DOWNLOAD
+        "${_ORT_URL}"
+        "${_ORT_ARCHIVE}"
+        STATUS _ORT_DL_STATUS
+        SHOW_PROGRESS
+      )
+    endif()
     list(GET _ORT_DL_STATUS 0 _ORT_DL_CODE)
     list(GET _ORT_DL_STATUS 1 _ORT_DL_MSG)
     if(NOT _ORT_DL_CODE EQUAL 0)
