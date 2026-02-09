@@ -34,7 +34,6 @@
 struct dt_ai_context_t {
   // ONNX Runtime C Objects
   OrtSession *session;
-  OrtEnv *env;
   OrtMemoryInfo *memory_info;
 
   // IO Names
@@ -47,9 +46,12 @@ struct dt_ai_context_t {
   dt_ai_dtype_t *output_types;
 };
 
-// Global pointer to the API struct (initialized exactly once via g_once)
+// Global singletons (initialized exactly once via g_once)
+// ORT requires at most one OrtEnv per process.
 static const OrtApi *g_ort = NULL;
 static GOnce g_ort_once = G_ONCE_INIT;
+static OrtEnv *g_env = NULL;
+static GOnce g_env_once = G_ONCE_INIT;
 
 static gpointer _init_ort_api(gpointer data)
 {
@@ -60,14 +62,62 @@ static gpointer _init_ort_api(gpointer data)
   return (gpointer)api;
 }
 
+static gpointer _init_ort_env(gpointer data)
+{
+  (void)data;
+  OrtEnv *env = NULL;
+  OrtStatus *status =
+      g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &env);
+  if(status)
+  {
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to create ORT environment: %s",
+             g_ort->GetErrorMessage(status));
+    g_ort->ReleaseStatus(status);
+    return NULL;
+  }
+  return (gpointer)env;
+}
+
 // --- Helper Functions ---
+
+// Map ONNX tensor element type to our dt_ai_dtype_t.
+// Returns TRUE on success, FALSE if the type is unsupported.
+static gboolean _map_onnx_type(ONNXTensorElementDataType onnx_type,
+                                dt_ai_dtype_t *out)
+{
+  switch(onnx_type)
+  {
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:   *out = DT_AI_FLOAT;   return TRUE;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:  *out = DT_AI_FLOAT16; return TRUE;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:    *out = DT_AI_UINT8;   return TRUE;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:     *out = DT_AI_INT8;    return TRUE;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:    *out = DT_AI_INT32;   return TRUE;
+    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:    *out = DT_AI_INT64;   return TRUE;
+    default: return FALSE;
+  }
+}
+
+// Map dt_ai_dtype_t to ONNX type and element size.
+// Returns TRUE on success, FALSE if the type is unsupported.
+static gboolean _dtype_to_onnx(dt_ai_dtype_t dtype,
+                                ONNXTensorElementDataType *out_type,
+                                size_t *out_size)
+{
+  switch(dtype)
+  {
+    case DT_AI_FLOAT:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;   *out_size = sizeof(float);    return TRUE;
+    case DT_AI_FLOAT16: *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16; *out_size = sizeof(uint16_t); return TRUE;
+    case DT_AI_UINT8:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;   *out_size = sizeof(uint8_t);  return TRUE;
+    case DT_AI_INT8:    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;    *out_size = sizeof(int8_t);   return TRUE;
+    case DT_AI_INT32:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;   *out_size = sizeof(int32_t);  return TRUE;
+    case DT_AI_INT64:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;   *out_size = sizeof(int64_t);  return TRUE;
+    default: return FALSE;
+  }
+}
 
 // Float16 Conversion Utilities
 // Based on: https://gist.github.com/rygorous/2156668
-
-// Robust Float16 Conversion Utilities
 // Handles Zero, Denormals, and Infinity correctly.
-
 static uint16_t _float_to_half(float f) {
   uint32_t x;
   memcpy(&x, &f, sizeof(x));
@@ -266,37 +316,36 @@ static void _enable_acceleration(OrtSessionOptions *session_opts,
 
 // --- ONNX Model Loading ---
 
+// Load ONNX model from model_dir/model_file.
+// If model_file is NULL, defaults to "model.onnx".
 dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
-                                  dt_ai_provider_t provider,
-                                  const char *model_id) {
-  // Lazy init ORT API on first load
-  g_once(&g_ort_once, _init_ort_api, NULL);
-  g_ort = (const OrtApi *)g_ort_once.retval;
-  if(!g_ort) return NULL;
+                                  const char *model_file,
+                                  dt_ai_provider_t provider) {
+  if(!model_dir) return NULL;
 
-  char *onnx_path = g_build_filename(model_dir, "model.onnx", NULL);
+  char *onnx_path = g_build_filename(model_dir,
+                                     model_file ? model_file : "model.onnx",
+                                     NULL);
   if(!g_file_test(onnx_path, G_FILE_TEST_EXISTS)) {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Model file missing: %s", onnx_path);
     g_free(onnx_path);
     return NULL;
   }
 
-  dt_print(DT_DEBUG_AI, "[darktable_ai] Loading (C): %s", onnx_path);
+  // Lazy init ORT API and shared environment on first load
+  g_once(&g_ort_once, _init_ort_api, NULL);
+  g_ort = (const OrtApi *)g_ort_once.retval;
+  if(!g_ort) { g_free(onnx_path); return NULL; }
+
+  g_once(&g_env_once, _init_ort_env, NULL);
+  g_env = (OrtEnv *)g_env_once.retval;
+  if(!g_env) { g_free(onnx_path); return NULL; }
+
+  dt_print(DT_DEBUG_AI, "[darktable_ai] Loading: %s", onnx_path);
 
   dt_ai_context_t *ctx = g_new0(dt_ai_context_t, 1);
 
-  // ONNX Init
   OrtStatus *status;
-
-  status =
-      g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &ctx->env);
-  if(status) {
-    g_ort->ReleaseStatus(status);
-    g_free(onnx_path);
-    dt_ai_unload_model(ctx);
-    return NULL;
-  }
-
   OrtSessionOptions *session_opts;
   status = g_ort->CreateSessionOptions(&session_opts);
   if(status) {
@@ -343,11 +392,11 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
   // On Windows, CreateSession expects a wide character string
   wchar_t *onnx_path_wide = (wchar_t *)g_utf8_to_utf16(onnx_path, -1, NULL, NULL, NULL);
   status =
-      g_ort->CreateSession(ctx->env, onnx_path_wide, session_opts, &ctx->session);
+      g_ort->CreateSession(g_env, onnx_path_wide, session_opts, &ctx->session);
   g_free(onnx_path_wide);
 #else
   status =
-      g_ort->CreateSession(ctx->env, onnx_path, session_opts, &ctx->session);
+      g_ort->CreateSession(g_env, onnx_path, session_opts, &ctx->session);
 #endif
 
   g_ort->ReleaseSessionOptions(session_opts);
@@ -427,20 +476,7 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
       return NULL;
     }
 
-    // Map ONNX type to internal type
-    if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
-      ctx->input_types[i] = DT_AI_FLOAT;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
-      ctx->input_types[i] = DT_AI_FLOAT16;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8)
-      ctx->input_types[i] = DT_AI_UINT8;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8)
-      ctx->input_types[i] = DT_AI_INT8;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32)
-      ctx->input_types[i] = DT_AI_INT32;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
-      ctx->input_types[i] = DT_AI_INT64;
-    else {
+    if(!_map_onnx_type(type, &ctx->input_types[i])) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX input type %d for input %zu", type, i);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -486,19 +522,7 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
       return NULL;
     }
 
-    if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT)
-      ctx->output_types[i] = DT_AI_FLOAT;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
-      ctx->output_types[i] = DT_AI_FLOAT16;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8)
-      ctx->output_types[i] = DT_AI_UINT8;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8)
-      ctx->output_types[i] = DT_AI_INT8;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32)
-      ctx->output_types[i] = DT_AI_INT32;
-    else if(type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64)
-      ctx->output_types[i] = DT_AI_INT64;
-    else {
+    if(!_map_onnx_type(type, &ctx->output_types[i])) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX output type %d for output %zu", type, i);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -560,33 +584,7 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       data_ptr = half_data;
       temp_input_buffers[i] = half_data;
     } else {
-      // Standard Mapping
-      switch(inputs[i].type) {
-      case DT_AI_FLOAT:
-        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
-        type_size = sizeof(float);
-        break;
-      case DT_AI_FLOAT16:
-        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
-        type_size = sizeof(uint16_t);
-        break;
-      case DT_AI_UINT8:
-        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
-        type_size = sizeof(uint8_t);
-        break;
-      case DT_AI_INT8:
-        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
-        type_size = sizeof(int8_t);
-        break;
-      case DT_AI_INT64:
-        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
-        type_size = sizeof(int64_t);
-        break;
-      case DT_AI_INT32:
-        onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
-        type_size = sizeof(int32_t);
-        break;
-      default:
+      if(!_dtype_to_onnx(inputs[i].type, &onnx_type, &type_size)) {
         dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported input type %d for Input[%d]",
                  inputs[i].type, i);
         ret = -4;
@@ -623,35 +621,10 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
     for(int j = 0; j < outputs[i].ndim; j++)
       element_count *= outputs[i].shape[j];
 
-    ONNXTensorElementDataType onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
-    size_t type_size = sizeof(float);
+    ONNXTensorElementDataType onnx_type;
+    size_t type_size;
 
-    switch(outputs[i].type) {
-    case DT_AI_FLOAT:
-      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
-      type_size = sizeof(float);
-      break;
-    case DT_AI_FLOAT16:
-      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
-      type_size = sizeof(uint16_t);
-      break;
-    case DT_AI_UINT8:
-      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
-      type_size = sizeof(uint8_t);
-      break;
-    case DT_AI_INT8:
-      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
-      type_size = sizeof(int8_t);
-      break;
-    case DT_AI_INT64:
-      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
-      type_size = sizeof(int64_t);
-      break;
-    case DT_AI_INT32:
-      onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
-      type_size = sizeof(int32_t);
-      break;
-    default:
+    if(!_dtype_to_onnx(outputs[i].type, &onnx_type, &type_size)) {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported output type %d for Output[%d]",
                outputs[i].type, i);
       ret = -4;
@@ -773,8 +746,7 @@ void dt_ai_unload_model(dt_ai_context_t *ctx) {
   if(ctx) {
     if(ctx->session)
       g_ort->ReleaseSession(ctx->session);
-    if(ctx->env)
-      g_ort->ReleaseEnv(ctx->env);
+    // Note: OrtEnv is a shared singleton (g_env), not per-context
     if(ctx->memory_info)
       g_ort->ReleaseMemoryInfo(ctx->memory_info);
 
