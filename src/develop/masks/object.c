@@ -184,8 +184,12 @@ static void _finalize_mask(dt_iop_module_t *module,
 
   // Pass NULL for image: the AI mask lives in preview backbuf pixel space.
   // We backtransform through the pipeline to input image coords below.
+  const int cleanup = dt_conf_get_int("plugins/darkroom/masks/object/cleanup");
+  const float smoothing = dt_conf_get_float("plugins/darkroom/masks/object/smoothing");
+
   GList *signs = NULL;
-  GList *forms = ras2forms(inv_mask, d->mask_w, d->mask_h, NULL, &signs);
+  GList *forms = ras2forms(inv_mask, d->mask_w, d->mask_h, NULL,
+                           cleanup, (double)smoothing, &signs);
   g_free(inv_mask);
 
   // darktable mask coordinates are stored in input-image-normalized space:

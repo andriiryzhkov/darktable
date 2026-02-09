@@ -45,6 +45,7 @@ typedef struct dt_lib_masks_t
   dt_gui_collapsible_section_t cs;
   GtkWidget *property[DT_MASKS_PROPERTY_LAST];
   GtkWidget *pressure, *smoothing;
+  GtkWidget *object_cleanup, *object_smoothing;
   float last_value[DT_MASKS_PROPERTY_LAST];
   GtkWidget *none_label;
 
@@ -111,6 +112,20 @@ const struct
       [ DT_MASKS_PROPERTY_CURVATURE] = { N_("curvature"), "%", -1, 1, FALSE },
       [ DT_MASKS_PROPERTY_COMPRESSION] = { N_("compression"), "%", 0.0001, 1, TRUE },
 };
+
+static void _object_cleanup_changed(GtkWidget *widget, gpointer data)
+{
+  if(darktable.gui->reset) return;
+  dt_conf_set_int("plugins/darkroom/masks/object/cleanup",
+                  (int)dt_bauhaus_slider_get(widget));
+}
+
+static void _object_smoothing_changed(GtkWidget *widget, gpointer data)
+{
+  if(darktable.gui->reset) return;
+  dt_conf_set_float("plugins/darkroom/masks/object/smoothing",
+                    dt_bauhaus_slider_get(widget));
+}
 
 gboolean _timeout_show_all_feathers(gpointer userdata)
 {
@@ -257,6 +272,10 @@ static void _update_all_properties(dt_lib_masks_t *self)
 
   gtk_widget_set_visible(self->pressure, drawing_brush && darktable.gui->have_pen_pressure);
   gtk_widget_set_visible(self->smoothing, drawing_brush);
+
+  gboolean drawing_object = form && form->type & DT_MASKS_OBJECT;
+  gtk_widget_set_visible(self->object_cleanup, drawing_object);
+  gtk_widget_set_visible(self->object_smoothing, drawing_object);
 }
 
 static void _lib_masks_get_values(GtkTreeModel *model,
@@ -1924,6 +1943,23 @@ void gui_init(dt_lib_module_t *self)
   d->smoothing = dt_gui_preferences_enum(DT_ACTION(self), "brush_smoothing");
   dt_bauhaus_widget_set_label(d->smoothing, N_("properties"), N_("smoothing"));
   dt_gui_box_add(d->cs.container, d->pressure, d->smoothing);
+
+  // AI object mask vectorization controls
+  d->object_cleanup = dt_bauhaus_slider_new_action(DT_ACTION(self), 0, 100, 1,
+                                                    dt_conf_get_int("plugins/darkroom/masks/object/cleanup"), 0);
+  dt_bauhaus_widget_set_label(d->object_cleanup, N_("properties"), N_("cleanup"));
+  gtk_widget_set_tooltip_text(d->object_cleanup, _("suppress small speckles (area in pixels²)"));
+  g_signal_connect(G_OBJECT(d->object_cleanup), "value-changed",
+                   G_CALLBACK(_object_cleanup_changed), NULL);
+
+  d->object_smoothing = dt_bauhaus_slider_new_action(DT_ACTION(self), 0.0, 1.3, 0.1,
+                                                      dt_conf_get_float("plugins/darkroom/masks/object/smoothing"), 1);
+  dt_bauhaus_widget_set_label(d->object_smoothing, N_("properties"), N_("smoothing"));
+  gtk_widget_set_tooltip_text(d->object_smoothing, _("corner threshold (0 = sharpest, 1.3 = smoothest)"));
+  g_signal_connect(G_OBJECT(d->object_smoothing), "value-changed",
+                   G_CALLBACK(_object_smoothing_changed), NULL);
+
+  dt_gui_box_add(d->cs.container, d->object_cleanup, d->object_smoothing);
 
   // set proxy functions
   darktable.develop->proxy.masks.module = self;

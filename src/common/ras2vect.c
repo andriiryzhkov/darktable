@@ -141,6 +141,8 @@ GList *ras2forms(const float *mask,
                  const int width,
                  const int height,
                  const dt_image_t *const image,
+                 const int cleanup,
+                 const double smoothing,
                  GList **out_signs)
 {
   GList *forms = NULL;
@@ -169,8 +171,8 @@ GList *ras2forms(const float *mask,
   }
 
   potrace_param_t *param = potrace_param_default();
-  // finer path possible
-  param->alphamax = 0.0f;
+  param->turdsize = cleanup;
+  param->alphamax = smoothing;
 
   potrace_state_t *st = potrace_trace(param, bm);
 
