@@ -437,7 +437,6 @@ typedef struct darktable_t
 #ifdef HAVE_AI
   struct dt_ai_registry_t *ai_registry;
 #endif
-} 
 } darktable_t;
 
 typedef struct
