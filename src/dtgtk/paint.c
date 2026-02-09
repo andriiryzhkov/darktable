@@ -632,33 +632,18 @@ void dtgtk_cairo_paint_masks_object(cairo_t *cr, const gint x, const gint y, con
 {
   PREAMBLE(0.90, 1, 0., 0.)
 
-  // Wand shape — a magic wand icon for AI segmentation
-  // Wand stick (diagonal line)
-  cairo_move_to(cr, 0.1, 0.9);
-  cairo_line_to(cr, 0.65, 0.35);
+  // Three-corner rounded rect (open top-right) + sparkle
+  cairo_move_to(cr, 0.80, 0.70);
+  cairo_arc(cr, 0.68, 0.88, 0.12, 0.0, 0.5 * M_PI);
+  cairo_arc(cr, 0.12, 0.88, 0.12, 0.5 * M_PI, M_PI);
+  cairo_arc(cr, 0.12, 0.37, 0.12, M_PI, 1.5 * M_PI);
+  cairo_line_to(cr, 0.35, 0.25);
   cairo_stroke(cr);
 
-  // Wand tip (small diamond)
-  cairo_move_to(cr, 0.65, 0.25);
-  cairo_line_to(cr, 0.75, 0.35);
-  cairo_line_to(cr, 0.65, 0.45);
-  cairo_line_to(cr, 0.55, 0.35);
-  cairo_close_path(cr);
-  cairo_fill(cr);
-
-  // Sparkles (small stars around the tip)
-  cairo_set_line_width(cr, 0.04);
-  // Star 1
-  cairo_move_to(cr, 0.85, 0.10);
-  cairo_line_to(cr, 0.85, 0.20);
-  cairo_move_to(cr, 0.80, 0.15);
-  cairo_line_to(cr, 0.90, 0.15);
-  cairo_stroke(cr);
-  // Star 2
-  cairo_move_to(cr, 0.90, 0.35);
-  cairo_line_to(cr, 0.98, 0.35);
-  cairo_move_to(cr, 0.94, 0.30);
-  cairo_line_to(cr, 0.94, 0.40);
+  cairo_move_to(cr, 0.80, -0.05);
+  cairo_line_to(cr, 0.80, 0.55);
+  cairo_move_to(cr, 0.50, 0.25);
+  cairo_line_to(cr, 1.10, 0.25);
   cairo_stroke(cr);
 
   FINISH
