@@ -177,8 +177,6 @@ static void _finalize_mask(dt_iop_module_t *module,
   _object_data_t *d = _get_data(gui);
   if(!d || !d->mask) return;
 
-  const dt_image_t *const image = &(darktable.develop->image_storage);
-
   // Invert mask for potrace (potrace traces dark regions)
   // Our mask: 1.0 = foreground; potrace expects: 0.0 = foreground
   const size_t n = (size_t)d->mask_w * d->mask_h;
@@ -188,30 +186,119 @@ static void _finalize_mask(dt_iop_module_t *module,
   for(size_t i = 0; i < n; i++)
     inv_mask[i] = 1.0f - d->mask[i];
 
-  GList *forms = ras2forms(inv_mask, d->mask_w, d->mask_h, image);
+  // Pass NULL for image: the AI mask lives in preview backbuf pixel space.
+  // We backtransform through the pipeline to input image coords below.
+  GList *signs = NULL;
+  GList *forms = ras2forms(inv_mask, d->mask_w, d->mask_h, NULL, &signs);
   g_free(inv_mask);
 
-  const int nbform = g_list_length(forms);
-  if(nbform == 0)
-  {
-    dt_control_log(_("no mask extracted from AI segmentation"));
-    return;
-  }
-
-  // Name the forms with AI prefix
-  static int ai_group_counter = 0;
-  ai_group_counter++;
+  // darktable mask coordinates are stored in input-image-normalized space:
+  //   coord = backtransform(backbuf_pixel) / iwidth
+  // This undoes all geometric pipeline transforms (crop, rotation, lens, etc.)
+  // so that the mask can be applied at any point in the pipeline.
+  float wd, ht, iwidth, iheight;
+  dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
 
   for(GList *l = forms; l; l = g_list_next(l))
   {
     dt_masks_form_t *f = l->data;
-    snprintf(f->name, sizeof(f->name), "AI mask %d", ai_group_counter);
+    const int npts = g_list_length(f->points);
+    if(npts == 0) continue;
+
+    // Collect all coordinates into a flat array for batch backtransform.
+    // Each path point has 3 coordinate pairs: corner, ctrl1, ctrl2.
+    float *pts = g_new(float, npts * 6);
+    int i = 0;
+    for(GList *p = f->points; p; p = g_list_next(p))
+    {
+      dt_masks_point_path_t *pt = p->data;
+      pts[i++] = pt->corner[0];
+      pts[i++] = pt->corner[1];
+      pts[i++] = pt->ctrl1[0];
+      pts[i++] = pt->ctrl1[1];
+      pts[i++] = pt->ctrl2[0];
+      pts[i++] = pt->ctrl2[1];
+    }
+
+    dt_dev_distort_backtransform(darktable.develop, pts, npts * 3);
+
+    // Write back and normalize by input image dimensions
+    i = 0;
+    for(GList *p = f->points; p; p = g_list_next(p))
+    {
+      dt_masks_point_path_t *pt = p->data;
+      pt->corner[0] = pts[i++] / iwidth;
+      pt->corner[1] = pts[i++] / iheight;
+      pt->ctrl1[0] = pts[i++] / iwidth;
+      pt->ctrl1[1] = pts[i++] / iheight;
+      pt->ctrl2[0] = pts[i++] / iwidth;
+      pt->ctrl2[1] = pts[i++] / iheight;
+    }
+    g_free(pts);
   }
 
-  dt_masks_register_forms(darktable.develop, forms);
+  const int nbform = g_list_length(forms);
+  if(nbform == 0)
+  {
+    g_list_free(signs);
+    dt_control_log(_("no mask extracted from AI segmentation"));
+    return;
+  }
 
-  dt_control_log(ngettext("%d AI mask created",
-                          "%d AI masks created", nbform), nbform);
+  // Always wrap paths in a group — holes use difference mode
+
+  // Count existing AI object groups/paths for numbering
+  dt_develop_t *dev = darktable.develop;
+  guint grp_nb = 0;
+  guint path_nb = 0;
+  for(GList *l = dev->forms; l; l = g_list_next(l))
+  {
+    const dt_masks_form_t *f = l->data;
+    if(strncmp(f->name, "ai object group", 15) == 0) grp_nb++;
+    if(strncmp(f->name, "ai object #", 11) == 0) path_nb++;
+  }
+  grp_nb++;
+  path_nb++;
+
+  // Name each path form
+  for(GList *l = forms; l; l = g_list_next(l))
+  {
+    dt_masks_form_t *f = l->data;
+    snprintf(f->name, sizeof(f->name), "ai object #%d", (int)path_nb++);
+  }
+
+  dt_masks_form_t *grp = dt_masks_create(DT_MASKS_GROUP);
+  snprintf(grp->name, sizeof(grp->name), "ai object group #%d", (int)grp_nb);
+
+  // Register all path forms so they exist in dev->forms
+  for(GList *l = forms; l; l = g_list_next(l))
+  {
+    dt_masks_form_t *f = l->data;
+    dev->forms = g_list_append(dev->forms, f);
+  }
+
+  // Add each path to the group; holes get difference mode
+  GList *s = signs;
+  for(GList *l = forms; l; l = g_list_next(l),
+      s = s ? g_list_next(s) : NULL)
+  {
+    dt_masks_form_t *f = l->data;
+    const int sign = s ? GPOINTER_TO_INT(s->data) : '+';
+    dt_masks_point_group_t *grpt = dt_masks_group_add_form(grp, f);
+    if(grpt && sign == '-')
+    {
+      grpt->state = (grpt->state & ~DT_MASKS_STATE_UNION)
+                  | DT_MASKS_STATE_DIFFERENCE;
+    }
+  }
+
+  // Register the group
+  dev->forms = g_list_append(dev->forms, grp);
+  dt_dev_add_masks_history_item(dev, NULL, TRUE);
+
+  g_list_free(signs);
+
+  dt_control_log(_("AI object mask created (%d paths)"), nbform);
 }
 
 // --- Mask Event Handlers ---
