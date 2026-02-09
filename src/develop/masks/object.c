@@ -298,7 +298,7 @@ static void _finalize_mask(dt_iop_module_t *module,
 
   g_list_free(signs);
 
-  dt_control_log(_("AI object mask created (%d paths)"), nbform);
+  dt_control_log(_("AI object created (%d paths)"), nbform);
 }
 
 // --- Mask Event Handlers ---

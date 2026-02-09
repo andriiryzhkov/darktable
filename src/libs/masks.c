@@ -1843,7 +1843,7 @@ void gui_init(dt_lib_module_t *self)
                    d->bt_object, &dt_action_def_toggle);
   g_signal_connect(G_OBJECT(d->bt_object), "button-press-event",
                    G_CALLBACK(_bt_add_shape), GINT_TO_POINTER(DT_MASKS_OBJECT));
-  gtk_widget_set_tooltip_text(d->bt_object, _("add AI object mask"));
+  gtk_widget_set_tooltip_text(d->bt_object, _("add AI object"));
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->bt_object), FALSE);
 
 
