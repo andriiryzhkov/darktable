@@ -48,6 +48,12 @@ add_library(session MODULE "session.c")
 add_library(duplicate MODULE "duplicate.c")
 add_library(ioporder MODULE "ioporder.c")
 
+if(BUILD_AI)
+  add_library(denoise_ai MODULE "denoise_ai.c")
+  target_link_libraries(denoise_ai darktable_ai TIFF::TIFF)
+  set(MODULES ${MODULES} denoise_ai)
+endif(BUILD_AI)
+
 # tools
 add_library(viewswitcher MODULE "tools/viewswitcher.c")
 
