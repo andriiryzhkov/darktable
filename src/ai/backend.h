@@ -104,15 +104,17 @@ void dt_ai_env_destroy(dt_ai_environment_t *env);
 /* --- Execution --- */
 
 /**
- * @brief Load a specific model for execution.
+ * @brief Load a model for execution from the registry.
  * @param env Library environment.
  * @param model_id ID of the model to load.
+ * @param model_file Filename within the model directory (NULL = "model.onnx").
  * @param provider Execution provider to use for hardware acceleration.
  * @return dt_ai_context_t* Context ready for inference, or NULL.
  */
 dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
-                                               const char *model_id,
-                                               dt_ai_provider_t provider);
+                                  const char *model_id,
+                                  const char *model_file,
+                                  dt_ai_provider_t provider);
 
 /**
  * @brief Tensor Data Types

@@ -227,17 +227,18 @@ void dt_ai_env_destroy(dt_ai_environment_t *env) {
   g_free(env);
 }
 
-// --- Backend-specific load functions (defined in backend_onnx.c, etc.) ---
+// --- Backend-specific load (defined in backend_onnx.c) ---
 
 extern dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
-                                         dt_ai_provider_t provider,
-                                         const char *model_id);
+                                         const char *model_file,
+                                         dt_ai_provider_t provider);
 
 // --- Model Loading with Backend Dispatch ---
 
 dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
-                                               const char *model_id,
-                                               dt_ai_provider_t provider) {
+                                  const char *model_id,
+                                  const char *model_file,
+                                  dt_ai_provider_t provider) {
   if(!env || !model_id)
     return NULL;
 
@@ -268,7 +269,7 @@ dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
   dt_ai_context_t *ctx = NULL;
 
   if(strcmp(backend_copy, "onnx") == 0) {
-    ctx = dt_ai_onnx_load(model_dir, provider, model_id);
+    ctx = dt_ai_onnx_load(model_dir, model_file, provider);
   } else {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Unknown backend '%s' for model '%s'",
              backend_copy, model_id);
