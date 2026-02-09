@@ -314,7 +314,6 @@ add_definitions(${LIBXML2_DEFINITIONS})
 
 # Check for potrace
 find_package(Potrace REQUIRED)
-include_directories(SYSTEM ${POTRACE_INCLUDE_DIR})
 list(APPEND LIBS ${POTRACE_LIBRARY})
 
 if(USE_CAMERA_SUPPORT)

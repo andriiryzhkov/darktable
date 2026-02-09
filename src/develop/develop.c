@@ -106,14 +106,6 @@ void dt_dev_init(dt_develop_t *dev,
     dev->histogram_pre_levels_max = -1;
     dev->darkroom_mouse_in_center_area = FALSE;
     dev->darkroom_skip_mouse_events = FALSE;
-
-    if(darktable.gui)
-    {
-      dev->full.ppd = darktable.gui->ppd;
-      dev->full.dpi = darktable.gui->dpi;
-      dev->full.dpi_factor = darktable.gui->dpi_factor;
-      dev->full.widget = dt_ui_center(darktable.gui->ui);
-    }
   }
 
   dev->iop_instance = 0;
@@ -2336,6 +2328,7 @@ void dt_dev_read_history_ext(dt_develop_t *dev,
   // FIXME : this probably needs to capture dev thread lock
   if(dev->gui_attached && !no_image)
   {
+    dt_dev_pixelpipe_rebuild(dev);
     dt_dev_pipe_synch_all(dev);
     dt_dev_invalidate_all(dev);
 
