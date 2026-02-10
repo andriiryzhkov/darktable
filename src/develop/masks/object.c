@@ -177,7 +177,11 @@ static void _finalize_mask(dt_iop_module_t *module,
   // Our mask: 1.0 = foreground; potrace expects: 0.0 = foreground
   const size_t n = (size_t)d->mask_w * d->mask_h;
   float *inv_mask = g_try_malloc(n * sizeof(float));
-  if(!inv_mask) return;
+  if(!inv_mask)
+  {
+    dt_control_busy_leave();
+    return;
+  }
 
   for(size_t i = 0; i < n; i++)
     inv_mask[i] = 1.0f - d->mask[i];
