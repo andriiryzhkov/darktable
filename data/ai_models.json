@@ -2,12 +2,19 @@
   "version": 1,
   "models": [
     {
-      "id": "nafnet-sidd-width32",
-      "name": "Denoise NAFNet (SIDD)",
+      "id": "denoise-nafnet",
+      "name": "denoise nafnet",
       "description": "General-purpose image denoising trained on SIDD dataset",
       "task": "denoise",
-      "github_asset": "nafnet-sidd-width32.zip",
-      "checksum": "sha256:54dee14146981232a62c70fec50d726fb45a79f2f73a13a8c7e2b10493c92bc4",
+      "github_asset": "denoise-nafnet.zip",
+      "required": true
+    },
+    {
+      "id": "mask-light-hq-sam",
+      "name": "mask light sam-hq",
+      "description": "Light HQ Segment Anything Model for masking",
+      "task": "mask",
+      "github_asset": "mask-light-hq-sam.zip",
       "required": true
     }
   ]
