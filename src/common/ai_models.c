@@ -775,9 +775,10 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
   model->status = DT_AI_MODEL_DOWNLOADING;
   model->download_progress = 0.0;
 
-  // Copy immutable fields we need outside the lock
+  // Copy fields we need outside the lock (repository can be replaced by reload)
   char *asset = g_strdup(model->github_asset);
   char *checksum_copy = g_strdup(model->checksum);
+  char *repository = g_strdup(registry->repository);
   g_mutex_unlock(&registry->lock);
 
   // Helper macro: set model status under lock and return error
@@ -790,18 +791,19 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
       g_mutex_unlock(&registry->lock); \
       g_free(asset); \
       g_free(checksum_copy); \
+      g_free(repository); \
       return (err_expr); \
     } while(0)
 
   // Validate repository format (must be "owner/repo" with safe characters)
-  if(!registry->repository
-     || !g_regex_match_simple("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", registry->repository, 0, 0))
+  if(!repository
+     || !g_regex_match_simple("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", repository, 0, 0))
   {
     SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("invalid repository format")));
   }
 
   // Find the latest compatible release for this darktable version
-  char *release_tag = _find_latest_compatible_release(registry->repository);
+  char *release_tag = _find_latest_compatible_release(repository);
   if(!release_tag)
   {
     char *dt_ver = _get_darktable_version_prefix();
@@ -813,7 +815,7 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
 
   // Build GitHub download URL using local copies (not model pointer)
   char *url = g_strdup_printf("https://github.com/%s/releases/download/%s/%s",
-                              registry->repository, release_tag, asset);
+                              repository, release_tag, asset);
   g_free(release_tag);
 
   if(!url)
@@ -937,6 +939,7 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
 
   g_free(asset);
   g_free(checksum_copy);
+  g_free(repository);
 
   #undef SET_STATUS_AND_RETURN
 
