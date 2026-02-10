@@ -434,6 +434,16 @@ gboolean dt_ai_models_load_registry(dt_ai_registry_t *registry)
   return TRUE;
 }
 
+// Validate that a model_id is a plain directory name with no path separators
+// or ".." components that could escape the models directory.
+static gboolean _valid_model_id(const char *model_id)
+{
+  if(!model_id || !model_id[0]) return FALSE;
+  if(strchr(model_id, '/') || strchr(model_id, '\\')) return FALSE;
+  if(strcmp(model_id, "..") == 0 || strcmp(model_id, ".") == 0) return FALSE;
+  return TRUE;
+}
+
 void dt_ai_models_refresh_status(dt_ai_registry_t *registry)
 {
   if(!registry) return;
@@ -443,6 +453,9 @@ void dt_ai_models_refresh_status(dt_ai_registry_t *registry)
   for(GList *l = registry->models; l; l = g_list_next(l))
   {
     dt_ai_model_t *model = (dt_ai_model_t *)l->data;
+
+    // Skip models with invalid IDs (path traversal protection)
+    if(!_valid_model_id(model->id)) continue;
 
     // Check if model directory exists and contains required files
     char *model_dir = g_build_filename(registry->models_dir, model->id, NULL);
@@ -1043,7 +1056,7 @@ static gboolean _rmdir_recursive(const char *path)
 
 gboolean dt_ai_models_delete(dt_ai_registry_t *registry, const char *model_id)
 {
-  if(!registry || !model_id) return FALSE;
+  if(!registry || !_valid_model_id(model_id)) return FALSE;
 
   // Check model exists
   g_mutex_lock(&registry->lock);
@@ -1093,7 +1106,7 @@ void dt_ai_models_set_enabled(dt_ai_registry_t *registry, const char *model_id,
 
 char *dt_ai_models_get_path(dt_ai_registry_t *registry, const char *model_id)
 {
-  if(!registry || !model_id) return NULL;
+  if(!registry || !_valid_model_id(model_id)) return NULL;
 
   g_mutex_lock(&registry->lock);
   dt_ai_model_t *model = _find_model_unlocked(registry, model_id);
