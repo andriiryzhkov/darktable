@@ -220,12 +220,11 @@ static char *_find_latest_compatible_release(const char *repository)
     return NULL;
   }
 
-  // Build prefix to match: "vX.Y.Z"
-  char *tag_prefix = g_strdup_printf("v%s", dt_version);
-  size_t prefix_len = strlen(tag_prefix);
+  // Build prefix to match: accept both "vX.Y.Z" and "X.Y.Z" tag formats
+  size_t ver_len = strlen(dt_version);
 
   char *best_tag = NULL;
-  int best_revision = -1;  // -1 means no revision suffix (e.g., "v5.5.0" itself)
+  int best_revision = -1;  // -1 means no revision suffix (e.g., "5.5.0" itself)
 
   JsonArray *releases = json_node_get_array(root);
   guint len = json_array_get_length(releases);
@@ -237,12 +236,19 @@ static char *_find_latest_compatible_release(const char *repository)
 
     if(!json_object_has_member(rel, "tag_name")) continue;
     const char *tag = json_object_get_string_member(rel, "tag_name");
-    if(!tag || strncmp(tag, tag_prefix, prefix_len) != 0) continue;
+    if(!tag) continue;
 
-    // Tag matches prefix. Check what follows:
-    // "vX.Y.Z" (exact) -> revision = 0
-    // "vX.Y.Z.N"       -> revision = N
-    const char *suffix = tag + prefix_len;
+    // Skip any non-digit prefix (e.g. "v", "release-") to extract X.Y.Z.W
+    const char *ver_part = tag;
+    while(*ver_part && !g_ascii_isdigit(*ver_part)) ver_part++;
+    if(!*ver_part) continue;
+
+    if(strncmp(ver_part, dt_version, ver_len) != 0) continue;
+
+    // Tag matches version prefix. Check what follows:
+    // "X.Y.Z" (exact) -> revision = 0
+    // "X.Y.Z.N"       -> revision = N
+    const char *suffix = ver_part + ver_len;
     int revision = 0;
     if(suffix[0] == '\0')
     {
@@ -265,7 +271,6 @@ static char *_find_latest_compatible_release(const char *repository)
     }
   }
 
-  g_free(tag_prefix);
   g_free(dt_version);
   g_object_unref(parser);
 
@@ -922,6 +927,14 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
      || !g_regex_match_simple("^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$", repository, 0, 0))
   {
     SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("invalid repository format")));
+  }
+
+  {
+    char *ver = _get_darktable_version_prefix();
+    dt_print(DT_DEBUG_AI, "[ai_models] Repository: %s", repository);
+    dt_print(DT_DEBUG_AI, "[ai_models] darktable version: %s (full: %s)",
+             ver ? ver : "unknown", darktable_package_version);
+    g_free(ver);
   }
 
   // Find the latest compatible release for this darktable version
