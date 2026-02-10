@@ -97,6 +97,21 @@ static gboolean _map_onnx_type(ONNXTensorElementDataType onnx_type,
   }
 }
 
+// Compute total element count from shape dimensions with overflow checking.
+// Returns the product of all shape dimensions, or -1 if any dimension is
+// non-positive or the multiplication would overflow int64_t.
+static int64_t _safe_element_count(const int64_t *shape, int ndim)
+{
+  int64_t count = 1;
+  for(int i = 0; i < ndim; i++)
+  {
+    if(shape[i] <= 0) return -1;
+    if(count > INT64_MAX / shape[i]) return -1;
+    count *= shape[i];
+  }
+  return count;
+}
+
 // Map dt_ai_dtype_t to ONNX type and element size.
 // Returns TRUE on success, FALSE if the type is unsupported.
 static gboolean _dtype_to_onnx(dt_ai_dtype_t dtype,
@@ -560,9 +575,12 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   const char **input_names = (const char **)ctx->input_names; // Cast for Run()
 
   for(int i = 0; i < num_inputs; i++) {
-    int64_t element_count = 1;
-    for(int j = 0; j < inputs[i].ndim; j++)
-      element_count *= inputs[i].shape[j];
+    const int64_t element_count = _safe_element_count(inputs[i].shape, inputs[i].ndim);
+    if(element_count < 0) {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Invalid or overflowing shape for Input[%d]", i);
+      ret = -4;
+      goto cleanup;
+    }
 
     ONNXTensorElementDataType onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
     size_t type_size = sizeof(float);
@@ -575,6 +593,11 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
       type_size = sizeof(uint16_t); // Half is 2 bytes
 
+      if((size_t)element_count > SIZE_MAX / type_size) {
+        dt_print(DT_DEBUG_AI, "[darktable_ai] Tensor size overflow for Input[%d]", i);
+        ret = -4;
+        goto cleanup;
+      }
       uint16_t *half_data = g_malloc(element_count * type_size);
       const float *src = (const float *)inputs[i].data;
       for(int64_t k = 0; k < element_count; k++) {
@@ -592,6 +615,11 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       }
     }
 
+    if((size_t)element_count > SIZE_MAX / type_size) {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Tensor size overflow for Input[%d]", i);
+      ret = -4;
+      goto cleanup;
+    }
     status = g_ort->CreateTensorWithDataAsOrtValue(
         ctx->memory_info, data_ptr, element_count * type_size, inputs[i].shape,
         inputs[i].ndim, onnx_type, &input_tensors[i]);
@@ -617,9 +645,12 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       continue;
     }
 
-    int64_t element_count = 1;
-    for(int j = 0; j < outputs[i].ndim; j++)
-      element_count *= outputs[i].shape[j];
+    const int64_t element_count = _safe_element_count(outputs[i].shape, outputs[i].ndim);
+    if(element_count < 0) {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Invalid or overflowing shape for Output[%d]", i);
+      ret = -4;
+      goto cleanup;
+    }
 
     ONNXTensorElementDataType onnx_type;
     size_t type_size;
@@ -631,6 +662,11 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
       goto cleanup;
     }
 
+    if((size_t)element_count > SIZE_MAX / type_size) {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Tensor size overflow for Output[%d]", i);
+      ret = -4;
+      goto cleanup;
+    }
     status = g_ort->CreateTensorWithDataAsOrtValue(
         ctx->memory_info, outputs[i].data, element_count * type_size,
         outputs[i].shape, outputs[i].ndim, onnx_type, &output_tensors[i]);
@@ -669,10 +705,11 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
             continue;
           }
 
-          // Element count
-          int64_t element_count = 1;
-          for(int j = 0; j < outputs[i].ndim; j++)
-            element_count *= outputs[i].shape[j];
+          const int64_t element_count = _safe_element_count(outputs[i].shape, outputs[i].ndim);
+          if(element_count < 0) {
+            dt_print(DT_DEBUG_AI, "[darktable_ai] Invalid or overflowing shape for Output[%d]", i);
+            continue;
+          }
 
           uint16_t *half_data = (uint16_t *)raw_data;
           float *dst = (float *)outputs[i].data;
