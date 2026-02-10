@@ -278,6 +278,115 @@ static char *_find_latest_compatible_release(const char *repository)
   return best_tag;
 }
 
+/**
+ * @brief Fetch the SHA256 digest for a release asset from the GitHub API.
+ *
+ * Queries /repos/{repo}/releases/tags/{tag}, iterates the assets array,
+ * and returns the "digest" field for the asset whose "name" matches.
+ *
+ * @param repository  GitHub "owner/repo" string
+ * @param release_tag Release tag (e.g. "5.5.0.1")
+ * @param asset_name  Asset filename (e.g. "denoise-nafnet.zip")
+ * @return Newly allocated string "sha256:...", or NULL if not found.
+ */
+static char *_fetch_asset_digest(const char *repository,
+                                 const char *release_tag,
+                                 const char *asset_name)
+{
+  char *api_url = g_strdup_printf(
+    "https://api.github.com/repos/%s/releases/tags/%s", repository, release_tag);
+
+  CURL *curl = curl_easy_init();
+  if(!curl)
+  {
+    g_free(api_url);
+    return NULL;
+  }
+  dt_curl_init(curl, FALSE);
+
+  GString *response = g_string_new(NULL);
+  curl_easy_setopt(curl, CURLOPT_URL, api_url);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _curl_write_string);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+
+  struct curl_slist *headers = NULL;
+  headers = curl_slist_append(headers, "Accept: application/vnd.github+json");
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+  CURLcode res = curl_easy_perform(curl);
+  long http_code = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+  g_free(api_url);
+
+  if(res != CURLE_OK || http_code != 200)
+  {
+    dt_print(DT_DEBUG_AI,
+      "[ai_models] Failed to fetch release metadata: curl=%d, http=%ld", res, http_code);
+    g_string_free(response, TRUE);
+    return NULL;
+  }
+
+  // Parse the release JSON object
+  JsonParser *parser = json_parser_new();
+  if(!json_parser_load_from_data(parser, response->str, response->len, NULL))
+  {
+    g_object_unref(parser);
+    g_string_free(response, TRUE);
+    return NULL;
+  }
+  g_string_free(response, TRUE);
+
+  JsonNode *root = json_parser_get_root(parser);
+  if(!root || !JSON_NODE_HOLDS_OBJECT(root))
+  {
+    g_object_unref(parser);
+    return NULL;
+  }
+
+  JsonObject *release = json_node_get_object(root);
+  if(!json_object_has_member(release, "assets"))
+  {
+    g_object_unref(parser);
+    return NULL;
+  }
+
+  char *digest = NULL;
+  JsonArray *assets = json_object_get_array_member(release, "assets");
+  guint len = json_array_get_length(assets);
+  for(guint i = 0; i < len; i++)
+  {
+    JsonNode *node = json_array_get_element(assets, i);
+    if(!JSON_NODE_HOLDS_OBJECT(node)) continue;
+    JsonObject *asset_obj = json_node_get_object(node);
+
+    if(!json_object_has_member(asset_obj, "name")) continue;
+    const char *name = json_object_get_string_member(asset_obj, "name");
+    if(g_strcmp0(name, asset_name) != 0) continue;
+
+    if(json_object_has_member(asset_obj, "digest"))
+    {
+      const char *d = json_object_get_string_member(asset_obj, "digest");
+      if(d && g_str_has_prefix(d, "sha256:"))
+      {
+        digest = g_strdup(d);
+        dt_print(DT_DEBUG_AI, "[ai_models] Asset %s digest: %s", asset_name, digest);
+      }
+    }
+    break;
+  }
+
+  g_object_unref(parser);
+
+  if(!digest)
+    dt_print(DT_DEBUG_AI, "[ai_models] No digest found for asset %s in release %s",
+             asset_name, release_tag);
+
+  return digest;
+}
+
 // --- Core API ---
 
 dt_ai_registry_t *dt_ai_models_init(void)
@@ -826,6 +935,17 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
     SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, err);
   }
 
+  // Fetch SHA256 digest from GitHub Releases API if not already known
+  if(!checksum_copy || !g_str_has_prefix(checksum_copy, "sha256:"))
+  {
+    g_free(checksum_copy);
+    checksum_copy = _fetch_asset_digest(repository, release_tag, asset);
+    if(!checksum_copy)
+      dt_print(DT_DEBUG_AI,
+        "[ai_models] WARNING: could not obtain checksum for %s — "
+        "download will proceed without integrity verification", asset);
+  }
+
   // Build GitHub download URL using local copies (not model pointer)
   char *url = g_strdup_printf("https://github.com/%s/releases/download/%s/%s",
                               repository, release_tag, asset);
@@ -914,12 +1034,20 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry, const char *model_i
     SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, error);
   }
 
-  // Verify checksum using local copy
-  if(!_verify_checksum(download_path, checksum_copy))
+  // Verify checksum if available (fetched from GitHub API or stored in registry)
+  if(checksum_copy && g_str_has_prefix(checksum_copy, "sha256:"))
   {
-    g_unlink(download_path);
-    g_free(download_path);
-    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("checksum verification failed")));
+    if(!_verify_checksum(download_path, checksum_copy))
+    {
+      g_unlink(download_path);
+      g_free(download_path);
+      SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, g_strdup(_("checksum verification failed")));
+    }
+  }
+  else
+  {
+    dt_print(DT_DEBUG_AI,
+      "[ai_models] WARNING: no checksum available for %s — skipping verification", asset);
   }
 
   // Extract to models directory (ZIP already contains model_id folder)
