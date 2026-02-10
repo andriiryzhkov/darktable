@@ -61,8 +61,8 @@ static float *_preprocess_image(const uint8_t *rgb_data,
 {
   const int target = SAM_INPUT_SIZE;
   const float scale = (float)target / (float)(width > height ? width : height);
-  const int new_w = (int)(width * scale + 0.5f);
-  const int new_h = (int)(height * scale + 0.5f);
+  const int new_w = MIN((int)(width * scale + 0.5f), target);
+  const int new_h = MIN((int)(height * scale + 0.5f), target);
 
   *out_scale = scale;
 
