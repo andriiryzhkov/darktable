@@ -144,11 +144,9 @@ static dt_signal_description _signal_description[DT_SIGNAL_COUNT] = {
   [DT_SIGNAL_PRESET_APPLIED] = { "dt-preset-applied",
     NULL, NULL, G_TYPE_NONE, g_cclosure_marshal_VOID__VOID, 0, NULL, NULL, FALSE },
 
-#ifdef HAVE_AI
   /* AI models related signals */
   [DT_SIGNAL_AI_MODELS_CHANGED] = { "dt-ai-models-changed",
     NULL, NULL, G_TYPE_NONE, g_cclosure_marshal_VOID__VOID, 0, NULL, NULL, FALSE },
-#endif
 
   /* Develop related signals */
   [DT_SIGNAL_DEVELOP_INITIALIZE] = { "dt-develop-initialized",
