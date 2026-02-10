@@ -432,15 +432,21 @@ static gboolean _download_model_with_dialog(dt_prefs_ai_data_t *data, const char
   // Run dialog
   gint response = gtk_dialog_run(GTK_DIALOG(dialog));
 
-  // Stop timer
-  g_source_remove(timer_id);
-
   // Handle cancellation (atomic so curl progress callback can read it safely)
   if(response == GTK_RESPONSE_CANCEL)
     g_atomic_int_set(&dl->cancelled, TRUE);
 
-  // Wait for thread to finish
+  // Wait for thread to finish — after this, dl->finished is TRUE
   g_thread_join(thread);
+
+  // Remove the timer. Any already-dispatched idle callback will see
+  // dl->finished == TRUE and return G_SOURCE_REMOVE harmlessly.
+  g_source_remove(timer_id);
+
+  // Destroy the dialog before freeing dl so no straggling callback
+  // can touch destroyed widgets.
+  gtk_widget_destroy(dialog);
+  dl->dialog = NULL;
 
   gboolean success = (dl->error == NULL);
 
@@ -453,7 +459,6 @@ static gboolean _download_model_with_dialog(dt_prefs_ai_data_t *data, const char
   g_free(dl->model_id);
   g_free(dl->error);
   g_free(dl);
-  gtk_widget_destroy(dialog);
 
   return success;
 }
