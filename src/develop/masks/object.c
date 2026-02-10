@@ -34,25 +34,25 @@
 
 typedef enum _encode_state_t
 {
-  ENCODE_ERROR    = -1,
-  ENCODE_IDLE     =  0,
-  ENCODE_MSG_SHOWN =  1,  // busy message queued, waiting for next expose
-  ENCODE_READY    =  2,   // encoding complete, results available
-  ENCODE_RUNNING  =  3,   // background thread in progress
+  ENCODE_ERROR = -1,
+  ENCODE_IDLE = 0,
+  ENCODE_MSG_SHOWN = 1, // busy message queued, waiting for next expose
+  ENCODE_READY = 2,     // encoding complete, results available
+  ENCODE_RUNNING = 3,   // background thread in progress
 } _encode_state_t;
 
 typedef struct _object_data_t
 {
-  dt_ai_environment_t *env;  // AI environment for model registry
-  dt_seg_context_t *seg;     // SAM context (encoder+decoder)
-  float *mask;               // current mask buffer (preview pipe size)
-  int mask_w, mask_h;        // mask dimensions
-  gboolean model_loaded;     // whether the model was loaded
-  int encode_state;          // uses _encode_state_t values (atomic access)
-  dt_imgid_t encoded_imgid;  // image ID that was encoded
-  guint modifier_poll_id;    // timer to detect shift key changes
-  GThread *encode_thread;    // background encoding thread
-  gboolean busy;             // TRUE if dt_control_busy_enter() was called
+  dt_ai_environment_t *env; // AI environment for model registry
+  dt_seg_context_t *seg;    // SAM context (encoder+decoder)
+  float *mask;              // current mask buffer (preview pipe size)
+  int mask_w, mask_h;       // mask dimensions
+  gboolean model_loaded;    // whether the model was loaded
+  int encode_state;         // uses _encode_state_t values (atomic access)
+  dt_imgid_t encoded_imgid; // image ID that was encoded
+  guint modifier_poll_id;   // timer to detect shift key changes
+  GThread *encode_thread;   // background encoding thread
+  gboolean busy;            // TRUE if dt_control_busy_enter() was called
 } _object_data_t;
 
 static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
@@ -63,15 +63,18 @@ static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
 // Free all resources in _object_data_t (must be called after thread has joined)
 static void _destroy_data(_object_data_t *d)
 {
-  if(!d) return;
+  if(!d)
+    return;
   if(d->busy)
     dt_control_busy_leave();
   if(d->modifier_poll_id)
     g_source_remove(d->modifier_poll_id);
   if(d->encode_thread)
     g_thread_join(d->encode_thread);
-  if(d->seg) dt_seg_free(d->seg);
-  if(d->env) dt_ai_env_destroy(d->env);
+  if(d->seg)
+    dt_seg_free(d->seg);
+  if(d->env)
+    dt_ai_env_destroy(d->env);
   g_free(d->mask);
   g_free(d);
 }
@@ -82,7 +85,7 @@ static gboolean _deferred_cleanup(gpointer data)
   _object_data_t *d = data;
   const int state = g_atomic_int_get(&d->encode_state);
   if(state == ENCODE_RUNNING)
-    return G_SOURCE_CONTINUE;  // thread still running, try again later
+    return G_SOURCE_CONTINUE; // thread still running, try again later
   _destroy_data(d);
   return G_SOURCE_REMOVE;
 }
@@ -90,7 +93,8 @@ static gboolean _deferred_cleanup(gpointer data)
 static void _free_data(dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
-  if(!d) return;
+  if(!d)
+    return;
   gui->scratchpad = NULL;
 
   const int state = g_atomic_int_get(&d->encode_state);
@@ -107,7 +111,7 @@ static void _free_data(dt_masks_form_gui_t *gui)
 typedef struct _encode_thread_data_t
 {
   _object_data_t *d;
-  uint8_t *rgb;     // RGB copy of backbuf (owned, freed by thread)
+  uint8_t *rgb; // RGB copy of backbuf (owned, freed by thread)
   int width, height;
 } _encode_thread_data_t;
 
@@ -150,8 +154,10 @@ static gpointer _encode_thread_func(gpointer data)
 static void _run_decoder(dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
-  if(!d || !d->seg || !dt_seg_is_encoded(d->seg)) return;
-  if(gui->guipoints_count <= 0) return;
+  if(!d || !d->seg || !dt_seg_is_encoded(d->seg))
+    return;
+  if(gui->guipoints_count <= 0)
+    return;
 
   const float *gp = dt_masks_dynbuf_buffer(gui->guipoints);
   const float *gpp = dt_masks_dynbuf_buffer(gui->guipoints_payload);
@@ -165,8 +171,7 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
   }
 
   int mw, mh;
-  float *mask = dt_seg_compute_mask(d->seg, points, gui->guipoints_count,
-                                     &mw, &mh);
+  float *mask = dt_seg_compute_mask(d->seg, points, gui->guipoints_count, &mw, &mh);
   g_free(points);
 
   if(mask)
@@ -179,18 +184,19 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
 }
 
 // Finalize: vectorize the mask and register as a group of path forms
-static void _finalize_mask(dt_iop_module_t *module,
-                           dt_masks_form_t *form,
-                           dt_masks_form_gui_t *gui)
+static void
+_finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
-  if(!d || !d->mask) return;
+  if(!d || !d->mask)
+    return;
 
   // Invert mask for potrace (potrace traces dark regions)
   // Our mask: 1.0 = foreground; potrace expects: 0.0 = foreground
   const size_t n = (size_t)d->mask_w * d->mask_h;
   float *inv_mask = g_try_malloc(n * sizeof(float));
-  if(!inv_mask) return;
+  if(!inv_mask)
+    return;
 
   for(size_t i = 0; i < n; i++)
     inv_mask[i] = 1.0f - d->mask[i];
@@ -201,8 +207,8 @@ static void _finalize_mask(dt_iop_module_t *module,
   const float smoothing = dt_conf_get_float("plugins/darkroom/masks/object/smoothing");
 
   GList *signs = NULL;
-  GList *forms = ras2forms(inv_mask, d->mask_w, d->mask_h, NULL,
-                           cleanup, (double)smoothing, &signs);
+  GList *forms
+    = ras2forms(inv_mask, d->mask_w, d->mask_h, NULL, cleanup, (double)smoothing, &signs);
   g_free(inv_mask);
 
   // darktable mask coordinates are stored in input-image-normalized space:
@@ -216,7 +222,8 @@ static void _finalize_mask(dt_iop_module_t *module,
   {
     dt_masks_form_t *f = l->data;
     const int npts = g_list_length(f->points);
-    if(npts == 0) continue;
+    if(npts == 0)
+      continue;
 
     // Collect all coordinates into a flat array for batch backtransform.
     // Each path point has 3 coordinate pairs: corner, ctrl1, ctrl2.
@@ -267,8 +274,10 @@ static void _finalize_mask(dt_iop_module_t *module,
   for(GList *l = dev->forms; l; l = g_list_next(l))
   {
     const dt_masks_form_t *f = l->data;
-    if(strncmp(f->name, "ai object group", 15) == 0) grp_nb++;
-    if(strncmp(f->name, "ai object #", 11) == 0) path_nb++;
+    if(strncmp(f->name, "ai object group", 15) == 0)
+      grp_nb++;
+    if(strncmp(f->name, "ai object #", 11) == 0)
+      path_nb++;
   }
   grp_nb++;
   path_nb++;
@@ -292,16 +301,14 @@ static void _finalize_mask(dt_iop_module_t *module,
 
   // Add each path to the group; holes get difference mode
   GList *s = signs;
-  for(GList *l = forms; l; l = g_list_next(l),
-      s = s ? g_list_next(s) : NULL)
+  for(GList *l = forms; l; l = g_list_next(l), s = s ? g_list_next(s) : NULL)
   {
     dt_masks_form_t *f = l->data;
     const int sign = s ? GPOINTER_TO_INT(s->data) : '+';
     dt_masks_point_group_t *grpt = dt_masks_group_add_form(grp, f);
     if(grpt && sign == '-')
     {
-      grpt->state = (grpt->state & ~DT_MASKS_STATE_UNION)
-                  | DT_MASKS_STATE_DIFFERENCE;
+      grpt->state = (grpt->state & ~DT_MASKS_STATE_UNION) | DT_MASKS_STATE_DIFFERENCE;
     }
   }
 
@@ -316,33 +323,42 @@ static void _finalize_mask(dt_iop_module_t *module,
 
 // --- Mask Event Handlers ---
 
-static void _object_get_distance(const float x,
-                                 const float y,
-                                 const float as,
-                                 dt_masks_form_gui_t *gui,
-                                 const int index,
-                                 const int num_points,
-                                 gboolean *inside,
-                                 gboolean *inside_border,
-                                 int *near,
-                                 gboolean *inside_source,
-                                 float *dist)
+static void _object_get_distance(
+  const float x,
+  const float y,
+  const float as,
+  dt_masks_form_gui_t *gui,
+  const int index,
+  const int num_points,
+  gboolean *inside,
+  gboolean *inside_border,
+  int *near,
+  gboolean *inside_source,
+  float *dist)
 {
-  (void)x; (void)y; (void)as; (void)gui;
-  (void)index; (void)num_points;
-  (void)inside; (void)inside_border; (void)near;
-  (void)inside_source; (void)dist;
+  (void)x;
+  (void)y;
+  (void)as;
+  (void)gui;
+  (void)index;
+  (void)num_points;
+  (void)inside;
+  (void)inside_border;
+  (void)near;
+  (void)inside_source;
+  (void)dist;
 }
 
-static int _object_events_mouse_scrolled(dt_iop_module_t *module,
-                                         const float pzx,
-                                         const float pzy,
-                                         const gboolean up,
-                                         const uint32_t state,
-                                         dt_masks_form_t *form,
-                                         const dt_imgid_t parentid,
-                                         dt_masks_form_gui_t *gui,
-                                         const int index)
+static int _object_events_mouse_scrolled(
+  dt_iop_module_t *module,
+  const float pzx,
+  const float pzy,
+  const gboolean up,
+  const uint32_t state,
+  dt_masks_form_t *form,
+  const dt_imgid_t parentid,
+  dt_masks_form_gui_t *gui,
+  const int index)
 {
   if(dt_modifier_is(state, GDK_CONTROL_MASK))
   {
@@ -356,7 +372,8 @@ static int _object_events_mouse_scrolled(dt_iop_module_t *module,
 static void _clear_selection(dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
-  if(!d) return;
+  if(!d)
+    return;
 
   if(gui->guipoints)
     dt_masks_dynbuf_reset(gui->guipoints);
@@ -368,25 +385,32 @@ static void _clear_selection(dt_masks_form_gui_t *gui)
   d->mask = NULL;
   d->mask_w = d->mask_h = 0;
 
-  if(d->seg) dt_seg_reset_prev_mask(d->seg);
+  if(d->seg)
+    dt_seg_reset_prev_mask(d->seg);
 
   dt_control_queue_redraw_center();
 }
 
-static int _object_events_button_pressed(dt_iop_module_t *module,
-                                         float pzx, float pzy,
-                                         const double pressure,
-                                         const int which,
-                                         const int type,
-                                         const uint32_t state,
-                                         dt_masks_form_t *form,
-                                         const dt_imgid_t parentid,
-                                         dt_masks_form_gui_t *gui,
-                                         const int index)
+static int _object_events_button_pressed(
+  dt_iop_module_t *module,
+  float pzx,
+  float pzy,
+  const double pressure,
+  const int which,
+  const int type,
+  const uint32_t state,
+  dt_masks_form_t *form,
+  const dt_imgid_t parentid,
+  dt_masks_form_gui_t *gui,
+  const int index)
 {
-  (void)pressure; (void)parentid; (void)index;
-  if(type == GDK_2BUTTON_PRESS || type == GDK_3BUTTON_PRESS) return 1;
-  if(!gui) return 0;
+  (void)pressure;
+  (void)parentid;
+  (void)index;
+  if(type == GDK_2BUTTON_PRESS || type == GDK_3BUTTON_PRESS)
+    return 1;
+  if(!gui)
+    return 0;
 
   if(gui->creation && which == 1 && dt_modifier_is(state, GDK_MOD1_MASK))
   {
@@ -400,23 +424,27 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   {
     // Only accept clicks after encoding is complete
     _object_data_t *d = _get_data(gui);
-    if(!d || d->encode_state != ENCODE_READY) return 1;
+    if(!d || d->encode_state != ENCODE_READY)
+      return 1;
 
     // Initialize point buffers
     if(!gui->guipoints)
       gui->guipoints = dt_masks_dynbuf_init(200000, "object guipoints");
-    if(!gui->guipoints) return 1;
+    if(!gui->guipoints)
+      return 1;
     if(!gui->guipoints_payload)
       gui->guipoints_payload = dt_masks_dynbuf_init(100000, "object guipoints_payload");
-    if(!gui->guipoints_payload) return 1;
+    if(!gui->guipoints_payload)
+      return 1;
 
     // Coordinates in preview pipe pixel space
     float wd, ht, iwidth, iheight;
     dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
 
     dt_masks_dynbuf_add_2(gui->guipoints, pzx * wd, pzy * ht);
-    dt_masks_dynbuf_add(gui->guipoints_payload,
-                        dt_modifier_is(state, GDK_SHIFT_MASK) ? 0.0f : 1.0f);
+    dt_masks_dynbuf_add(
+      gui->guipoints_payload,
+      dt_modifier_is(state, GDK_SHIFT_MASK) ? 0.0f : 1.0f);
     gui->guipoints_count++;
 
     // Run decoder to update live preview
@@ -457,36 +485,51 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   return 0;
 }
 
-static int _object_events_button_released(dt_iop_module_t *module,
-                                          const float pzx,
-                                          const float pzy,
-                                          const int which,
-                                          const uint32_t state,
-                                          dt_masks_form_t *form,
-                                          const dt_imgid_t parentid,
-                                          dt_masks_form_gui_t *gui,
-                                          const int index)
+static int _object_events_button_released(
+  dt_iop_module_t *module,
+  const float pzx,
+  const float pzy,
+  const int which,
+  const uint32_t state,
+  dt_masks_form_t *form,
+  const dt_imgid_t parentid,
+  dt_masks_form_gui_t *gui,
+  const int index)
 {
-  (void)module; (void)pzx; (void)pzy; (void)which; (void)state;
-  (void)form; (void)parentid; (void)gui; (void)index;
+  (void)module;
+  (void)pzx;
+  (void)pzy;
+  (void)which;
+  (void)state;
+  (void)form;
+  (void)parentid;
+  (void)gui;
+  (void)index;
   return 0;
 }
 
-static int _object_events_mouse_moved(dt_iop_module_t *module,
-                                      const float pzx,
-                                      const float pzy,
-                                      const double pressure,
-                                      const int which,
-                                      const float zoom_scale,
-                                      dt_masks_form_t *form,
-                                      const dt_imgid_t parentid,
-                                      dt_masks_form_gui_t *gui,
-                                      const int index)
+static int _object_events_mouse_moved(
+  dt_iop_module_t *module,
+  const float pzx,
+  const float pzy,
+  const double pressure,
+  const int which,
+  const float zoom_scale,
+  dt_masks_form_t *form,
+  const dt_imgid_t parentid,
+  dt_masks_form_gui_t *gui,
+  const int index)
 {
-  (void)module; (void)pressure; (void)which; (void)zoom_scale;
-  (void)form; (void)parentid; (void)index;
+  (void)module;
+  (void)pressure;
+  (void)which;
+  (void)zoom_scale;
+  (void)form;
+  (void)parentid;
+  (void)index;
 
-  if(!gui) return 0;
+  if(!gui)
+    return 0;
 
   gui->form_selected = FALSE;
   gui->border_selected = FALSE;
@@ -510,15 +553,19 @@ static gboolean _modifier_poll(gpointer data)
   return G_SOURCE_CONTINUE;
 }
 
-static void _object_events_post_expose(cairo_t *cr,
-                                       const float zoom_scale,
-                                       dt_masks_form_gui_t *gui,
-                                       const int index,
-                                       const int num_points)
+static void _object_events_post_expose(
+  cairo_t *cr,
+  const float zoom_scale,
+  dt_masks_form_gui_t *gui,
+  const int index,
+  const int num_points)
 {
-  (void)index; (void)num_points;
-  if(!gui) return;
-  if(!gui->creation) return;
+  (void)index;
+  (void)num_points;
+  if(!gui)
+    return;
+  if(!gui->creation)
+    return;
 
   // Ensure scratchpad exists
   _object_data_t *d = _get_data(gui);
@@ -530,16 +577,20 @@ static void _object_events_post_expose(cairo_t *cr,
 
   // Detect image change: reset encoding if we switched to a different image
   const dt_imgid_t cur_imgid = darktable.develop->image_storage.id;
-  if(g_atomic_int_get(&d->encode_state) == ENCODE_READY
-     && d->encoded_imgid != cur_imgid)
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_READY && d->encoded_imgid != cur_imgid)
   {
     if(d->encode_thread)
     {
       g_thread_join(d->encode_thread);
       d->encode_thread = NULL;
     }
-    if(d->busy) { dt_control_busy_leave(); d->busy = FALSE; }
-    if(d->seg) dt_seg_reset_encoding(d->seg);
+    if(d->busy)
+    {
+      dt_control_busy_leave();
+      d->busy = FALSE;
+    }
+    if(d->seg)
+      dt_seg_reset_encoding(d->seg);
     g_free(d->mask);
     d->mask = NULL;
     d->mask_w = d->mask_h = 0;
@@ -612,14 +663,18 @@ static void _object_events_post_expose(cairo_t *cr,
   }
 
   if(g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
-    return;  // background thread in progress, poll timer will trigger redraw
+    return; // background thread in progress, poll timer will trigger redraw
 
   if(g_atomic_int_get(&d->encode_state) == ENCODE_READY && d->encode_thread)
   {
     // Thread finished (detected by poll timer redraw) — join it
     g_thread_join(d->encode_thread);
     d->encode_thread = NULL;
-    if(d->busy) { dt_control_busy_leave(); d->busy = FALSE; }
+    if(d->busy)
+    {
+      dt_control_busy_leave();
+      d->busy = FALSE;
+    }
   }
 
   if(g_atomic_int_get(&d->encode_state) == ENCODE_ERROR)
@@ -629,12 +684,17 @@ static void _object_events_post_expose(cairo_t *cr,
       g_thread_join(d->encode_thread);
       d->encode_thread = NULL;
     }
-    if(d->busy) { dt_control_busy_leave(); d->busy = FALSE; }
+    if(d->busy)
+    {
+      dt_control_busy_leave();
+      d->busy = FALSE;
+    }
     dt_control_log(_("AI mask encoding failed"));
     return;
   }
 
-  if(d->encode_state != ENCODE_READY) return;
+  if(d->encode_state != ENCODE_READY)
+    return;
 
   float wd, ht, iwidth, iheight;
   dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
@@ -657,16 +717,16 @@ static void _object_events_post_expose(cairo_t *cr,
           if(val > 0.5f)
           {
             const unsigned char alpha = 80;
-            row[x * 4 + 0] = 0;            // B
-            row[x * 4 + 1] = 0;            // G
-            row[x * 4 + 2] = alpha;        // R (premultiplied)
-            row[x * 4 + 3] = alpha;        // A
+            row[x * 4 + 0] = 0;     // B
+            row[x * 4 + 1] = 0;     // G
+            row[x * 4 + 2] = alpha; // R (premultiplied)
+            row[x * 4 + 3] = alpha; // A
           }
         }
       }
 
-      cairo_surface_t *surface = cairo_image_surface_create_for_data(
-          buf, CAIRO_FORMAT_ARGB32, mw, mh, stride);
+      cairo_surface_t *surface
+        = cairo_image_surface_create_for_data(buf, CAIRO_FORMAT_ARGB32, mw, mh, stride);
 
       if(surface)
       {
@@ -684,8 +744,8 @@ static void _object_events_post_expose(cairo_t *cr,
   // Query pointer modifier state reliably (gdk_keymap doesn't work on macOS)
   GtkWidget *cw = dt_ui_center(darktable.gui->ui);
   GdkWindow *win = gtk_widget_get_window(cw);
-  GdkDevice *pointer = gdk_seat_get_pointer(
-      gdk_display_get_default_seat(gdk_display_get_default()));
+  GdkDevice *pointer
+    = gdk_seat_get_pointer(gdk_display_get_default_seat(gdk_display_get_default()));
   GdkModifierType mod = 0;
   if(win && pointer)
     gdk_window_get_device_position(win, pointer, NULL, NULL, &mod);
@@ -713,70 +773,119 @@ static void _object_events_post_expose(cairo_t *cr,
 
 // --- Stub functions (object is transient — result is path masks) ---
 
-static int _object_get_points(dt_develop_t *dev,
-                              const float x, const float y,
-                              const float radius, const float radius2,
-                              const float rotation,
-                              float **points, int *points_count)
+static int _object_get_points(
+  dt_develop_t *dev,
+  const float x,
+  const float y,
+  const float radius,
+  const float radius2,
+  const float rotation,
+  float **points,
+  int *points_count)
 {
-  (void)dev; (void)x; (void)y; (void)radius; (void)radius2;
+  (void)dev;
+  (void)x;
+  (void)y;
+  (void)radius;
+  (void)radius2;
   (void)rotation;
   *points = NULL;
   *points_count = 0;
   return 0;
 }
 
-static int _object_get_points_border(dt_develop_t *dev,
-                                     struct dt_masks_form_t *form,
-                                     float **points, int *points_count,
-                                     float **border, int *border_count,
-                                     const int source,
-                                     const dt_iop_module_t *module)
+static int _object_get_points_border(
+  dt_develop_t *dev,
+  struct dt_masks_form_t *form,
+  float **points,
+  int *points_count,
+  float **border,
+  int *border_count,
+  const int source,
+  const dt_iop_module_t *module)
 {
-  (void)dev; (void)form; (void)points; (void)points_count;
-  (void)border; (void)border_count; (void)source; (void)module;
+  (void)dev;
+  (void)form;
+  (void)points;
+  (void)points_count;
+  (void)border;
+  (void)border_count;
+  (void)source;
+  (void)module;
   return 0;
 }
 
-static int _object_get_source_area(dt_iop_module_t *module,
-                                   dt_dev_pixelpipe_iop_t *piece,
-                                   dt_masks_form_t *form,
-                                   int *width, int *height,
-                                   int *posx, int *posy)
+static int _object_get_source_area(
+  dt_iop_module_t *module,
+  dt_dev_pixelpipe_iop_t *piece,
+  dt_masks_form_t *form,
+  int *width,
+  int *height,
+  int *posx,
+  int *posy)
 {
-  (void)module; (void)piece; (void)form;
-  (void)width; (void)height; (void)posx; (void)posy;
+  (void)module;
+  (void)piece;
+  (void)form;
+  (void)width;
+  (void)height;
+  (void)posx;
+  (void)posy;
   return 1;
 }
 
-static int _object_get_area(const dt_iop_module_t *const restrict module,
-                            const dt_dev_pixelpipe_iop_t *const restrict piece,
-                            dt_masks_form_t *const restrict form,
-                            int *width, int *height, int *posx, int *posy)
+static int _object_get_area(
+  const dt_iop_module_t *const restrict module,
+  const dt_dev_pixelpipe_iop_t *const restrict piece,
+  dt_masks_form_t *const restrict form,
+  int *width,
+  int *height,
+  int *posx,
+  int *posy)
 {
-  (void)module; (void)piece; (void)form;
-  (void)width; (void)height; (void)posx; (void)posy;
+  (void)module;
+  (void)piece;
+  (void)form;
+  (void)width;
+  (void)height;
+  (void)posx;
+  (void)posy;
   return 1;
 }
 
-static int _object_get_mask(const dt_iop_module_t *const restrict module,
-                            const dt_dev_pixelpipe_iop_t *const restrict piece,
-                            dt_masks_form_t *const restrict form,
-                            float **buffer,
-                            int *width, int *height, int *posx, int *posy)
+static int _object_get_mask(
+  const dt_iop_module_t *const restrict module,
+  const dt_dev_pixelpipe_iop_t *const restrict piece,
+  dt_masks_form_t *const restrict form,
+  float **buffer,
+  int *width,
+  int *height,
+  int *posx,
+  int *posy)
 {
-  (void)module; (void)piece; (void)form; (void)buffer;
-  (void)width; (void)height; (void)posx; (void)posy;
+  (void)module;
+  (void)piece;
+  (void)form;
+  (void)buffer;
+  (void)width;
+  (void)height;
+  (void)posx;
+  (void)posy;
   return 1;
 }
 
-static int _object_get_mask_roi(const dt_iop_module_t *const restrict module,
-                                const dt_dev_pixelpipe_iop_t *const restrict piece,
-                                dt_masks_form_t *const form,
-                                const dt_iop_roi_t *const roi,
-                                float *const restrict buffer)
+static int _object_get_mask_roi(
+  const dt_iop_module_t *const restrict module,
+  const dt_dev_pixelpipe_iop_t *const restrict piece,
+  dt_masks_form_t *const form,
+  const dt_iop_roi_t *const roi,
+  float *const restrict buffer)
 {
-  (void)module; (void)piece; (void)form; (void)roi; (void)buffer;
+  (void)module;
+  (void)piece;
+  (void)form;
+  (void)roi;
+  (void)buffer;
   return 1;
 }
 
@@ -784,65 +893,91 @@ static GSList *_object_setup_mouse_actions(const struct dt_masks_form_t *const f
 {
   (void)form;
   GSList *lm = NULL;
-  lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_LEFT,
-                                     0, _("[OBJECT] add foreground point"));
-  lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_LEFT,
-                                     GDK_SHIFT_MASK,
-                                     _("[OBJECT] add background point"));
-  lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_RIGHT,
-                                     0, _("[OBJECT] apply mask"));
-  lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_SCROLL,
-                                     GDK_CONTROL_MASK,
-                                     _("[OBJECT] change opacity"));
+  lm = dt_mouse_action_create_simple(
+    lm,
+    DT_MOUSE_ACTION_LEFT,
+    0,
+    _("[OBJECT] add foreground point"));
+  lm = dt_mouse_action_create_simple(
+    lm,
+    DT_MOUSE_ACTION_LEFT,
+    GDK_SHIFT_MASK,
+    _("[OBJECT] add background point"));
+  lm = dt_mouse_action_create_simple(
+    lm,
+    DT_MOUSE_ACTION_RIGHT,
+    0,
+    _("[OBJECT] apply mask"));
+  lm = dt_mouse_action_create_simple(
+    lm,
+    DT_MOUSE_ACTION_SCROLL,
+    GDK_CONTROL_MASK,
+    _("[OBJECT] change opacity"));
   return lm;
 }
 
-static void _object_sanitize_config(dt_masks_type_t type)
-{
-  (void)type;
-}
+static void _object_sanitize_config(dt_masks_type_t type) { (void)type; }
 
-static void _object_set_form_name(dt_masks_form_t *const form,
-                                  const size_t nb)
+static void _object_set_form_name(dt_masks_form_t *const form, const size_t nb)
 {
   snprintf(form->name, sizeof(form->name), _("object #%d"), (int)nb);
 }
 
-static void _object_set_hint_message(const dt_masks_form_gui_t *const gui,
-                                     const dt_masks_form_t *const form,
-                                     const int opacity,
-                                     char *const restrict msgbuf,
-                                     const size_t msgbuf_len)
+static void _object_set_hint_message(
+  const dt_masks_form_gui_t *const gui,
+  const dt_masks_form_t *const form,
+  const int opacity,
+  char *const restrict msgbuf,
+  const size_t msgbuf_len)
 {
   (void)form;
   if(gui->creation)
-    g_snprintf(msgbuf, msgbuf_len,
-               _("<b>add</b>: click, <b>subtract</b>: shift+click, "
-                 "<b>clear</b>: alt+click, <b>apply</b>: right-click\n"
-                 "<b>opacity</b>: ctrl+scroll (%d%%)"), opacity);
+    g_snprintf(
+      msgbuf,
+      msgbuf_len,
+      _("<b>add</b>: click, <b>subtract</b>: shift+click, "
+        "<b>clear</b>: alt+click, <b>apply</b>: right-click\n"
+        "<b>opacity</b>: ctrl+scroll (%d%%)"),
+      opacity);
 }
 
-static void _object_duplicate_points(dt_develop_t *dev,
-                                     dt_masks_form_t *const base,
-                                     dt_masks_form_t *const dest)
+static void _object_duplicate_points(
+  dt_develop_t *dev,
+  dt_masks_form_t *const base,
+  dt_masks_form_t *const dest)
 {
-  (void)dev; (void)base; (void)dest;
+  (void)dev;
+  (void)base;
+  (void)dest;
 }
 
-static void _object_modify_property(dt_masks_form_t *const form,
-                                    const dt_masks_property_t prop,
-                                    const float old_val, const float new_val,
-                                    float *sum, int *count,
-                                    float *min, float *max)
+static void _object_modify_property(
+  dt_masks_form_t *const form,
+  const dt_masks_property_t prop,
+  const float old_val,
+  const float new_val,
+  float *sum,
+  int *count,
+  float *min,
+  float *max)
 {
-  (void)form; (void)prop; (void)old_val; (void)new_val;
-  (void)sum; (void)count; (void)min; (void)max;
+  (void)form;
+  (void)prop;
+  (void)old_val;
+  (void)new_val;
+  (void)sum;
+  (void)count;
+  (void)min;
+  (void)max;
 }
 
-static void _object_initial_source_pos(const float iwd, const float iht,
-                                       float *x, float *y)
+static void
+_object_initial_source_pos(const float iwd, const float iht, float *x, float *y)
 {
-  (void)iwd; (void)iht; (void)x; (void)y;
+  (void)iwd;
+  (void)iht;
+  (void)x;
+  (void)y;
 }
 
 // The function table for object masks
@@ -866,8 +1001,7 @@ const dt_masks_functions_t dt_masks_functions_object = {
   .mouse_scrolled = _object_events_mouse_scrolled,
   .button_pressed = _object_events_button_pressed,
   .button_released = _object_events_button_released,
-  .post_expose = _object_events_post_expose
-};
+  .post_expose = _object_events_post_expose};
 
 // clang-format off
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.py

@@ -31,7 +31,8 @@
 
 // --- Internal Structures ---
 
-struct dt_ai_context_t {
+struct dt_ai_context_t
+{
   // ONNX Runtime C Objects
   OrtSession *session;
   OrtMemoryInfo *memory_info;
@@ -66,12 +67,13 @@ static gpointer _init_ort_env(gpointer data)
 {
   (void)data;
   OrtEnv *env = NULL;
-  OrtStatus *status =
-      g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &env);
+  OrtStatus *status = g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &env);
   if(status)
   {
-    dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to create ORT environment: %s",
-             g_ort->GetErrorMessage(status));
+    dt_print(
+      DT_DEBUG_AI,
+      "[darktable_ai] Failed to create ORT environment: %s",
+      g_ort->GetErrorMessage(status));
     g_ort->ReleaseStatus(status);
     return NULL;
   }
@@ -82,18 +84,30 @@ static gpointer _init_ort_env(gpointer data)
 
 // Map ONNX tensor element type to our dt_ai_dtype_t.
 // Returns TRUE on success, FALSE if the type is unsupported.
-static gboolean _map_onnx_type(ONNXTensorElementDataType onnx_type,
-                                dt_ai_dtype_t *out)
+static gboolean _map_onnx_type(ONNXTensorElementDataType onnx_type, dt_ai_dtype_t *out)
 {
   switch(onnx_type)
   {
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:   *out = DT_AI_FLOAT;   return TRUE;
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:  *out = DT_AI_FLOAT16; return TRUE;
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:    *out = DT_AI_UINT8;   return TRUE;
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:     *out = DT_AI_INT8;    return TRUE;
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:    *out = DT_AI_INT32;   return TRUE;
-    case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:    *out = DT_AI_INT64;   return TRUE;
-    default: return FALSE;
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT:
+    *out = DT_AI_FLOAT;
+    return TRUE;
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16:
+    *out = DT_AI_FLOAT16;
+    return TRUE;
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8:
+    *out = DT_AI_UINT8;
+    return TRUE;
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8:
+    *out = DT_AI_INT8;
+    return TRUE;
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32:
+    *out = DT_AI_INT32;
+    return TRUE;
+  case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64:
+    *out = DT_AI_INT64;
+    return TRUE;
+  default:
+    return FALSE;
   }
 }
 
@@ -105,8 +119,10 @@ static int64_t _safe_element_count(const int64_t *shape, int ndim)
   int64_t count = 1;
   for(int i = 0; i < ndim; i++)
   {
-    if(shape[i] <= 0) return -1;
-    if(count > INT64_MAX / shape[i]) return -1;
+    if(shape[i] <= 0)
+      return -1;
+    if(count > INT64_MAX / shape[i])
+      return -1;
     count *= shape[i];
   }
   return count;
@@ -114,26 +130,45 @@ static int64_t _safe_element_count(const int64_t *shape, int ndim)
 
 // Map dt_ai_dtype_t to ONNX type and element size.
 // Returns TRUE on success, FALSE if the type is unsupported.
-static gboolean _dtype_to_onnx(dt_ai_dtype_t dtype,
-                                ONNXTensorElementDataType *out_type,
-                                size_t *out_size)
+static gboolean
+_dtype_to_onnx(dt_ai_dtype_t dtype, ONNXTensorElementDataType *out_type, size_t *out_size)
 {
   switch(dtype)
   {
-    case DT_AI_FLOAT:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;   *out_size = sizeof(float);    return TRUE;
-    case DT_AI_FLOAT16: *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16; *out_size = sizeof(uint16_t); return TRUE;
-    case DT_AI_UINT8:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;   *out_size = sizeof(uint8_t);  return TRUE;
-    case DT_AI_INT8:    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;    *out_size = sizeof(int8_t);   return TRUE;
-    case DT_AI_INT32:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;   *out_size = sizeof(int32_t);  return TRUE;
-    case DT_AI_INT64:   *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;   *out_size = sizeof(int64_t);  return TRUE;
-    default: return FALSE;
+  case DT_AI_FLOAT:
+    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+    *out_size = sizeof(float);
+    return TRUE;
+  case DT_AI_FLOAT16:
+    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+    *out_size = sizeof(uint16_t);
+    return TRUE;
+  case DT_AI_UINT8:
+    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
+    *out_size = sizeof(uint8_t);
+    return TRUE;
+  case DT_AI_INT8:
+    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8;
+    *out_size = sizeof(int8_t);
+    return TRUE;
+  case DT_AI_INT32:
+    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32;
+    *out_size = sizeof(int32_t);
+    return TRUE;
+  case DT_AI_INT64:
+    *out_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64;
+    *out_size = sizeof(int64_t);
+    return TRUE;
+  default:
+    return FALSE;
   }
 }
 
 // Float16 Conversion Utilities
 // Based on: https://gist.github.com/rygorous/2156668
 // Handles Zero, Denormals, and Infinity correctly.
-static uint16_t _float_to_half(float f) {
+static uint16_t _float_to_half(float f)
+{
   uint32_t x;
   memcpy(&x, &f, sizeof(x));
   uint32_t sign = (x >> 31) & 1;
@@ -151,15 +186,19 @@ static uint16_t _float_to_half(float f) {
   // Re-bias exponent from float32 (bias 127) to float16 (bias 15)
   int new_exp = (int)exp - 127 + 15;
 
-  if(new_exp <= 0) {
+  if(new_exp <= 0)
+  {
     // Encode as float16 denormal: shift mantissa with implicit leading 1
     // The implicit 1 bit plus 10 mantissa bits, shifted right by (1 - new_exp)
     int shift = 1 - new_exp;
-    if(shift > 24) return (uint16_t)(sign << 15); // too small even for denormal
+    if(shift > 24)
+      return (uint16_t)(sign << 15);       // too small even for denormal
     uint32_t full_mant = (1 << 23) | mant; // restore implicit leading 1
     uint16_t half_mant = (uint16_t)(full_mant >> (13 + shift));
     return (uint16_t)((sign << 15) | half_mant);
-  } else if(new_exp >= 31) {
+  }
+  else if(new_exp >= 31)
+  {
     // Overflow to Infinity
     return (uint16_t)((sign << 15) | 0x7C00);
   }
@@ -167,13 +206,16 @@ static uint16_t _float_to_half(float f) {
   return (uint16_t)((sign << 15) | (new_exp << 10) | (mant >> 13));
 }
 
-static float _half_to_float(uint16_t h) {
+static float _half_to_float(uint16_t h)
+{
   uint32_t sign = (h >> 15) & 1;
   uint32_t exp = (h >> 10) & 0x1F;
   uint32_t mant = h & 0x3FF;
 
-  if(exp == 0) {
-    if(mant == 0) {
+  if(exp == 0)
+  {
+    if(mant == 0)
+    {
       // Zero
       uint32_t result = (sign << 31);
       float f;
@@ -184,7 +226,8 @@ static float _half_to_float(uint16_t h) {
     // Convert to float32 by normalizing: find leading 1 and shift
     uint32_t m = mant;
     int e = -1;
-    while(!(m & 0x400)) { // shift until leading 1 reaches bit 10
+    while(!(m & 0x400))
+    { // shift until leading 1 reaches bit 10
       m <<= 1;
       e--;
     }
@@ -194,7 +237,9 @@ static float _half_to_float(uint16_t h) {
     float f;
     memcpy(&f, &result, 4);
     return f;
-  } else if(exp == 31) {
+  }
+  else if(exp == 31)
+  {
     // Inf / NaN
     uint32_t result = (sign << 31) | 0x7F800000 | (mant << 13);
     float f;
@@ -215,24 +260,27 @@ static float _half_to_float(uint16_t h) {
 // Try to find and call an ORT execution provider function at runtime via
 // dynamic symbol lookup (GModule/dlsym).  Returns TRUE if the provider was
 // enabled successfully, FALSE otherwise.
-static gboolean _try_provider(OrtSessionOptions *session_opts,
-                               const char *symbol_name,
-                               const char *provider_name) {
+static gboolean _try_provider(
+  OrtSessionOptions *session_opts,
+  const char *symbol_name,
+  const char *provider_name)
+{
   OrtStatus *status = NULL;
   gboolean ok = FALSE;
 
-  dt_print(DT_DEBUG_AI, "[darktable_ai] Attempting to enable %s...",
-           provider_name);
+  dt_print(DT_DEBUG_AI, "[darktable_ai] Attempting to enable %s...", provider_name);
 
 #ifdef _WIN32
   // On Windows, we need to get the handle to onnxruntime.dll, not the main executable
   HMODULE h = GetModuleHandleA("onnxruntime.dll");
-  if(!h) {
+  if(!h)
+  {
     // If not already loaded, try to load it
     h = LoadLibraryA("onnxruntime.dll");
   }
   void *func_ptr = NULL;
-  if(h) {
+  if(h)
+  {
     func_ptr = (void *)GetProcAddress(h, symbol_name);
     // Don't call FreeLibrary - we want to keep onnxruntime.dll loaded
   }
@@ -243,23 +291,30 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
     g_module_symbol(mod, symbol_name, &func_ptr);
 #endif
 
-  if(func_ptr) {
+  if(func_ptr)
+  {
     // All provider append functions take (OrtSessionOptions*, uint32_t/int)
     typedef OrtStatus *(*ProviderAppender)(OrtSessionOptions *, uint32_t);
     ProviderAppender appender = (ProviderAppender)func_ptr;
     status = appender(session_opts, 0);
-    if(!status) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] %s enabled successfully.",
-               provider_name);
+    if(!status)
+    {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] %s enabled successfully.", provider_name);
       ok = TRUE;
-    } else {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] %s enable failed: %s",
-               provider_name, g_ort->GetErrorMessage(status));
+    }
+    else
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] %s enable failed: %s",
+        provider_name,
+        g_ort->GetErrorMessage(status));
       g_ort->ReleaseStatus(status);
     }
-  } else {
-    dt_print(DT_DEBUG_AI, "[darktable_ai] %s provider not found.",
-             provider_name);
+  }
+  else
+  {
+    dt_print(DT_DEBUG_AI, "[darktable_ai] %s provider not found.", provider_name);
   }
 
 #ifndef _WIN32
@@ -270,62 +325,73 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
   return ok;
 }
 
-static void _enable_acceleration(OrtSessionOptions *session_opts,
-                                 dt_ai_provider_t provider) {
+static void
+_enable_acceleration(OrtSessionOptions *session_opts, dt_ai_provider_t provider)
+{
   switch(provider)
   {
-    case DT_AI_PROVIDER_CPU:
-      // CPU only - don't enable any accelerator
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Using CPU only (no hardware acceleration)");
-      break;
+  case DT_AI_PROVIDER_CPU:
+    // CPU only - don't enable any accelerator
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Using CPU only (no hardware acceleration)");
+    break;
 
-    case DT_AI_PROVIDER_COREML:
+  case DT_AI_PROVIDER_COREML:
 #if defined(__APPLE__)
-      _try_provider(session_opts,
-                    "OrtSessionOptionsAppendExecutionProvider_CoreML", "CoreML");
+    _try_provider(
+      session_opts,
+      "OrtSessionOptionsAppendExecutionProvider_CoreML",
+      "CoreML");
 #else
-      dt_print(DT_DEBUG_AI, "[darktable_ai] CoreML not available on this platform");
+    dt_print(DT_DEBUG_AI, "[darktable_ai] CoreML not available on this platform");
 #endif
-      break;
+    break;
 
-    case DT_AI_PROVIDER_CUDA:
-      _try_provider(session_opts,
-                    "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA");
-      break;
+  case DT_AI_PROVIDER_CUDA:
+    _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA");
+    break;
 
-    case DT_AI_PROVIDER_ROCM:
-      _try_provider(session_opts,
-                    "OrtSessionOptionsAppendExecutionProvider_ROCM", "ROCm");
-      break;
+  case DT_AI_PROVIDER_ROCM:
+    _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_ROCM", "ROCm");
+    break;
 
-    case DT_AI_PROVIDER_DIRECTML:
+  case DT_AI_PROVIDER_DIRECTML:
 #if defined(_WIN32)
-      _try_provider(session_opts,
-                    "OrtSessionOptionsAppendExecutionProvider_DML", "DirectML");
+    _try_provider(
+      session_opts,
+      "OrtSessionOptionsAppendExecutionProvider_DML",
+      "DirectML");
 #else
-      dt_print(DT_DEBUG_AI, "[darktable_ai] DirectML not available on this platform");
+    dt_print(DT_DEBUG_AI, "[darktable_ai] DirectML not available on this platform");
 #endif
-      break;
+    break;
 
-    case DT_AI_PROVIDER_AUTO:
-    default:
-      // Auto-detect best provider based on platform
+  case DT_AI_PROVIDER_AUTO:
+  default:
+    // Auto-detect best provider based on platform
 #if defined(__APPLE__)
-      _try_provider(session_opts,
-                    "OrtSessionOptionsAppendExecutionProvider_CoreML", "CoreML");
+    _try_provider(
+      session_opts,
+      "OrtSessionOptionsAppendExecutionProvider_CoreML",
+      "CoreML");
 #elif defined(_WIN32)
-      _try_provider(session_opts,
-                    "OrtSessionOptionsAppendExecutionProvider_DML", "DirectML");
+    _try_provider(
+      session_opts,
+      "OrtSessionOptionsAppendExecutionProvider_DML",
+      "DirectML");
 #elif defined(__linux__)
-      // Try CUDA first, then ROCm
-      if(!_try_provider(session_opts,
-                        "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA"))
-      {
-        _try_provider(session_opts,
-                      "OrtSessionOptionsAppendExecutionProvider_ROCM", "ROCm");
-      }
+    // Try CUDA first, then ROCm
+    if(!_try_provider(
+         session_opts,
+         "OrtSessionOptionsAppendExecutionProvider_CUDA",
+         "CUDA"))
+    {
+      _try_provider(
+        session_opts,
+        "OrtSessionOptionsAppendExecutionProvider_ROCM",
+        "ROCm");
+    }
 #endif
-      break;
+    break;
   }
 }
 
@@ -333,15 +399,16 @@ static void _enable_acceleration(OrtSessionOptions *session_opts,
 
 // Load ONNX model from model_dir/model_file.
 // If model_file is NULL, defaults to "model.onnx".
-dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
-                                  const char *model_file,
-                                  dt_ai_provider_t provider) {
-  if(!model_dir) return NULL;
+dt_ai_context_t *
+dt_ai_onnx_load(const char *model_dir, const char *model_file, dt_ai_provider_t provider)
+{
+  if(!model_dir)
+    return NULL;
 
-  char *onnx_path = g_build_filename(model_dir,
-                                     model_file ? model_file : "model.onnx",
-                                     NULL);
-  if(!g_file_test(onnx_path, G_FILE_TEST_EXISTS)) {
+  char *onnx_path
+    = g_build_filename(model_dir, model_file ? model_file : "model.onnx", NULL);
+  if(!g_file_test(onnx_path, G_FILE_TEST_EXISTS))
+  {
     dt_print(DT_DEBUG_AI, "[darktable_ai] Model file missing: %s", onnx_path);
     g_free(onnx_path);
     return NULL;
@@ -350,11 +417,19 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
   // Lazy init ORT API and shared environment on first load
   g_once(&g_ort_once, _init_ort_api, NULL);
   g_ort = (const OrtApi *)g_ort_once.retval;
-  if(!g_ort) { g_free(onnx_path); return NULL; }
+  if(!g_ort)
+  {
+    g_free(onnx_path);
+    return NULL;
+  }
 
   g_once(&g_env_once, _init_ort_env, NULL);
   g_env = (OrtEnv *)g_env_once.retval;
-  if(!g_env) { g_free(onnx_path); return NULL; }
+  if(!g_env)
+  {
+    g_free(onnx_path);
+    return NULL;
+  }
 
   dt_print(DT_DEBUG_AI, "[darktable_ai] Loading: %s", onnx_path);
 
@@ -363,7 +438,8 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
   OrtStatus *status;
   OrtSessionOptions *session_opts;
   status = g_ort->CreateSessionOptions(&session_opts);
-  if(status) {
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     g_free(onnx_path);
     dt_ai_unload_model(ctx);
@@ -382,7 +458,8 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
     num_cores = 1;
 
   status = g_ort->SetIntraOpNumThreads(session_opts, (int)num_cores);
-  if(status) {
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     g_ort->ReleaseSessionOptions(session_opts);
     g_free(onnx_path);
@@ -390,9 +467,9 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
     return NULL;
   }
 
-  status =
-      g_ort->SetSessionGraphOptimizationLevel(session_opts, ORT_ENABLE_ALL);
-  if(status) {
+  status = g_ort->SetSessionGraphOptimizationLevel(session_opts, ORT_ENABLE_ALL);
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     g_ort->ReleaseSessionOptions(session_opts);
     g_free(onnx_path);
@@ -406,28 +483,30 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
 #ifdef _WIN32
   // On Windows, CreateSession expects a wide character string
   wchar_t *onnx_path_wide = (wchar_t *)g_utf8_to_utf16(onnx_path, -1, NULL, NULL, NULL);
-  status =
-      g_ort->CreateSession(g_env, onnx_path_wide, session_opts, &ctx->session);
+  status = g_ort->CreateSession(g_env, onnx_path_wide, session_opts, &ctx->session);
   g_free(onnx_path_wide);
 #else
-  status =
-      g_ort->CreateSession(g_env, onnx_path, session_opts, &ctx->session);
+  status = g_ort->CreateSession(g_env, onnx_path, session_opts, &ctx->session);
 #endif
 
   g_ort->ReleaseSessionOptions(session_opts);
   g_free(onnx_path);
 
-  if(status) {
-    dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to create session: %s",
-             g_ort->GetErrorMessage(status));
+  if(status)
+  {
+    dt_print(
+      DT_DEBUG_AI,
+      "[darktable_ai] Failed to create session: %s",
+      g_ort->GetErrorMessage(status));
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
   }
 
-  status = g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault,
-                                      &ctx->memory_info);
-  if(status) {
+  status
+    = g_ort->CreateCpuMemoryInfo(OrtArenaAllocator, OrtMemTypeDefault, &ctx->memory_info);
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
@@ -435,21 +514,24 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
 
   // Resolve IO Names
   status = g_ort->GetAllocatorWithDefaultOptions(&ctx->allocator);
-  if(status) {
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
   }
 
   status = g_ort->SessionGetInputCount(ctx->session, &ctx->input_count);
-  if(status) {
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
   }
 
   status = g_ort->SessionGetOutputCount(ctx->session, &ctx->output_count);
-  if(status) {
+  if(status)
+  {
     g_ort->ReleaseStatus(status);
     dt_ai_unload_model(ctx);
     return NULL;
@@ -457,10 +539,12 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
 
   ctx->input_names = g_new0(char *, ctx->input_count);
   ctx->input_types = g_new0(dt_ai_dtype_t, ctx->input_count);
-  for(size_t i = 0; i < ctx->input_count; i++) {
-    status = g_ort->SessionGetInputName(ctx->session, i, ctx->allocator,
-                                        &ctx->input_names[i]);
-    if(status) {
+  for(size_t i = 0; i < ctx->input_count; i++)
+  {
+    status
+      = g_ort->SessionGetInputName(ctx->session, i, ctx->allocator, &ctx->input_names[i]);
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -469,14 +553,16 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
     // Get Input Type
     OrtTypeInfo *typeinfo = NULL;
     status = g_ort->SessionGetInputTypeInfo(ctx->session, i, &typeinfo);
-    if(status) {
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
     }
     const OrtTensorTypeAndShapeInfo *tensor_info = NULL;
     status = g_ort->CastTypeInfoToTensorInfo(typeinfo, &tensor_info);
-    if(status) {
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -484,15 +570,21 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
     }
     ONNXTensorElementDataType type;
     status = g_ort->GetTensorElementType(tensor_info, &type);
-    if(status) {
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
       return NULL;
     }
 
-    if(!_map_onnx_type(type, &ctx->input_types[i])) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX input type %d for input %zu", type, i);
+    if(!_map_onnx_type(type, &ctx->input_types[i]))
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] Unsupported ONNX input type %d for input %zu",
+        type,
+        i);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -503,10 +595,15 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
 
   ctx->output_names = g_new0(char *, ctx->output_count);
   ctx->output_types = g_new0(dt_ai_dtype_t, ctx->output_count);
-  for(size_t i = 0; i < ctx->output_count; i++) {
-    status = g_ort->SessionGetOutputName(ctx->session, i, ctx->allocator,
-                                         &ctx->output_names[i]);
-    if(status) {
+  for(size_t i = 0; i < ctx->output_count; i++)
+  {
+    status = g_ort->SessionGetOutputName(
+      ctx->session,
+      i,
+      ctx->allocator,
+      &ctx->output_names[i]);
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -515,14 +612,16 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
     // Get Output Type
     OrtTypeInfo *typeinfo = NULL;
     status = g_ort->SessionGetOutputTypeInfo(ctx->session, i, &typeinfo);
-    if(status) {
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       dt_ai_unload_model(ctx);
       return NULL;
     }
     const OrtTensorTypeAndShapeInfo *tensor_info = NULL;
     status = g_ort->CastTypeInfoToTensorInfo(typeinfo, &tensor_info);
-    if(status) {
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
@@ -530,15 +629,21 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
     }
     ONNXTensorElementDataType type;
     status = g_ort->GetTensorElementType(tensor_info, &type);
-    if(status) {
+    if(status)
+    {
       g_ort->ReleaseStatus(status);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
       return NULL;
     }
 
-    if(!_map_onnx_type(type, &ctx->output_types[i])) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported ONNX output type %d for output %zu", type, i);
+    if(!_map_onnx_type(type, &ctx->output_types[i]))
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] Unsupported ONNX output type %d for output %zu",
+        type,
+        i);
       g_ort->ReleaseTypeInfo(typeinfo);
       dt_ai_unload_model(ctx);
       return NULL;
@@ -550,15 +655,24 @@ dt_ai_context_t *dt_ai_onnx_load(const char *model_dir,
   return ctx;
 }
 
-int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
-                           int num_inputs, dt_ai_tensor_t *outputs,
-                           int num_outputs) {
+int dt_ai_run(
+  dt_ai_context_t *ctx,
+  dt_ai_tensor_t *inputs,
+  int num_inputs,
+  dt_ai_tensor_t *outputs,
+  int num_outputs)
+{
   if(!ctx || !ctx->session)
     return -1;
-  if(num_inputs != ctx->input_count || num_outputs != ctx->output_count) {
-    dt_print(DT_DEBUG_AI,
-             "[darktable_ai] IO count mismatch. Expected %zu/%zu, got %d/%d",
-             ctx->input_count, ctx->output_count, num_inputs, num_outputs);
+  if(num_inputs != ctx->input_count || num_outputs != ctx->output_count)
+  {
+    dt_print(
+      DT_DEBUG_AI,
+      "[darktable_ai] IO count mismatch. Expected %zu/%zu, got %d/%d",
+      ctx->input_count,
+      ctx->output_count,
+      num_inputs,
+      num_outputs);
     return -2;
   }
 
@@ -574,10 +688,15 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   OrtValue **output_tensors = g_new0(OrtValue *, num_outputs);
   const char **input_names = (const char **)ctx->input_names; // Cast for Run()
 
-  for(int i = 0; i < num_inputs; i++) {
+  for(int i = 0; i < num_inputs; i++)
+  {
     const int64_t element_count = _safe_element_count(inputs[i].shape, inputs[i].ndim);
-    if(element_count < 0) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Invalid or overflowing shape for Input[%d]", i);
+    if(element_count < 0)
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] Invalid or overflowing shape for Input[%d]",
+        i);
       ret = -4;
       goto cleanup;
     }
@@ -587,46 +706,68 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
     void *data_ptr = inputs[i].data;
 
     // Check for Type Mismatch (Float -> Half)
-    if(inputs[i].type == DT_AI_FLOAT && ctx->input_types[i] == DT_AI_FLOAT16) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Auto-converting Input[%d] Float32 -> Float16", i);
+    if(inputs[i].type == DT_AI_FLOAT && ctx->input_types[i] == DT_AI_FLOAT16)
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] Auto-converting Input[%d] Float32 -> Float16",
+        i);
       // Auto-convert Float32 -> Float16
       onnx_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
       type_size = sizeof(uint16_t); // Half is 2 bytes
 
-      if((size_t)element_count > SIZE_MAX / type_size) {
+      if((size_t)element_count > SIZE_MAX / type_size)
+      {
         dt_print(DT_DEBUG_AI, "[darktable_ai] Tensor size overflow for Input[%d]", i);
         ret = -4;
         goto cleanup;
       }
       uint16_t *half_data = g_malloc(element_count * type_size);
       const float *src = (const float *)inputs[i].data;
-      for(int64_t k = 0; k < element_count; k++) {
+      for(int64_t k = 0; k < element_count; k++)
+      {
         half_data[k] = _float_to_half(src[k]);
       }
 
       data_ptr = half_data;
       temp_input_buffers[i] = half_data;
-    } else {
-      if(!_dtype_to_onnx(inputs[i].type, &onnx_type, &type_size)) {
-        dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported input type %d for Input[%d]",
-                 inputs[i].type, i);
+    }
+    else
+    {
+      if(!_dtype_to_onnx(inputs[i].type, &onnx_type, &type_size))
+      {
+        dt_print(
+          DT_DEBUG_AI,
+          "[darktable_ai] Unsupported input type %d for Input[%d]",
+          inputs[i].type,
+          i);
         ret = -4;
         goto cleanup;
       }
     }
 
-    if((size_t)element_count > SIZE_MAX / type_size) {
+    if((size_t)element_count > SIZE_MAX / type_size)
+    {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Tensor size overflow for Input[%d]", i);
       ret = -4;
       goto cleanup;
     }
     status = g_ort->CreateTensorWithDataAsOrtValue(
-        ctx->memory_info, data_ptr, element_count * type_size, inputs[i].shape,
-        inputs[i].ndim, onnx_type, &input_tensors[i]);
+      ctx->memory_info,
+      data_ptr,
+      element_count * type_size,
+      inputs[i].shape,
+      inputs[i].ndim,
+      onnx_type,
+      &input_tensors[i]);
 
-    if(status) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] CreateTensor Input[%d] fail: %s", i,
-               g_ort->GetErrorMessage(status));
+    if(status)
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] CreateTensor Input[%d] fail: %s",
+        i,
+        g_ort->GetErrorMessage(status));
       g_ort->ReleaseStatus(status);
       ret = -4;
       goto cleanup;
@@ -636,18 +777,23 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   // Create Output Tensors (Pre-allocated)
   const char **output_names = (const char **)ctx->output_names;
 
-  for(int i = 0; i < num_outputs; i++) {
+  for(int i = 0; i < num_outputs; i++)
+  {
     // Check for Type Mismatch (Float16 -> Float)
-    if(outputs[i].type == DT_AI_FLOAT &&
-        ctx->output_types[i] == DT_AI_FLOAT16) {
+    if(outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16)
+    {
       // Let ORT allocate the output tensor (Float16)
       output_tensors[i] = NULL;
       continue;
     }
 
     const int64_t element_count = _safe_element_count(outputs[i].shape, outputs[i].ndim);
-    if(element_count < 0) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Invalid or overflowing shape for Output[%d]", i);
+    if(element_count < 0)
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] Invalid or overflowing shape for Output[%d]",
+        i);
       ret = -4;
       goto cleanup;
     }
@@ -655,25 +801,39 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
     ONNXTensorElementDataType onnx_type;
     size_t type_size;
 
-    if(!_dtype_to_onnx(outputs[i].type, &onnx_type, &type_size)) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] Unsupported output type %d for Output[%d]",
-               outputs[i].type, i);
+    if(!_dtype_to_onnx(outputs[i].type, &onnx_type, &type_size))
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] Unsupported output type %d for Output[%d]",
+        outputs[i].type,
+        i);
       ret = -4;
       goto cleanup;
     }
 
-    if((size_t)element_count > SIZE_MAX / type_size) {
+    if((size_t)element_count > SIZE_MAX / type_size)
+    {
       dt_print(DT_DEBUG_AI, "[darktable_ai] Tensor size overflow for Output[%d]", i);
       ret = -4;
       goto cleanup;
     }
     status = g_ort->CreateTensorWithDataAsOrtValue(
-        ctx->memory_info, outputs[i].data, element_count * type_size,
-        outputs[i].shape, outputs[i].ndim, onnx_type, &output_tensors[i]);
+      ctx->memory_info,
+      outputs[i].data,
+      element_count * type_size,
+      outputs[i].shape,
+      outputs[i].ndim,
+      onnx_type,
+      &output_tensors[i]);
 
-    if(status) {
-      dt_print(DT_DEBUG_AI, "[darktable_ai] CreateTensor Output[%d] fail: %s",
-               i, g_ort->GetErrorMessage(status));
+    if(status)
+    {
+      dt_print(
+        DT_DEBUG_AI,
+        "[darktable_ai] CreateTensor Output[%d] fail: %s",
+        i,
+        g_ort->GetErrorMessage(status));
       g_ort->ReleaseStatus(status);
       ret = -4;
       goto cleanup;
@@ -681,39 +841,58 @@ int dt_ai_run(dt_ai_context_t *ctx, dt_ai_tensor_t *inputs,
   }
 
   // RUN
-  status = g_ort->Run(ctx->session, NULL, input_names,
-                      (const OrtValue *const *)input_tensors, num_inputs,
-                      output_names, num_outputs, output_tensors);
+  status = g_ort->Run(
+    ctx->session,
+    NULL,
+    input_names,
+    (const OrtValue *const *)input_tensors,
+    num_inputs,
+    output_names,
+    num_outputs,
+    output_tensors);
 
-  if(status) {
-    dt_print(DT_DEBUG_AI, "[darktable_ai] Run error: %s",
-             g_ort->GetErrorMessage(status));
+  if(status)
+  {
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Run error: %s", g_ort->GetErrorMessage(status));
     g_ort->ReleaseStatus(status);
     ret = -3;
-  } else {
+  }
+  else
+  {
     // Post-Run: Auto-convert Output (Half -> Float)
-    for(int i = 0; i < num_outputs; i++) {
-      if(outputs[i].type == DT_AI_FLOAT &&
-          ctx->output_types[i] == DT_AI_FLOAT16) {
-        if(output_tensors[i]) {
+    for(int i = 0; i < num_outputs; i++)
+    {
+      if(outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16)
+      {
+        if(output_tensors[i])
+        {
           void *raw_data = NULL;
           status = g_ort->GetTensorMutableData(output_tensors[i], &raw_data);
-          if(status) {
-            dt_print(DT_DEBUG_AI, "[darktable_ai] GetTensorMutableData failed: %s",
-                     g_ort->GetErrorMessage(status));
+          if(status)
+          {
+            dt_print(
+              DT_DEBUG_AI,
+              "[darktable_ai] GetTensorMutableData failed: %s",
+              g_ort->GetErrorMessage(status));
             g_ort->ReleaseStatus(status);
             continue;
           }
 
-          const int64_t element_count = _safe_element_count(outputs[i].shape, outputs[i].ndim);
-          if(element_count < 0) {
-            dt_print(DT_DEBUG_AI, "[darktable_ai] Invalid or overflowing shape for Output[%d]", i);
+          const int64_t element_count
+            = _safe_element_count(outputs[i].shape, outputs[i].ndim);
+          if(element_count < 0)
+          {
+            dt_print(
+              DT_DEBUG_AI,
+              "[darktable_ai] Invalid or overflowing shape for Output[%d]",
+              i);
             continue;
           }
 
           uint16_t *half_data = (uint16_t *)raw_data;
           float *dst = (float *)outputs[i].data;
-          for(int64_t k = 0; k < element_count; k++) {
+          for(int64_t k = 0; k < element_count; k++)
+          {
             dst[k] = _half_to_float(half_data[k]);
           }
         }
@@ -731,7 +910,8 @@ cleanup:
       g_ort->ReleaseValue(output_tensors[i]);
 
   // Free temp input buffers
-  for(int i = 0; i < num_inputs; i++) {
+  for(int i = 0; i < num_inputs; i++)
+  {
     if(temp_input_buffers[i])
       g_free(temp_input_buffers[i]);
   }
@@ -743,44 +923,48 @@ cleanup:
   return ret;
 }
 
-int dt_ai_get_input_count(dt_ai_context_t *ctx) {
+int dt_ai_get_input_count(dt_ai_context_t *ctx)
+{
   return ctx ? (int)ctx->input_count : 0;
 }
 
-int dt_ai_get_output_count(dt_ai_context_t *ctx) {
+int dt_ai_get_output_count(dt_ai_context_t *ctx)
+{
   return ctx ? (int)ctx->output_count : 0;
 }
 
-const char *dt_ai_get_input_name(dt_ai_context_t *ctx,
-                                               int index) {
+const char *dt_ai_get_input_name(dt_ai_context_t *ctx, int index)
+{
   if(!ctx || index < 0 || (size_t)index >= ctx->input_count)
     return NULL;
   return ctx->input_names[index];
 }
 
-dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx,
-                                                  int index) {
+dt_ai_dtype_t dt_ai_get_input_type(dt_ai_context_t *ctx, int index)
+{
   if(!ctx || index < 0 || (size_t)index >= ctx->input_count)
     return DT_AI_FLOAT;
   return ctx->input_types[index];
 }
 
-const char *dt_ai_get_output_name(dt_ai_context_t *ctx,
-                                                int index) {
+const char *dt_ai_get_output_name(dt_ai_context_t *ctx, int index)
+{
   if(!ctx || index < 0 || (size_t)index >= ctx->output_count)
     return NULL;
   return ctx->output_names[index];
 }
 
-dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
-                                                   int index) {
+dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx, int index)
+{
   if(!ctx || index < 0 || (size_t)index >= ctx->output_count)
     return DT_AI_FLOAT;
   return ctx->output_types[index];
 }
 
-void dt_ai_unload_model(dt_ai_context_t *ctx) {
-  if(ctx) {
+void dt_ai_unload_model(dt_ai_context_t *ctx)
+{
+  if(ctx)
+  {
     if(ctx->session)
       g_ort->ReleaseSession(ctx->session);
     // Note: OrtEnv is a shared singleton (g_env), not per-context
@@ -788,12 +972,15 @@ void dt_ai_unload_model(dt_ai_context_t *ctx) {
       g_ort->ReleaseMemoryInfo(ctx->memory_info);
 
     // Release IO names using the allocator that created them
-    if(ctx->allocator) {
-      for(size_t i = 0; i < ctx->input_count; i++) {
+    if(ctx->allocator)
+    {
+      for(size_t i = 0; i < ctx->input_count; i++)
+      {
         if(ctx->input_names[i])
           ctx->allocator->Free(ctx->allocator, ctx->input_names[i]);
       }
-      for(size_t i = 0; i < ctx->output_count; i++) {
+      for(size_t i = 0; i < ctx->output_count; i++)
+      {
         if(ctx->output_names[i])
           ctx->allocator->Free(ctx->allocator, ctx->output_names[i]);
       }

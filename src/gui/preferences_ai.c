@@ -79,7 +79,8 @@ static GtkWidget *_create_indicator(const char *confkey)
 }
 
 // Column indices for model list store
-enum {
+enum
+{
   COL_SELECTED,
   COL_NAME,
   COL_DESCRIPTION,
@@ -89,7 +90,8 @@ enum {
   NUM_COLS
 };
 
-typedef struct dt_prefs_ai_data_t {
+typedef struct dt_prefs_ai_data_t
+{
   GtkWidget *enable_toggle;
   GtkWidget *provider_combo;
   GtkWidget *model_list;
@@ -103,7 +105,8 @@ typedef struct dt_prefs_ai_data_t {
 } dt_prefs_ai_data_t;
 
 // Download dialog data
-typedef struct dt_download_dialog_t {
+typedef struct dt_download_dialog_t
+{
   GtkWidget *dialog;
   GtkWidget *progress_bar;
   GtkWidget *status_label;
@@ -120,10 +123,14 @@ static const char *_status_to_string(dt_ai_model_status_t status)
 {
   switch(status)
   {
-    case DT_AI_MODEL_DOWNLOADED:     return _("downloaded");
-    case DT_AI_MODEL_DOWNLOADING:    return _("downloading...");
-    case DT_AI_MODEL_ERROR:          return _("error");
-    default:                         return _("not downloaded");
+  case DT_AI_MODEL_DOWNLOADED:
+    return _("downloaded");
+  case DT_AI_MODEL_DOWNLOADING:
+    return _("downloading...");
+  case DT_AI_MODEL_ERROR:
+    return _("error");
+  default:
+    return _("not downloaded");
   }
 }
 
@@ -149,18 +156,29 @@ static void _refresh_model_list(dt_prefs_ai_data_t *data)
       dt_print(DT_DEBUG_AI, "[preferences_ai] Model at index %d is NULL", i);
       continue;
     }
-    dt_print(DT_DEBUG_AI, "[preferences_ai] Adding model: %s", model->id ? model->id : "(null)");
+    dt_print(
+      DT_DEBUG_AI,
+      "[preferences_ai] Adding model: %s",
+      model->id ? model->id : "(null)");
 
     GtkTreeIter iter;
     gtk_list_store_append(data->model_store, &iter);
-    gtk_list_store_set(data->model_store, &iter,
-                       COL_SELECTED, FALSE,
-                       COL_NAME, model->name ? model->name : model->id,
-                       COL_DESCRIPTION, model->description ? model->description : "",
-                       COL_STATUS, _status_to_string(model->status),
-                       COL_REQUIRED, model->required ? _("yes") : _("no"),
-                       COL_ID, model->id,
-                       -1);
+    gtk_list_store_set(
+      data->model_store,
+      &iter,
+      COL_SELECTED,
+      FALSE,
+      COL_NAME,
+      model->name ? model->name : model->id,
+      COL_DESCRIPTION,
+      model->description ? model->description : "",
+      COL_STATUS,
+      _status_to_string(model->status),
+      COL_REQUIRED,
+      model->required ? _("yes") : _("no"),
+      COL_ID,
+      model->id,
+      -1);
     dt_ai_model_free(model);
   }
 
@@ -202,8 +220,8 @@ static void _on_provider_changed(GtkWidget *widget, gpointer user_data)
 }
 
 // Double-click on label resets the enable toggle to default
-static gboolean _reset_enable_click(GtkWidget *label, GdkEventButton *event,
-                                     GtkWidget *widget)
+static gboolean
+_reset_enable_click(GtkWidget *label, GdkEventButton *event, GtkWidget *widget)
 {
   if(event->type == GDK_2BUTTON_PRESS)
   {
@@ -215,8 +233,8 @@ static gboolean _reset_enable_click(GtkWidget *label, GdkEventButton *event,
 }
 
 // Double-click on label resets the provider combo to default
-static gboolean _reset_provider_click(GtkWidget *label, GdkEventButton *event,
-                                       GtkWidget *widget)
+static gboolean
+_reset_provider_click(GtkWidget *label, GdkEventButton *event, GtkWidget *widget)
 {
   if(event->type == GDK_2BUTTON_PRESS)
   {
@@ -228,9 +246,10 @@ static gboolean _reset_provider_click(GtkWidget *label, GdkEventButton *event,
   return FALSE;
 }
 
-static void _on_model_selection_toggled(GtkCellRendererToggle *cell,
-                                        gchar *path_string,
-                                        gpointer user_data)
+static void _on_model_selection_toggled(
+  GtkCellRendererToggle *cell,
+  gchar *path_string,
+  gpointer user_data)
 {
   dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
 
@@ -240,8 +259,12 @@ static void _on_model_selection_toggled(GtkCellRendererToggle *cell,
   gtk_tree_path_free(path);
 
   gboolean selected;
-  gtk_tree_model_get(GTK_TREE_MODEL(data->model_store), &iter,
-                     COL_SELECTED, &selected, -1);
+  gtk_tree_model_get(
+    GTK_TREE_MODEL(data->model_store),
+    &iter,
+    COL_SELECTED,
+    &selected,
+    -1);
 
   // Toggle the value
   gtk_list_store_set(data->model_store, &iter, COL_SELECTED, !selected, -1);
@@ -253,7 +276,8 @@ static void _on_select_all_toggled(GtkToggleButton *toggle, gpointer user_data)
   const gboolean select_all = gtk_toggle_button_get_active(toggle);
 
   GtkTreeIter iter;
-  gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(data->model_store), &iter);
+  gboolean valid
+    = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(data->model_store), &iter);
   while(valid)
   {
     gtk_list_store_set(data->model_store, &iter, COL_SELECTED, select_all, -1);
@@ -267,9 +291,13 @@ static void _on_select_all_header_clicked(GtkWidget *button, gpointer user_data)
   // Only toggle if the click wasn't already handled by the checkbox itself.
   // Block the toggled signal to prevent double-fire, then toggle manually.
   g_signal_handlers_block_by_func(data->select_all_toggle, _on_select_all_toggled, data);
-  gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(data->select_all_toggle));
+  gboolean active
+    = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(data->select_all_toggle));
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(data->select_all_toggle), !active);
-  g_signal_handlers_unblock_by_func(data->select_all_toggle, _on_select_all_toggled, data);
+  g_signal_handlers_unblock_by_func(
+    data->select_all_toggle,
+    _on_select_all_toggled,
+    data);
 
   // Now manually apply the selection since we blocked the signal
   _on_select_all_toggled(GTK_TOGGLE_BUTTON(data->select_all_toggle), data);
@@ -280,15 +308,20 @@ static GList *_get_selected_model_ids(dt_prefs_ai_data_t *data)
 {
   GList *ids = NULL;
   GtkTreeIter iter;
-  gboolean valid = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(data->model_store), &iter);
+  gboolean valid
+    = gtk_tree_model_get_iter_first(GTK_TREE_MODEL(data->model_store), &iter);
   while(valid)
   {
     gboolean selected;
     gchar *model_id;
-    gtk_tree_model_get(GTK_TREE_MODEL(data->model_store), &iter,
-                       COL_SELECTED, &selected,
-                       COL_ID, &model_id,
-                       -1);
+    gtk_tree_model_get(
+      GTK_TREE_MODEL(data->model_store),
+      &iter,
+      COL_SELECTED,
+      &selected,
+      COL_ID,
+      &model_id,
+      -1);
     if(selected && model_id)
       ids = g_list_append(ids, model_id);
     else
@@ -299,8 +332,8 @@ static GList *_get_selected_model_ids(dt_prefs_ai_data_t *data)
 }
 
 // Progress callback called from download thread
-static void _download_progress_callback(const char *model_id, double progress,
-                                        gpointer user_data)
+static void
+_download_progress_callback(const char *model_id, double progress, gpointer user_data)
 {
   dt_download_dialog_t *dl = (dt_download_dialog_t *)user_data;
   g_mutex_lock(&dl->mutex);
@@ -358,9 +391,12 @@ static gpointer _download_thread_func(gpointer user_data)
 {
   dt_download_dialog_t *dl = (dt_download_dialog_t *)user_data;
 
-  char *error = dt_ai_models_download_sync(darktable.ai_registry, dl->model_id,
-                                            _download_progress_callback, dl,
-                                            &dl->cancelled);
+  char *error = dt_ai_models_download_sync(
+    darktable.ai_registry,
+    dl->model_id,
+    _download_progress_callback,
+    dl,
+    &dl->cancelled);
 
   g_mutex_lock(&dl->mutex);
   dl->error = error;
@@ -371,17 +407,20 @@ static gpointer _download_thread_func(gpointer user_data)
 }
 
 // Show modal download dialog for a single model
-static gboolean _download_model_with_dialog(dt_prefs_ai_data_t *data, const char *model_id)
+static gboolean
+_download_model_with_dialog(dt_prefs_ai_data_t *data, const char *model_id)
 {
   dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, model_id);
-  if(!model) return FALSE;
+  if(!model)
+    return FALSE;
 
   // Create dialog
   GtkWidget *dialog = gtk_dialog_new_with_buttons(
     _("downloading AI model"),
     GTK_WINDOW(data->parent_dialog),
     GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
-    _("_cancel"), GTK_RESPONSE_CANCEL,
+    _("_cancel"),
+    GTK_RESPONSE_CANCEL,
     NULL);
 
   gtk_window_set_default_size(GTK_WINDOW(dialog), 400, -1);
@@ -391,7 +430,8 @@ static gboolean _download_model_with_dialog(dt_prefs_ai_data_t *data, const char
   gtk_box_set_spacing(GTK_BOX(content), 10);
 
   // Model name label (use fields from copy, then free it)
-  char *title = g_strdup_printf(_("Downloading: %s"), model->name ? model->name : model->id);
+  char *title
+    = g_strdup_printf(_("Downloading: %s"), model->name ? model->name : model->id);
   dt_ai_model_free(model);
   GtkWidget *title_label = gtk_label_new(title);
   g_free(title);
@@ -477,7 +517,7 @@ static void _on_download_selected(GtkButton *button, gpointer user_data)
       gboolean need_download = (model->status == DT_AI_MODEL_NOT_DOWNLOADED);
       dt_ai_model_free(model);
       if(need_download && !_download_model_with_dialog(data, id))
-        break;  // Stop on error or cancel
+        break; // Stop on error or cancel
     }
   }
   g_list_free_full(ids, g_free);
@@ -493,8 +533,10 @@ static void _on_download_required(GtkButton *button, gpointer user_data)
   for(int i = 0; i < count; i++)
   {
     dt_ai_model_t *model = dt_ai_models_get_by_index(darktable.ai_registry, i);
-    if(!model) continue;
-    gboolean need_download = (model->required && model->status == DT_AI_MODEL_NOT_DOWNLOADED);
+    if(!model)
+      continue;
+    gboolean need_download
+      = (model->required && model->status == DT_AI_MODEL_NOT_DOWNLOADED);
     char *id = need_download ? g_strdup(model->id) : NULL;
     dt_ai_model_free(model);
     if(need_download)
@@ -502,7 +544,7 @@ static void _on_download_required(GtkButton *button, gpointer user_data)
       if(!_download_model_with_dialog(data, id))
       {
         g_free(id);
-        break;  // Stop on error or cancel
+        break; // Stop on error or cancel
       }
       g_free(id);
     }
@@ -519,7 +561,8 @@ static void _on_download_all(GtkButton *button, gpointer user_data)
   for(int i = 0; i < count; i++)
   {
     dt_ai_model_t *model = dt_ai_models_get_by_index(darktable.ai_registry, i);
-    if(!model) continue;
+    if(!model)
+      continue;
     gboolean need_download = (model->status == DT_AI_MODEL_NOT_DOWNLOADED);
     char *id = need_download ? g_strdup(model->id) : NULL;
     dt_ai_model_free(model);
@@ -528,7 +571,7 @@ static void _on_download_all(GtkButton *button, gpointer user_data)
       if(!_download_model_with_dialog(data, id))
       {
         g_free(id);
-        break;  // Stop on error or cancel
+        break; // Stop on error or cancel
       }
       g_free(id);
     }
@@ -573,8 +616,7 @@ static void _on_delete_selected(GtkButton *button, gpointer user_data)
     GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
     GTK_MESSAGE_QUESTION,
     GTK_BUTTONS_YES_NO,
-    ngettext("delete %d selected model?",
-             "delete %d selected models?", delete_count),
+    ngettext("delete %d selected model?", "delete %d selected models?", delete_count),
     delete_count);
 
   gint response = gtk_dialog_run(GTK_DIALOG(confirm));
@@ -642,12 +684,19 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
 
   GtkWidget *enable_indicator = _create_indicator("plugins/ai/enabled");
   data->enable_toggle = gtk_check_button_new();
-  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(data->enable_toggle),
-                               dt_conf_get_bool("plugins/ai/enabled"));
-  g_signal_connect(data->enable_toggle, "toggled",
-                   G_CALLBACK(_on_enable_toggled), enable_indicator);
-  g_signal_connect(enable_labelev, "button-press-event",
-                   G_CALLBACK(_reset_enable_click), data->enable_toggle);
+  gtk_toggle_button_set_active(
+    GTK_TOGGLE_BUTTON(data->enable_toggle),
+    dt_conf_get_bool("plugins/ai/enabled"));
+  g_signal_connect(
+    data->enable_toggle,
+    "toggled",
+    G_CALLBACK(_on_enable_toggled),
+    enable_indicator);
+  g_signal_connect(
+    enable_labelev,
+    "button-press-event",
+    G_CALLBACK(_reset_enable_click),
+    data->enable_toggle);
   gtk_grid_attach(GTK_GRID(general_grid), enable_labelev, 0, row, 1, 1);
   gtk_grid_attach(GTK_GRID(general_grid), enable_indicator, 1, row, 1, 1);
   gtk_grid_attach(GTK_GRID(general_grid), data->enable_toggle, 2, row++, 1, 1);
@@ -674,11 +723,18 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   g_free(provider_str);
   dt_bauhaus_combobox_set(data->provider_combo, (int)provider);
 
-  g_signal_connect(data->provider_combo, "value-changed",
-                   G_CALLBACK(_on_provider_changed), provider_indicator);
-  g_signal_connect(provider_labelev, "button-press-event",
-                   G_CALLBACK(_reset_provider_click), data->provider_combo);
-  gtk_widget_set_tooltip_text(data->provider_combo,
+  g_signal_connect(
+    data->provider_combo,
+    "value-changed",
+    G_CALLBACK(_on_provider_changed),
+    provider_indicator);
+  g_signal_connect(
+    provider_labelev,
+    "button-press-event",
+    G_CALLBACK(_reset_provider_click),
+    data->provider_combo);
+  gtk_widget_set_tooltip_text(
+    data->provider_combo,
     _("select hardware acceleration for AI inference:\n"
       "- auto: automatically detect best option\n"
       "- CPU: use CPU only (slowest but always available)\n"
@@ -709,30 +765,41 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   }
 
   // Create model list store
-  data->model_store = gtk_list_store_new(NUM_COLS,
-                                          G_TYPE_BOOLEAN,  // selected
-                                          G_TYPE_STRING,   // name
-                                          G_TYPE_STRING,   // description
-                                          G_TYPE_STRING,   // status
-                                          G_TYPE_STRING,   // required
-                                          G_TYPE_STRING);  // id
+  data->model_store = gtk_list_store_new(
+    NUM_COLS,
+    G_TYPE_BOOLEAN, // selected
+    G_TYPE_STRING,  // name
+    G_TYPE_STRING,  // description
+    G_TYPE_STRING,  // status
+    G_TYPE_STRING,  // required
+    G_TYPE_STRING); // id
 
   // Create tree view
   data->model_list = gtk_tree_view_new_with_model(GTK_TREE_MODEL(data->model_store));
-  g_object_unref(data->model_store);  // Tree view takes ownership
+  g_object_unref(data->model_store); // Tree view takes ownership
 
   // Selection checkbox column (no title, with select-all checkbox in header)
   GtkCellRenderer *toggle_renderer = gtk_cell_renderer_toggle_new();
-  g_signal_connect(toggle_renderer, "toggled",
-                   G_CALLBACK(_on_model_selection_toggled), data);
+  g_signal_connect(
+    toggle_renderer,
+    "toggled",
+    G_CALLBACK(_on_model_selection_toggled),
+    data);
   GtkTreeViewColumn *select_col = gtk_tree_view_column_new_with_attributes(
-    "", toggle_renderer, "active", COL_SELECTED, NULL);
+    "",
+    toggle_renderer,
+    "active",
+    COL_SELECTED,
+    NULL);
 
   // Add select-all checkbox as column header widget
   data->select_all_toggle = gtk_check_button_new();
   gtk_widget_set_tooltip_text(data->select_all_toggle, _("select/deselect all"));
-  g_signal_connect(data->select_all_toggle, "toggled",
-                   G_CALLBACK(_on_select_all_toggled), data);
+  g_signal_connect(
+    data->select_all_toggle,
+    "toggled",
+    G_CALLBACK(_on_select_all_toggled),
+    data);
   gtk_widget_show(data->select_all_toggle);
   gtk_tree_view_column_set_widget(select_col, data->select_all_toggle);
   gtk_tree_view_column_set_clickable(select_col, TRUE);
@@ -742,38 +809,60 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   // Connect to the header button's clicked signal so the checkbox toggles
   // when clicking anywhere in the header area
   GtkWidget *select_col_button = gtk_tree_view_column_get_button(select_col);
-  g_signal_connect(select_col_button, "clicked",
-                   G_CALLBACK(_on_select_all_header_clicked), data);
+  g_signal_connect(
+    select_col_button,
+    "clicked",
+    G_CALLBACK(_on_select_all_header_clicked),
+    data);
 
   // Name column
   GtkCellRenderer *text_renderer = gtk_cell_renderer_text_new();
   GtkTreeViewColumn *name_col = gtk_tree_view_column_new_with_attributes(
-    _("name"), text_renderer, "text", COL_NAME, NULL);
+    _("name"),
+    text_renderer,
+    "text",
+    COL_NAME,
+    NULL);
   gtk_tree_view_column_set_expand(name_col, FALSE);
   gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), name_col);
 
   // Description column
   GtkTreeViewColumn *desc_col = gtk_tree_view_column_new_with_attributes(
-    _("description"), text_renderer, "text", COL_DESCRIPTION, NULL);
+    _("description"),
+    text_renderer,
+    "text",
+    COL_DESCRIPTION,
+    NULL);
   gtk_tree_view_column_set_expand(desc_col, TRUE);
   gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), desc_col);
 
   // Status column
   GtkTreeViewColumn *status_col = gtk_tree_view_column_new_with_attributes(
-    _("status"), text_renderer, "text", COL_STATUS, NULL);
+    _("status"),
+    text_renderer,
+    "text",
+    COL_STATUS,
+    NULL);
   gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), status_col);
 
   // Required column
   GtkTreeViewColumn *required_col = gtk_tree_view_column_new_with_attributes(
-    _("required"), text_renderer, "text", COL_REQUIRED, NULL);
+    _("required"),
+    text_renderer,
+    "text",
+    COL_REQUIRED,
+    NULL);
   gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), required_col);
 
   // Scrolled window for the list
   GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
-  gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
-                                 GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-  gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll),
-                                             DT_PIXEL_APPLY_DPI(200));
+  gtk_scrolled_window_set_policy(
+    GTK_SCROLLED_WINDOW(scroll),
+    GTK_POLICY_AUTOMATIC,
+    GTK_POLICY_AUTOMATIC);
+  gtk_scrolled_window_set_min_content_height(
+    GTK_SCROLLED_WINDOW(scroll),
+    DT_PIXEL_APPLY_DPI(200));
   gtk_widget_set_hexpand(scroll, TRUE);
   gtk_widget_set_vexpand(scroll, TRUE);
   gtk_container_add(GTK_CONTAINER(scroll), data->model_list);
@@ -785,26 +874,34 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
 
   // Download selected button
   data->download_selected_btn = gtk_button_new_with_label(_("download selected"));
-  g_signal_connect(data->download_selected_btn, "clicked",
-                   G_CALLBACK(_on_download_selected), data);
+  g_signal_connect(
+    data->download_selected_btn,
+    "clicked",
+    G_CALLBACK(_on_download_selected),
+    data);
   gtk_box_pack_start(GTK_BOX(button_box), data->download_selected_btn, FALSE, FALSE, 0);
 
   // Download required button
   data->download_required_btn = gtk_button_new_with_label(_("download required"));
-  g_signal_connect(data->download_required_btn, "clicked",
-                   G_CALLBACK(_on_download_required), data);
+  g_signal_connect(
+    data->download_required_btn,
+    "clicked",
+    G_CALLBACK(_on_download_required),
+    data);
   gtk_box_pack_start(GTK_BOX(button_box), data->download_required_btn, FALSE, FALSE, 0);
 
   // Download all button
   data->download_all_btn = gtk_button_new_with_label(_("download all"));
-  g_signal_connect(data->download_all_btn, "clicked",
-                   G_CALLBACK(_on_download_all), data);
+  g_signal_connect(data->download_all_btn, "clicked", G_CALLBACK(_on_download_all), data);
   gtk_box_pack_start(GTK_BOX(button_box), data->download_all_btn, FALSE, FALSE, 0);
 
   // Delete selected button
   data->delete_selected_btn = gtk_button_new_with_label(_("delete selected"));
-  g_signal_connect(data->delete_selected_btn, "clicked",
-                   G_CALLBACK(_on_delete_selected), data);
+  g_signal_connect(
+    data->delete_selected_btn,
+    "clicked",
+    G_CALLBACK(_on_delete_selected),
+    data);
   gtk_box_pack_start(GTK_BOX(button_box), data->delete_selected_btn, FALSE, FALSE, 0);
 
   // Refresh button
