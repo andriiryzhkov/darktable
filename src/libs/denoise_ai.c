@@ -526,6 +526,15 @@ static int32_t _process_job_run(dt_job_t *job) {
         snprintf(filename, sizeof(filename), "%s_%d.tif", base, suffix);
         if(!g_file_test(filename, G_FILE_TEST_EXISTS)) break;
       }
+
+      if(g_file_test(filename, G_FILE_TEST_EXISTS))
+      {
+        dt_print(DT_DEBUG_AI, "[denoise_ai] Could not find unique filename for imgid %d", imgid);
+        dt_control_log(_("AI denoise: too many existing output files"));
+        dt_control_job_set_progress(job, (double)++count / total);
+        iter = g_list_next(iter);
+        continue;
+      }
     }
 
     dt_print(DT_DEBUG_AI, "[denoise_ai] Denoising imgid %d -> %s", imgid, filename);
@@ -559,7 +568,7 @@ static int32_t _process_job_run(dt_job_t *job) {
 static void _update_button_sensitivity(dt_lib_denoise_ai_t *d) {
   gboolean sensitive = FALSE;
   if(d->model_available && !d->job_running
-     && darktable.develop->image_storage.id != -1) {
+     && dt_is_valid_imgid(darktable.develop->image_storage.id)) {
     sensitive = TRUE;
   }
   gtk_widget_set_sensitive(d->button, sensitive);

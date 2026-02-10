@@ -94,7 +94,7 @@ static void _scan_directory(dt_ai_environment_t *env, const char *root_path) {
                   ? (int)json_object_get_int_member(obj, "num_inputs")
                   : 1;
 
-              env->models = g_list_append(env->models, info);
+              env->models = g_list_prepend(env->models, info);
               g_hash_table_insert(env->model_paths, g_strdup(info->id),
                                   g_strdup(full_path));
 
@@ -155,6 +155,7 @@ dt_ai_environment_t *dt_ai_env_init(const char *search_paths) {
   env->search_paths = g_strdup(search_paths);
 
   _scan_all_paths(env);
+  env->models = g_list_reverse(env->models);
 
   return env;
 }

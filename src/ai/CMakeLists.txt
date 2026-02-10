@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
 
-project(darktable_ai)
-
 add_library(darktable_ai STATIC
   backend.h
   backend_common.c

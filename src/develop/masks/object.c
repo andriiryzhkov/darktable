@@ -32,6 +32,15 @@
 
 // --- Per-session segmentation state (stored in gui->scratchpad) ---
 
+typedef enum _encode_state_t
+{
+  ENCODE_ERROR    = -1,
+  ENCODE_IDLE     =  0,
+  ENCODE_MSG_SHOWN =  1,  // busy message queued, waiting for next expose
+  ENCODE_READY    =  2,   // encoding complete, results available
+  ENCODE_RUNNING  =  3,   // background thread in progress
+} _encode_state_t;
+
 typedef struct _object_data_t
 {
   dt_ai_environment_t *env;  // AI environment for model registry
@@ -39,7 +48,7 @@ typedef struct _object_data_t
   float *mask;               // current mask buffer (preview pipe size)
   int mask_w, mask_h;        // mask dimensions
   gboolean model_loaded;     // whether the model was loaded
-  int encode_state;          // 0=idle, 1=msg shown, 3=thread running, 2=ready, -1=error
+  int encode_state;          // uses _encode_state_t values (int for g_atomic_int_*)
   dt_imgid_t encoded_imgid;  // image ID that was encoded
   guint modifier_poll_id;    // timer to detect shift key changes
   GThread *encode_thread;    // background encoding thread
@@ -70,7 +79,7 @@ static void _destroy_data(_object_data_t *d)
 static gboolean _deferred_cleanup(gpointer data)
 {
   _object_data_t *d = data;
-  if(g_atomic_int_get(&d->encode_state) == 3)
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
     return G_SOURCE_CONTINUE;  // thread still running, try again
 
   _destroy_data(d);
@@ -83,7 +92,7 @@ static void _free_data(dt_masks_form_gui_t *gui)
   if(!d) return;
   gui->scratchpad = NULL;
 
-  if(d->encode_thread && g_atomic_int_get(&d->encode_state) == 3)
+  if(d->encode_thread && g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
   {
     // Thread still running — defer cleanup to avoid blocking the UI
     if(d->modifier_poll_id)
@@ -129,7 +138,7 @@ static gpointer _encode_thread_func(gpointer data)
       dt_control_log(_("AI segmentation model not found"));
       g_free(td->rgb);
       g_free(td);
-      g_atomic_int_set(&d->encode_state, -1);
+      g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
       dt_control_busy_leave();
       dt_control_queue_redraw_center();
       return NULL;
@@ -146,7 +155,7 @@ static gpointer _encode_thread_func(gpointer data)
     d->encoded_imgid = td->imgid;
     g_free(td->rgb);
     g_free(td);
-    g_atomic_int_set(&d->encode_state, -1);
+    g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
     dt_control_busy_leave();
     dt_control_queue_redraw_center();
     return NULL;
@@ -155,7 +164,7 @@ static gpointer _encode_thread_func(gpointer data)
   d->encoded_imgid = td->imgid;
   g_free(td->rgb);
   g_free(td);
-  g_atomic_int_set(&d->encode_state, 2);
+  g_atomic_int_set(&d->encode_state, ENCODE_READY);
   dt_control_busy_leave();
   dt_control_queue_redraw_center();
   return NULL;
@@ -414,7 +423,7 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   {
     // Alt+click: clear selection
     _object_data_t *d = _get_data(gui);
-    if(d && d->encode_state == 2 && gui->guipoints_count > 0)
+    if(d && d->encode_state == ENCODE_READY && gui->guipoints_count > 0)
       _clear_selection(gui);
     return 1;
   }
@@ -422,7 +431,7 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   {
     // Only accept clicks after encoding is complete
     _object_data_t *d = _get_data(gui);
-    if(!d || d->encode_state != 2) return 1;
+    if(!d || d->encode_state != ENCODE_READY) return 1;
 
     // Initialize point buffers
     if(!gui->guipoints)
@@ -451,7 +460,7 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   {
     // Don't exit while background encoding is in progress
     _object_data_t *dd = _get_data(gui);
-    if(dd && g_atomic_int_get(&dd->encode_state) == 3)
+    if(dd && g_atomic_int_get(&dd->encode_state) == ENCODE_RUNNING)
       return 1;
 
     // Right-click: finalize mask
@@ -552,24 +561,24 @@ static void _object_events_post_expose(cairo_t *cr,
 
   // Detect image change: reset encoding if we switched to a different image
   const dt_imgid_t cur_imgid = darktable.develop->image_storage.id;
-  if(d->encode_state == 2 && d->encoded_imgid != cur_imgid)
+  if(d->encode_state == ENCODE_READY && d->encoded_imgid != cur_imgid)
   {
     if(d->seg) dt_seg_reset_encoding(d->seg);
     g_free(d->mask);
     d->mask = NULL;
     d->mask_w = d->mask_h = 0;
-    d->encode_state = 0;
+    d->encode_state = ENCODE_IDLE;
   }
 
   // Eager encoding: load model and encode image as soon as tool opens
-  if(d->encode_state == 0)
+  if(d->encode_state == ENCODE_IDLE)
   {
-    d->encode_state = 1;
+    d->encode_state = ENCODE_MSG_SHOWN;
     dt_control_queue_redraw_center();
     return;
   }
 
-  if(d->encode_state == 1)
+  if(d->encode_state == ENCODE_MSG_SHOWN)
   {
     // Frame 2: log message visible, now launch background encoding thread.
     // The heavy work (model load + encode) runs off the main thread so
@@ -577,7 +586,7 @@ static void _object_events_post_expose(cairo_t *cr,
     dt_dev_pixelpipe_t *preview = darktable.develop->preview_pipe;
     if(!preview || !preview->backbuf)
     {
-      d->encode_state = -1;
+      d->encode_state = ENCODE_ERROR;
       return;
     }
 
@@ -605,7 +614,7 @@ static void _object_events_post_expose(cairo_t *cr,
 
     if(!rgb)
     {
-      d->encode_state = -1;
+      d->encode_state = ENCODE_ERROR;
       return;
     }
 
@@ -620,17 +629,17 @@ static void _object_events_post_expose(cairo_t *cr,
     td->imgid = cur_imgid;
 
     d->encode_thread = g_thread_new("ai-encode", _encode_thread_func, td);
-    d->encode_state = 3;
+    d->encode_state = ENCODE_RUNNING;
     return;
   }
 
-  if(g_atomic_int_get(&d->encode_state) == 3)
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
   {
     // Background thread running — return so expose can draw "working..."
     return;
   }
 
-  if(g_atomic_int_get(&d->encode_state) != 2) return;
+  if(g_atomic_int_get(&d->encode_state) != ENCODE_READY) return;
 
   // Encoding complete — join thread and start modifier polling
   if(d->encode_thread)
