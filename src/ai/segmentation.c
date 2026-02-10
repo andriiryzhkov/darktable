@@ -278,7 +278,9 @@ float *dt_seg_compute_mask(dt_seg_context_t *ctx,
   if(!masks) { g_free(point_coords); g_free(point_labels); return NULL; }
 
   float iou_pred[1];
-  float low_res[1 * 1 * 256 * 256];
+  const size_t low_res_size = 1 * 1 * 256 * 256;
+  float *low_res = g_try_malloc(low_res_size * sizeof(float));
+  if(!low_res) { g_free(point_coords); g_free(point_labels); g_free(masks); return NULL; }
 
   int64_t masks_shape[4] = { 1, 1, mask_h, mask_w };
   int64_t iou_shape[2] = { 1, 1 };
@@ -301,6 +303,7 @@ float *dt_seg_compute_mask(dt_seg_context_t *ctx,
   if(ret != 0)
   {
     dt_print(DT_DEBUG_AI, "[segmentation] Decoder failed: %d", ret);
+    g_free(low_res);
     g_free(masks);
     return NULL;
   }
@@ -309,6 +312,7 @@ float *dt_seg_compute_mask(dt_seg_context_t *ctx,
 
   // Cache low-res mask for iterative refinement
   memcpy(ctx->low_res_masks, low_res, sizeof(ctx->low_res_masks));
+  g_free(low_res);
   ctx->has_prev_mask = TRUE;
 
   // Apply sigmoid to convert logits to [0,1] probabilities
