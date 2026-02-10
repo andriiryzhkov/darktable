@@ -50,10 +50,9 @@ static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
   return (gui && gui->scratchpad) ? (_object_data_t *)gui->scratchpad : NULL;
 }
 
-static void _free_data(dt_masks_form_gui_t *gui)
+// Free all resources in _object_data_t. Called directly or from deferred idle.
+static void _destroy_data(_object_data_t *d)
 {
-  _object_data_t *d = _get_data(gui);
-  if(!d) return;
   if(d->encode_thread)
   {
     g_thread_join(d->encode_thread);
@@ -65,7 +64,38 @@ static void _free_data(dt_masks_form_gui_t *gui)
   if(d->env) dt_ai_env_destroy(d->env);
   g_free(d->mask);
   g_free(d);
+}
+
+// Idle callback: wait for encoding thread to finish, then free data.
+static gboolean _deferred_cleanup(gpointer data)
+{
+  _object_data_t *d = data;
+  if(g_atomic_int_get(&d->encode_state) == 3)
+    return G_SOURCE_CONTINUE;  // thread still running, try again
+
+  _destroy_data(d);
+  return G_SOURCE_REMOVE;
+}
+
+static void _free_data(dt_masks_form_gui_t *gui)
+{
+  _object_data_t *d = _get_data(gui);
+  if(!d) return;
   gui->scratchpad = NULL;
+
+  if(d->encode_thread && g_atomic_int_get(&d->encode_state) == 3)
+  {
+    // Thread still running — defer cleanup to avoid blocking the UI
+    if(d->modifier_poll_id)
+    {
+      g_source_remove(d->modifier_poll_id);
+      d->modifier_poll_id = 0;
+    }
+    g_idle_add(_deferred_cleanup, d);
+    return;
+  }
+
+  _destroy_data(d);
 }
 
 // Thread data for background model loading + image encoding
