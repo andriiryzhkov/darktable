@@ -48,9 +48,11 @@ typedef struct _object_data_t
   float *mask;               // current mask buffer (preview pipe size)
   int mask_w, mask_h;        // mask dimensions
   gboolean model_loaded;     // whether the model was loaded
-  int encode_state;          // uses _encode_state_t values
+  int encode_state;          // uses _encode_state_t values (atomic access)
   dt_imgid_t encoded_imgid;  // image ID that was encoded
   guint modifier_poll_id;    // timer to detect shift key changes
+  GThread *encode_thread;    // background encoding thread
+  gboolean busy;             // TRUE if dt_control_busy_enter() was called
 } _object_data_t;
 
 static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
@@ -58,30 +60,66 @@ static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
   return (gui && gui->scratchpad) ? (_object_data_t *)gui->scratchpad : NULL;
 }
 
-static void _free_data(dt_masks_form_gui_t *gui)
+// Free all resources in _object_data_t (must be called after thread has joined)
+static void _destroy_data(_object_data_t *d)
 {
-  _object_data_t *d = _get_data(gui);
   if(!d) return;
+  if(d->busy)
+    dt_control_busy_leave();
   if(d->modifier_poll_id)
     g_source_remove(d->modifier_poll_id);
+  if(d->encode_thread)
+    g_thread_join(d->encode_thread);
   if(d->seg) dt_seg_free(d->seg);
   if(d->env) dt_ai_env_destroy(d->env);
   g_free(d->mask);
   g_free(d);
-  gui->scratchpad = NULL;
 }
 
-// Ensure the model is loaded and the preview image is encoded.
-// Returns the _object_data_t or NULL on failure.
-static _object_data_t *_ensure_encoded(dt_masks_form_gui_t *gui)
+// Idle callback for deferred cleanup when background thread was still running
+static gboolean _deferred_cleanup(gpointer data)
+{
+  _object_data_t *d = data;
+  const int state = g_atomic_int_get(&d->encode_state);
+  if(state == ENCODE_RUNNING)
+    return G_SOURCE_CONTINUE;  // thread still running, try again later
+  _destroy_data(d);
+  return G_SOURCE_REMOVE;
+}
+
+static void _free_data(dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
-  if(!d)
-  {
-    d = g_new0(_object_data_t, 1);
-    gui->scratchpad = d;
-  }
+  if(!d) return;
+  gui->scratchpad = NULL;
 
+  const int state = g_atomic_int_get(&d->encode_state);
+  if(state == ENCODE_RUNNING)
+  {
+    // Thread still running — defer cleanup so we don't block the UI
+    g_timeout_add(200, _deferred_cleanup, d);
+    return;
+  }
+  _destroy_data(d);
+}
+
+// Data passed to the background encoding thread
+typedef struct _encode_thread_data_t
+{
+  _object_data_t *d;
+  uint8_t *rgb;     // RGB copy of backbuf (owned, freed by thread)
+  int width, height;
+} _encode_thread_data_t;
+
+// Background thread: loads model and encodes the preview image.
+// Does ZERO GLib/GTK calls — only computation + atomic state set.
+// The poll timer on the main thread detects completion.
+static gpointer _encode_thread_func(gpointer data)
+{
+  _encode_thread_data_t *td = data;
+  _object_data_t *d = td->d;
+
+  // Load model if needed
   if(!d->model_loaded)
   {
     if(!d->env)
@@ -91,59 +129,21 @@ static _object_data_t *_ensure_encoded(dt_masks_form_gui_t *gui)
 
     if(!d->seg)
     {
-      dt_print(DT_DEBUG_AI, "[object mask] Failed to load segmentation model");
-      dt_control_log(_("AI segmentation model not found"));
+      g_free(td->rgb);
+      g_free(td);
+      g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
       return NULL;
     }
     d->model_loaded = TRUE;
   }
 
-  // Encode preview image if not done yet
-  if(d->seg && !dt_seg_is_encoded(d->seg))
-  {
-    dt_dev_pixelpipe_t *preview = darktable.develop->preview_pipe;
-    if(!preview || !preview->backbuf)
-    {
-      dt_print(DT_DEBUG_AI, "[object mask] Preview buffer not available");
-      return NULL;
-    }
+  // Encode the image
+  const gboolean ok = dt_seg_encode_image(d->seg, td->rgb, td->width, td->height);
+  g_free(td->rgb);
+  g_free(td);
 
-    // Convert preview backbuf (uint8 RGBA) to uint8 RGB
-    dt_pthread_mutex_lock(&preview->backbuf_mutex);
-    const int pw = preview->backbuf_width;
-    const int ph = preview->backbuf_height;
-    const uint8_t *src = preview->backbuf;
-    uint8_t *rgb = NULL;
-
-    if(src && pw > 0 && ph > 0)
-    {
-      rgb = g_try_malloc((size_t)pw * ph * 3);
-      if(rgb)
-      {
-        for(int i = 0; i < pw * ph; i++)
-        {
-          rgb[i * 3 + 0] = src[i * 4 + 2]; // R (backbuf is BGRA)
-          rgb[i * 3 + 1] = src[i * 4 + 1]; // G
-          rgb[i * 3 + 2] = src[i * 4 + 0]; // B
-        }
-      }
-    }
-    dt_pthread_mutex_unlock(&preview->backbuf_mutex);
-
-    if(!rgb)
-      return NULL;
-
-    const gboolean ok = dt_seg_encode_image(d->seg, rgb, pw, ph);
-    g_free(rgb);
-
-    if(!ok)
-    {
-      dt_control_log(_("AI image encoding failed"));
-      return NULL;
-    }
-  }
-
-  return d;
+  g_atomic_int_set(&d->encode_state, ok ? ENCODE_READY : ENCODE_ERROR);
+  return NULL;
 }
 
 // Run the decoder with accumulated points and update the cached mask
@@ -311,7 +311,7 @@ static void _finalize_mask(dt_iop_module_t *module,
 
   g_list_free(signs);
 
-  dt_control_log(_("AI object created (%d paths)"), nbform);
+  dt_print(DT_DEBUG_AI, "[object mask] created %d paths", nbform);
 }
 
 // --- Mask Event Handlers ---
@@ -427,6 +427,11 @@ static int _object_events_button_pressed(dt_iop_module_t *module,
   }
   else if(gui->creation && which == 3)
   {
+    // Don't exit while background encoding is running
+    _object_data_t *d_rc = _get_data(gui);
+    if(d_rc && g_atomic_int_get(&d_rc->encode_state) == ENCODE_RUNNING)
+      return 1;
+
     // Right-click: finalize mask
     if(gui->guipoints_count > 0)
       _finalize_mask(module, form, gui);
@@ -525,8 +530,15 @@ static void _object_events_post_expose(cairo_t *cr,
 
   // Detect image change: reset encoding if we switched to a different image
   const dt_imgid_t cur_imgid = darktable.develop->image_storage.id;
-  if(d->encode_state == ENCODE_READY && d->encoded_imgid != cur_imgid)
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_READY
+     && d->encoded_imgid != cur_imgid)
   {
+    if(d->encode_thread)
+    {
+      g_thread_join(d->encode_thread);
+      d->encode_thread = NULL;
+    }
+    if(d->busy) { dt_control_busy_leave(); d->busy = FALSE; }
     if(d->seg) dt_seg_reset_encoding(d->seg);
     g_free(d->mask);
     d->mask = NULL;
@@ -537,8 +549,9 @@ static void _object_events_post_expose(cairo_t *cr,
   // Eager encoding: load model and encode image as soon as tool opens
   if(d->encode_state == ENCODE_IDLE)
   {
-    // Frame 1: show log message and return so it renders before we block
-    dt_control_log(_("preparing AI mask..."));
+    // Frame 1: show "working..." and return so it renders before we copy backbuf
+    dt_control_busy_enter();
+    d->busy = TRUE;
     d->encode_state = ENCODE_MSG_SHOWN;
     dt_control_queue_redraw_center();
     return;
@@ -546,19 +559,78 @@ static void _object_events_post_expose(cairo_t *cr,
 
   if(d->encode_state == ENCODE_MSG_SHOWN)
   {
-    // Frame 2: log message is visible from frame 1, now block on encoding
-    _ensure_encoded(gui);
-    if(d->model_loaded && d->seg && dt_seg_is_encoded(d->seg))
+    // Frame 2: log message is visible, copy backbuf and launch background thread
+    dt_dev_pixelpipe_t *preview = darktable.develop->preview_pipe;
+    if(!preview || !preview->backbuf)
     {
-      d->encode_state = ENCODE_READY;
-      d->encoded_imgid = cur_imgid;
-      // Start modifier polling so +/- cursor tracks shift key changes
-      if(!d->modifier_poll_id)
-        d->modifier_poll_id = g_timeout_add(100, _modifier_poll, NULL);
-    }
-    else
+      dt_print(DT_DEBUG_AI, "[object mask] Preview buffer not available");
       d->encode_state = ENCODE_ERROR;
-    dt_control_queue_redraw_center();
+      return;
+    }
+
+    dt_pthread_mutex_lock(&preview->backbuf_mutex);
+    const int pw = preview->backbuf_width;
+    const int ph = preview->backbuf_height;
+    const uint8_t *src = preview->backbuf;
+    uint8_t *rgb = NULL;
+
+    if(src && pw > 0 && ph > 0)
+    {
+      rgb = g_try_malloc((size_t)pw * ph * 3);
+      if(rgb)
+      {
+        for(int i = 0; i < pw * ph; i++)
+        {
+          rgb[i * 3 + 0] = src[i * 4 + 2]; // R (backbuf is BGRA)
+          rgb[i * 3 + 1] = src[i * 4 + 1]; // G
+          rgb[i * 3 + 2] = src[i * 4 + 0]; // B
+        }
+      }
+    }
+    dt_pthread_mutex_unlock(&preview->backbuf_mutex);
+
+    if(!rgb)
+    {
+      d->encode_state = ENCODE_ERROR;
+      return;
+    }
+
+    _encode_thread_data_t *td = g_new(_encode_thread_data_t, 1);
+    td->d = d;
+    td->rgb = rgb;
+    td->width = pw;
+    td->height = ph;
+
+    d->encoded_imgid = cur_imgid;
+    d->encode_state = ENCODE_RUNNING;
+    // Start poll timer BEFORE the thread — it will detect completion
+    // and also tracks modifier keys once encoding is ready
+    if(!d->modifier_poll_id)
+      d->modifier_poll_id = g_timeout_add(100, _modifier_poll, NULL);
+    d->encode_thread = g_thread_new("ai-mask-encode", _encode_thread_func, td);
+    return;
+  }
+
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
+    return;  // background thread in progress, poll timer will trigger redraw
+
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_READY && d->encode_thread)
+  {
+    // Thread finished (detected by poll timer redraw) — join it
+    g_thread_join(d->encode_thread);
+    d->encode_thread = NULL;
+    if(d->busy) { dt_control_busy_leave(); d->busy = FALSE; }
+  }
+
+  if(g_atomic_int_get(&d->encode_state) == ENCODE_ERROR)
+  {
+    if(d->encode_thread)
+    {
+      g_thread_join(d->encode_thread);
+      d->encode_thread = NULL;
+    }
+    if(d->busy) { dt_control_busy_leave(); d->busy = FALSE; }
+    dt_control_log(_("AI mask encoding failed"));
     return;
   }
 
