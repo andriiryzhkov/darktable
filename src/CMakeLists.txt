@@ -120,7 +120,6 @@ FILE(GLOB SOURCE_FILES
   "develop/masks/gradient.c"
   "develop/masks/group.c"
   "develop/masks/masks.c"
-  "develop/masks/object.c"
   "develop/masks/path.c"
   "develop/pixelpipe.c"
   "develop/tiling.c"
@@ -452,6 +451,7 @@ if(BUILD_AI)
 
   FILE(GLOB SOURCE_FILES_AI
     "common/ai_models.c"
+    "develop/masks/object.c"
     "gui/preferences_ai.c"
   )
   set(SOURCES ${SOURCES} ${SOURCE_FILES_AI})

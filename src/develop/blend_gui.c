@@ -2824,6 +2824,7 @@ void dt_iop_gui_init_masks(GtkWidget *blendw, dt_iop_module_t *module)
                                                   FALSE, 0, 0,
                                                   dtgtk_cairo_paint_masks_circle, abox);
 
+#ifdef HAVE_AI
     bd->masks_type[5] = DT_MASKS_OBJECT;
     bd->masks_shapes[5] = dt_iop_togglebutton_new(module, "blend`shapes",
                                                   N_("add object"),
@@ -2831,6 +2832,7 @@ void dt_iop_gui_init_masks(GtkWidget *blendw, dt_iop_module_t *module)
                                                   G_CALLBACK(_blendop_masks_add_shape),
                                                   FALSE, 0, 0,
                                                   dtgtk_cairo_paint_masks_object, abox);
+#endif
 
     bd->masks_box = GTK_BOX(dt_gui_vbox(hbox, abox));
     _add_wrapped_box(blendw, bd->masks_box, "masks_drawn");

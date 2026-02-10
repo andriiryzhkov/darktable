@@ -40,12 +40,17 @@ static void _lib_masks_update_list(dt_lib_module_t *self);
 typedef struct dt_lib_masks_t
 {
   /* vbox with managed history items */
-  GtkWidget *bt_circle, *bt_path, *bt_gradient, *bt_ellipse, *bt_brush, *bt_object;
+  GtkWidget *bt_circle, *bt_path, *bt_gradient, *bt_ellipse, *bt_brush;
+#ifdef HAVE_AI
+  GtkWidget *bt_object;
+#endif
   GtkWidget *treeview;
   dt_gui_collapsible_section_t cs;
   GtkWidget *property[DT_MASKS_PROPERTY_LAST];
   GtkWidget *pressure, *smoothing;
+#ifdef HAVE_AI
   GtkWidget *object_cleanup, *object_smoothing;
+#endif
   float last_value[DT_MASKS_PROPERTY_LAST];
   GtkWidget *none_label;
 
@@ -113,6 +118,7 @@ const struct
       [ DT_MASKS_PROPERTY_COMPRESSION] = { N_("compression"), "%", 0.0001, 1, TRUE },
 };
 
+#ifdef HAVE_AI
 static void _object_cleanup_changed(GtkWidget *widget, gpointer data)
 {
   if(darktable.gui->reset) return;
@@ -126,6 +132,7 @@ static void _object_smoothing_changed(GtkWidget *widget, gpointer data)
   dt_conf_set_float("plugins/darkroom/masks/object/smoothing",
                     dt_bauhaus_slider_get(widget));
 }
+#endif
 
 gboolean _timeout_show_all_feathers(gpointer userdata)
 {
@@ -273,9 +280,11 @@ static void _update_all_properties(dt_lib_masks_t *self)
   gtk_widget_set_visible(self->pressure, drawing_brush && darktable.gui->have_pen_pressure);
   gtk_widget_set_visible(self->smoothing, drawing_brush);
 
+#ifdef HAVE_AI
   gboolean drawing_object = form && form->type & DT_MASKS_OBJECT;
   gtk_widget_set_visible(self->object_cleanup, drawing_object);
   gtk_widget_set_visible(self->object_smoothing, drawing_object);
+#endif
 }
 
 static void _lib_masks_get_values(GtkTreeModel *model,
@@ -300,7 +309,9 @@ static void _lib_masks_inactivate_icons(dt_lib_module_t *self)
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lm->bt_path), FALSE);
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lm->bt_gradient), FALSE);
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lm->bt_brush), FALSE);
+#ifdef HAVE_AI
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(lm->bt_object), FALSE);
+#endif
 }
 
 static void _tree_add_shape(GtkButton *button, gpointer shape)
@@ -1857,6 +1868,7 @@ void gui_init(dt_lib_module_t *self)
   gtk_widget_set_tooltip_text(d->bt_brush, _("add brush"));
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->bt_brush), FALSE);
 
+#ifdef HAVE_AI
   d->bt_object = dtgtk_togglebutton_new(dtgtk_cairo_paint_masks_object, 0, NULL);
   dt_action_define(DT_ACTION(self), N_("shapes"), N_("add object"),
                    d->bt_object, &dt_action_def_toggle);
@@ -1864,7 +1876,7 @@ void gui_init(dt_lib_module_t *self)
                    G_CALLBACK(_bt_add_shape), GINT_TO_POINTER(DT_MASKS_OBJECT));
   gtk_widget_set_tooltip_text(d->bt_object, _("add AI object"));
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->bt_object), FALSE);
-
+#endif
 
   d->treeview = gtk_tree_view_new();
   GtkTreeViewColumn *col = gtk_tree_view_column_new();
@@ -1901,10 +1913,15 @@ void gui_init(dt_lib_module_t *self)
   g_signal_connect(d->treeview, "button-press-event",
                    G_CALLBACK(_tree_button_pressed), self);
 
+  GtkWidget *shape_buttons = dt_gui_hbox
+    (dt_gui_expand(dt_ui_label_new(_("created shapes"))),
+     d->bt_brush, d->bt_circle, d->bt_ellipse, d->bt_path, d->bt_gradient);
+#ifdef HAVE_AI
+  dt_gui_box_add(shape_buttons, d->bt_object);
+#endif
+
   self->widget = dt_gui_vbox
-    (dt_gui_hbox
-      (dt_gui_expand(dt_ui_label_new(_("created shapes"))),
-       d->bt_brush, d->bt_circle, d->bt_ellipse, d->bt_path, d->bt_gradient, d->bt_object),
+    (shape_buttons,
      dt_ui_resize_wrap(d->treeview, 200, "plugins/darkroom/masks/heightview"));
 
   dt_gui_new_collapsible_section
@@ -1944,6 +1961,7 @@ void gui_init(dt_lib_module_t *self)
   dt_bauhaus_widget_set_label(d->smoothing, N_("properties"), N_("smoothing"));
   dt_gui_box_add(d->cs.container, d->pressure, d->smoothing);
 
+#ifdef HAVE_AI
   // AI object mask vectorization controls
   d->object_cleanup = dt_bauhaus_slider_new_action(DT_ACTION(self), 0, 100, 1,
                                                     dt_conf_get_int("plugins/darkroom/masks/object/cleanup"), 0);
@@ -1960,6 +1978,7 @@ void gui_init(dt_lib_module_t *self)
                    G_CALLBACK(_object_smoothing_changed), NULL);
 
   dt_gui_box_add(d->cs.container, d->object_cleanup, d->object_smoothing);
+#endif
 
   // set proxy functions
   darktable.develop->proxy.masks.module = self;

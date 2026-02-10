@@ -43,7 +43,9 @@ typedef enum dt_masks_type_t
   DT_MASKS_ELLIPSE = 1 << 5,
   DT_MASKS_BRUSH = 1 << 6,
   DT_MASKS_NON_CLONE = 1 << 7,
-  DT_MASKS_OBJECT = 1 << 8
+#ifdef HAVE_AI
+  DT_MASKS_OBJECT = 1 << 8,
+#endif
 } dt_masks_type_t;
 
 /**masts states */
@@ -155,12 +157,14 @@ typedef struct dt_masks_point_ellipse_t
   dt_masks_ellipse_flags_t flags;
 } dt_masks_point_ellipse_t;
 
+#ifdef HAVE_AI
 /** structure used to store 1 point for an object (AI segmentation) form */
 typedef struct dt_masks_point_object_t
 {
   float anchor[2]; // click position (normalized image coords)
   int label;       // 1 = foreground, 0 = background
 } dt_masks_point_object_t;
+#endif
 
 /** structure used to store 1 point for a path form */
 typedef struct dt_masks_point_path_t
@@ -451,7 +455,9 @@ extern const dt_masks_functions_t dt_masks_functions_brush;
 extern const dt_masks_functions_t dt_masks_functions_path;
 extern const dt_masks_functions_t dt_masks_functions_gradient;
 extern const dt_masks_functions_t dt_masks_functions_group;
+#ifdef HAVE_AI
 extern const dt_masks_functions_t dt_masks_functions_object;
+#endif
 
 /** init dt_masks_form_gui_t struct with default values */
 void dt_masks_init_form_gui(dt_masks_form_gui_t *gui);
