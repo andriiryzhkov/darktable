@@ -135,7 +135,7 @@ static void _add_point(dt_masks_form_t *form,
   form->points = g_list_append(form->points, bzpt);
 }
 
-static uint32_t formnb = 0;
+static gint formnb = 0;
 
 GList *ras2forms(const float *mask,
                  const int width,
@@ -189,7 +189,8 @@ GList *ras2forms(const float *mask,
     const potrace_dpoint_t start = cv->c[n-1][2];
 
     dt_masks_form_t *form = dt_masks_create(DT_MASKS_PATH);
-    snprintf(form->name, sizeof(form->name), "path raster %d", ++formnb);
+    snprintf(form->name, sizeof(form->name), "path raster %d",
+             g_atomic_int_add(&formnb, 1) + 1);
 
     _add_point(form, image, width, height, start.x, start.y, -1, -1, -1, -1);
 
