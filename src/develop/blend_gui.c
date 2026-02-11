@@ -1626,6 +1626,14 @@ static gboolean _blendop_masks_add_shape(GtkWidget *widget,
 
   if(this < 0) return FALSE;
 
+#ifdef HAVE_AI
+  if(bd->masks_type[this] == DT_MASKS_OBJECT && !dt_masks_object_available())
+  {
+    dt_control_log(_("AI model is not available. Check preferences > AI"));
+    return TRUE;
+  }
+#endif
+
   _blendop_masks_modes_toggle(NULL, self, DEVELOP_MASK_MASK);
 
   // set all shape buttons to inactive

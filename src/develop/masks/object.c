@@ -16,6 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "common/ai_models.h"
 #include "common/debug.h"
 #include "control/conf.h"
 #include "control/control.h"
@@ -29,6 +30,8 @@
 
 #include <math.h>
 #include <string.h>
+
+#define OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // --- Per-session segmentation state (stored in gui->scratchpad) ---
 
@@ -129,7 +132,7 @@ static gpointer _encode_thread_func(gpointer data)
     if(!d->env)
       d->env = dt_ai_env_init(NULL);
 
-    d->seg = dt_seg_load(d->env, "mask-light-hq-sam");
+    d->seg = dt_seg_load(d->env, OBJECT_MODEL_ID);
 
     if(!d->seg)
     {
@@ -1002,6 +1005,16 @@ const dt_masks_functions_t dt_masks_functions_object = {
   .button_pressed = _object_events_button_pressed,
   .button_released = _object_events_button_released,
   .post_expose = _object_events_post_expose};
+
+gboolean dt_masks_object_available(void)
+{
+  if(!darktable.ai_registry || !darktable.ai_registry->ai_enabled)
+    return FALSE;
+  dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, OBJECT_MODEL_ID);
+  const gboolean available = model && model->status == DT_AI_MODEL_DOWNLOADED;
+  dt_ai_model_free(model);
+  return available;
+}
 
 // clang-format off
 // modelines: These editor modelines have been set for all relevant files by tools/update_modelines.py

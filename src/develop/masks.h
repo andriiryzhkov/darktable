@@ -457,6 +457,8 @@ extern const dt_masks_functions_t dt_masks_functions_gradient;
 extern const dt_masks_functions_t dt_masks_functions_group;
 #ifdef HAVE_AI
 extern const dt_masks_functions_t dt_masks_functions_object;
+/** check if AI object mask model is downloaded and AI is enabled */
+gboolean dt_masks_object_available(void);
 #endif
 
 /** init dt_masks_form_gui_t struct with default values */

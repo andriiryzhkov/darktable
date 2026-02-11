@@ -346,6 +346,13 @@ static gboolean _bt_add_shape(GtkWidget *widget, GdkEventButton *event, gpointer
 
   if(event->button == GDK_BUTTON_PRIMARY)
   {
+#ifdef HAVE_AI
+    if(GPOINTER_TO_INT(shape) == DT_MASKS_OBJECT && !dt_masks_object_available())
+    {
+      dt_control_log(_("AI model is not available. Check preferences > AI"));
+      return TRUE;
+    }
+#endif
     _tree_add_shape(NULL, shape);
 
     if(dt_modifier_is(event->state, GDK_CONTROL_MASK))
