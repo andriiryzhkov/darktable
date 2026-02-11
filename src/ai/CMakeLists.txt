@@ -47,7 +47,6 @@ if(APPLE)
   if(_ORT_DYLIB)
     install(FILES ${_ORT_DYLIB}
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/darktable
-      RENAME libonnxruntime.dylib
     )
   endif()
 elseif(WIN32)
