@@ -59,6 +59,23 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
   _ort_find_at("${_ORT_BUILD_ROOT}")
 endif()
 
+# Try system-installed package (e.g. libonnxruntime-dev on Linux)
+if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
+  unset(_ORT_HEADER CACHE)
+  unset(_ORT_LIBRARY CACHE)
+  find_path(_ORT_HEADER
+    NAMES onnxruntime_c_api.h
+    PATH_SUFFIXES onnxruntime
+  )
+  find_library(_ORT_LIBRARY NAMES onnxruntime)
+  if(_ORT_HEADER AND _ORT_LIBRARY)
+    get_filename_component(_ORT_INC_DIR "${_ORT_HEADER}" DIRECTORY)
+    get_filename_component(_ORT_ROOT "${_ORT_INC_DIR}" DIRECTORY)
+    set(_ORT_SYSTEM_PACKAGE TRUE)
+    message(STATUS "Found system ONNX Runtime: ${_ORT_LIBRARY}")
+  endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # Auto-download if not found
 # ---------------------------------------------------------------------------
@@ -246,6 +263,15 @@ endif()
 # Create onnxruntime::onnxruntime imported target
 # ---------------------------------------------------------------------------
 if(_ORT_HEADER AND _ORT_LIBRARY AND NOT TARGET onnxruntime::onnxruntime)
+
+  # For system packages, _ORT_HEADER is the directory containing the header
+  # (e.g. /usr/include/onnxruntime). For bundled packages, it's _ORT_ROOT/include.
+  if(_ORT_SYSTEM_PACKAGE)
+    set(_ORT_INCLUDE_DIR "${_ORT_HEADER}")
+  else()
+    set(_ORT_INCLUDE_DIR "${_ORT_ROOT}/include")
+  endif()
+
   # Try the shipped CMake config files first (they exist under lib/cmake/)
   set(_ORT_CMAKE_DIR "${_ORT_ROOT}/lib/cmake/onnxruntime")
   set(_ORT_CMAKE_TARGETS "${_ORT_CMAKE_DIR}/onnxruntimeTargets.cmake")
@@ -286,7 +312,7 @@ if(_ORT_HEADER AND _ORT_LIBRARY AND NOT TARGET onnxruntime::onnxruntime)
     message(STATUS "Creating onnxruntime::onnxruntime imported target manually")
     add_library(onnxruntime::onnxruntime SHARED IMPORTED)
     set_target_properties(onnxruntime::onnxruntime PROPERTIES
-      INTERFACE_INCLUDE_DIRECTORIES "${_ORT_ROOT}/include"
+      INTERFACE_INCLUDE_DIRECTORIES "${_ORT_INCLUDE_DIR}"
     )
     if(WIN32)
       # On Windows find_library finds the .lib import library;
@@ -328,8 +354,14 @@ find_package_handle_standard_args(ONNXRuntime
 )
 
 if(ONNXRuntime_FOUND)
-  set(ONNXRuntime_INCLUDE_DIRS "${_ORT_ROOT}/include")
+  set(ONNXRuntime_INCLUDE_DIRS "${_ORT_INCLUDE_DIR}")
   set(ONNXRuntime_LIBRARIES "${_ORT_LIBRARY}")
-  set(ONNXRuntime_LIB_DIR "${_ORT_ROOT}/lib" CACHE PATH "ONNX Runtime library directory")
-  mark_as_advanced(ONNXRuntime_LIB_DIR)
+  if(_ORT_SYSTEM_PACKAGE)
+    get_filename_component(ONNXRuntime_LIB_DIR "${_ORT_LIBRARY}" DIRECTORY)
+  else()
+    set(ONNXRuntime_LIB_DIR "${_ORT_ROOT}/lib")
+  endif()
+  set(ONNXRuntime_LIB_DIR "${ONNXRuntime_LIB_DIR}" CACHE PATH "ONNX Runtime library directory")
+  set(ONNXRuntime_SYSTEM_PACKAGE ${_ORT_SYSTEM_PACKAGE} CACHE BOOL "Using system ONNX Runtime package")
+  mark_as_advanced(ONNXRuntime_LIB_DIR ONNXRuntime_SYSTEM_PACKAGE)
 endif()

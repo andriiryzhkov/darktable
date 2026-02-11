@@ -42,7 +42,10 @@ target_link_libraries(darktable_ai PUBLIC
 )
 
 # Install the bundled ONNX Runtime shared library alongside darktable_ai
-if(APPLE)
+# (skip when using system package — it's already in the system library path)
+if(ONNXRuntime_SYSTEM_PACKAGE)
+  # Nothing to install
+elseif(APPLE)
   file(GLOB _ORT_DYLIB "${ONNXRuntime_LIB_DIR}/libonnxruntime.*.dylib")
   if(_ORT_DYLIB)
     install(FILES ${_ORT_DYLIB}
