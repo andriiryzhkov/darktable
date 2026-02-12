@@ -605,6 +605,63 @@ gboolean dt_ai_models_load_registry(dt_ai_registry_t *registry)
 
 // Validate that a model_id is a plain directory name with no path separators
 // or ".." components that could escape the models directory.
+static gboolean _valid_model_id(const char *model_id);
+static dt_ai_model_t *_find_model_unlocked(dt_ai_registry_t *registry,
+                                            const char *model_id);
+
+// Parse a local model's config.json into a dt_ai_model_t.
+// Uses directory name as fallback for id/name. No github_asset or checksum.
+static dt_ai_model_t *_parse_local_model_config(const char *config_path,
+                                                 const char *dir_name)
+{
+  JsonParser *parser = json_parser_new();
+  GError *error = NULL;
+
+  if(!json_parser_load_from_file(parser, config_path, &error))
+  {
+    dt_print(DT_DEBUG_AI, "[ai_models] Failed to parse %s: %s",
+             config_path, error ? error->message : "unknown");
+    if(error) g_error_free(error);
+    g_object_unref(parser);
+    return NULL;
+  }
+
+  JsonNode *root = json_parser_get_root(parser);
+  if(!JSON_NODE_HOLDS_OBJECT(root))
+  {
+    g_object_unref(parser);
+    return NULL;
+  }
+
+  JsonObject *obj = json_node_get_object(root);
+
+  const char *id = json_object_has_member(obj, "id")
+    ? json_object_get_string_member(obj, "id") : dir_name;
+  const char *name = json_object_has_member(obj, "name")
+    ? json_object_get_string_member(obj, "name") : dir_name;
+
+  if(!id || !id[0])
+  {
+    g_object_unref(parser);
+    return NULL;
+  }
+
+  dt_ai_model_t *model = _model_new();
+  model->id = g_strdup(id);
+  model->name = g_strdup(name);
+
+  if(json_object_has_member(obj, "description"))
+    model->description = g_strdup(json_object_get_string_member(obj, "description"));
+  if(json_object_has_member(obj, "task"))
+    model->task = g_strdup(json_object_get_string_member(obj, "task"));
+
+  // No github_asset, no checksum — local-only model
+  model->enabled = TRUE;
+
+  g_object_unref(parser);
+  return model;
+}
+
 static gboolean _valid_model_id(const char *model_id)
 {
   if(!model_id || !model_id[0])
@@ -623,9 +680,25 @@ void dt_ai_models_refresh_status(dt_ai_registry_t *registry)
 
   g_mutex_lock(&registry->lock);
 
-  for(GList *l = registry->models; l; l = g_list_next(l))
+  // --- Remove previously-discovered local models (no github_asset) ---
+  // These will be re-discovered from disk below if still present.
+  GList *l = registry->models;
+  while(l)
   {
+    GList *next = g_list_next(l);
     dt_ai_model_t *model = (dt_ai_model_t *)l->data;
+    if(!model->github_asset)
+    {
+      _model_free(model);
+      registry->models = g_list_delete_link(registry->models, l);
+    }
+    l = next;
+  }
+
+  // --- Pass 1: Update status for registry models ---
+  for(GList *l2 = registry->models; l2; l2 = g_list_next(l2))
+  {
+    dt_ai_model_t *model = (dt_ai_model_t *)l2->data;
 
     // Skip models with invalid IDs (path traversal protection)
     if(!_valid_model_id(model->id))
@@ -635,9 +708,8 @@ void dt_ai_models_refresh_status(dt_ai_registry_t *registry)
     char *model_dir = g_build_filename(registry->models_dir, model->id, NULL);
     char *config_path = g_build_filename(model_dir, "config.json", NULL);
 
-    if(
-      g_file_test(model_dir, G_FILE_TEST_IS_DIR)
-      && g_file_test(config_path, G_FILE_TEST_EXISTS))
+    if(g_file_test(model_dir, G_FILE_TEST_IS_DIR)
+       && g_file_test(config_path, G_FILE_TEST_EXISTS))
     {
       model->status = DT_AI_MODEL_DOWNLOADED;
     }
@@ -648,6 +720,46 @@ void dt_ai_models_refresh_status(dt_ai_registry_t *registry)
 
     g_free(config_path);
     g_free(model_dir);
+  }
+
+  // --- Pass 2: Discover locally-installed models not in registry ---
+  if(registry->models_dir)
+  {
+    GDir *dir = g_dir_open(registry->models_dir, 0, NULL);
+    if(dir)
+    {
+      const char *entry_name;
+      while((entry_name = g_dir_read_name(dir)))
+      {
+        if(!_valid_model_id(entry_name))
+          continue;
+
+        // Skip if already in registry (e.g. downloaded via ai_models.json)
+        if(_find_model_unlocked(registry, entry_name))
+          continue;
+
+        char *model_dir = g_build_filename(registry->models_dir, entry_name, NULL);
+        char *config_path = g_build_filename(model_dir, "config.json", NULL);
+
+        if(g_file_test(model_dir, G_FILE_TEST_IS_DIR)
+           && g_file_test(config_path, G_FILE_TEST_EXISTS))
+        {
+          dt_ai_model_t *model = _parse_local_model_config(config_path, entry_name);
+          if(model)
+          {
+            model->status = DT_AI_MODEL_DOWNLOADED;
+            registry->models = g_list_append(registry->models, model);
+            dt_print(DT_DEBUG_AI,
+                     "[ai_models] Discovered local model: %s (%s)",
+                     model->name, model->id);
+          }
+        }
+
+        g_free(config_path);
+        g_free(model_dir);
+      }
+      g_dir_close(dir);
+    }
   }
 
   g_mutex_unlock(&registry->lock);
