@@ -21,6 +21,11 @@
 #   ONNXRUNTIME_VERSION   - version to download (default 1.23.2)
 #   ONNXRUNTIME_OFFLINE   - if TRUE, never attempt a download (default OFF)
 
+# Skip if already found (avoid re-entry issues with cached variables)
+if(ONNXRuntime_FOUND)
+  return()
+endif()
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
