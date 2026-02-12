@@ -17,7 +17,9 @@
 */
 
 #include "common/ai_models.h"
+#include "common/colorspaces.h"
 #include "common/debug.h"
+#include "common/mipmap_cache.h"
 #include "control/conf.h"
 #include "control/control.h"
 #include "gui/gtk.h"
@@ -26,6 +28,8 @@
 #include "develop/imageop.h"
 #include "develop/masks.h"
 #include "develop/openmp_maths.h"
+#include "develop/pixelpipe_hb.h"
+#include "imageio/imageio_common.h"
 #include "common/ras2vect.h"
 
 #include <math.h>
@@ -33,6 +37,10 @@
 
 #define CONF_OBJECT_MODEL_KEY "plugins/darkroom/masks/object/model"
 #define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
+
+// Target resolution for SAM encoding (longest side in pixels).
+// Higher than preview pipe for better segmentation quality.
+#define SAM_ENCODE_TARGET 2048
 
 // --- Per-session segmentation state (stored in gui->scratchpad) ---
 
@@ -54,6 +62,7 @@ typedef struct _object_data_t
   gboolean model_loaded;    // whether the model was loaded
   int encode_state;         // uses _encode_state_t values (atomic access)
   dt_imgid_t encoded_imgid; // image ID that was encoded
+  int encode_w, encode_h;   // encoding resolution (for coordinate mapping)
   guint modifier_poll_id;   // timer to detect shift key changes
   GThread *encode_thread;   // background encoding thread
   gboolean busy;            // TRUE if dt_control_busy_enter() was called
@@ -115,17 +124,18 @@ static void _free_data(dt_masks_form_gui_t *gui)
 typedef struct _encode_thread_data_t
 {
   _object_data_t *d;
-  uint8_t *rgb; // RGB copy of backbuf (owned, freed by thread)
-  int width, height;
+  dt_imgid_t imgid; // image to encode (thread renders via export pipe)
 } _encode_thread_data_t;
 
-// Background thread: loads model and encodes the preview image.
+// Background thread: loads model, renders image via export pipe, and encodes.
 // Does ZERO GLib/GTK calls — only computation + atomic state set.
 // The poll timer on the main thread detects completion.
 static gpointer _encode_thread_func(gpointer data)
 {
   _encode_thread_data_t *td = data;
   _object_data_t *d = td->d;
+  const dt_imgid_t imgid = td->imgid;
+  g_free(td);
 
   // Load model if needed
   if(!d->model_loaded)
@@ -139,16 +149,95 @@ static gpointer _encode_thread_func(gpointer data)
 
     if(!d->seg)
     {
-      g_free(td->rgb);
-      g_free(td);
       g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
       return NULL;
     }
     d->model_loaded = TRUE;
   }
 
+  // Render image at high resolution via temporary export pipeline
+  dt_develop_t dev;
+  dt_dev_init(&dev, FALSE);
+  dt_dev_load_image(&dev, imgid);
+
+  dt_mipmap_buffer_t buf;
+  dt_mipmap_cache_get(&buf, imgid, DT_MIPMAP_FULL, DT_MIPMAP_BLOCKING, 'r');
+
+  if(!buf.buf || !buf.width || !buf.height)
+  {
+    dt_print(DT_DEBUG_AI, "[object mask] Failed to get image buffer for encoding");
+    dt_dev_cleanup(&dev);
+    g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
+    return NULL;
+  }
+
+  const int wd = dev.image_storage.width;
+  const int ht = dev.image_storage.height;
+
+  dt_dev_pixelpipe_t pipe;
+  if(!dt_dev_pixelpipe_init_export(&pipe, wd, ht, IMAGEIO_RGB | IMAGEIO_INT8, FALSE))
+  {
+    dt_print(DT_DEBUG_AI, "[object mask] Failed to init export pipe for encoding");
+    dt_mipmap_cache_release(&buf);
+    dt_dev_cleanup(&dev);
+    g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
+    return NULL;
+  }
+
+  dt_dev_pixelpipe_set_icc(&pipe, DT_COLORSPACE_SRGB, NULL, DT_INTENT_PERCEPTUAL);
+  dt_dev_pixelpipe_set_input(&pipe, &dev, (float *)buf.buf,
+                             buf.width, buf.height, buf.iscale);
+  dt_dev_pixelpipe_create_nodes(&pipe, &dev);
+  dt_dev_pixelpipe_synch_all(&pipe, &dev);
+
+  dt_dev_pixelpipe_get_dimensions(&pipe, &dev, pipe.iwidth, pipe.iheight,
+                                  &pipe.processed_width, &pipe.processed_height);
+
+  const double scale = fmin((double)SAM_ENCODE_TARGET / (double)pipe.processed_width,
+                            (double)SAM_ENCODE_TARGET / (double)pipe.processed_height);
+  const double final_scale = fmin(scale, 1.0); // don't upscale
+  const int out_w = (int)(final_scale * pipe.processed_width);
+  const int out_h = (int)(final_scale * pipe.processed_height);
+
+  dt_print(DT_DEBUG_AI, "[object mask] Rendering %dx%d (scale=%.3f) for encoding...",
+           out_w, out_h, final_scale);
+
+  dt_dev_pixelpipe_process_no_gamma(&pipe, &dev, 0, 0, out_w, out_h, final_scale);
+
+  // backbuf is float RGBA after process_no_gamma — convert to uint8 RGB for SAM
+  uint8_t *rgb = NULL;
+  if(pipe.backbuf)
+  {
+    const float *outbuf = (const float *)pipe.backbuf;
+    rgb = g_try_malloc((size_t)out_w * out_h * 3);
+    if(rgb)
+    {
+      for(size_t i = 0; i < (size_t)out_w * out_h; i++)
+      {
+        rgb[i * 3 + 0] = (uint8_t)CLAMP(outbuf[i * 4 + 0] * 255.0f + 0.5f, 0, 255);
+        rgb[i * 3 + 1] = (uint8_t)CLAMP(outbuf[i * 4 + 1] * 255.0f + 0.5f, 0, 255);
+        rgb[i * 3 + 2] = (uint8_t)CLAMP(outbuf[i * 4 + 2] * 255.0f + 0.5f, 0, 255);
+      }
+    }
+  }
+
+  dt_dev_pixelpipe_cleanup(&pipe);
+  dt_mipmap_cache_release(&buf);
+  dt_dev_cleanup(&dev);
+
+  if(!rgb)
+  {
+    dt_print(DT_DEBUG_AI, "[object mask] Failed to render image for encoding");
+    g_atomic_int_set(&d->encode_state, ENCODE_ERROR);
+    return NULL;
+  }
+
+  // Store encoding dimensions for coordinate mapping
+  d->encode_w = out_w;
+  d->encode_h = out_h;
+
   // Encode the image
-  gboolean ok = dt_seg_encode_image(d->seg, td->rgb, td->width, td->height);
+  gboolean ok = dt_seg_encode_image(d->seg, rgb, out_w, out_h);
 
   // If accelerated encoding failed, fall back to CPU
   if(!ok)
@@ -160,13 +249,12 @@ static gpointer _encode_thread_func(gpointer data)
     g_free(model_id);
 
     if(d->seg)
-      ok = dt_seg_encode_image(d->seg, td->rgb, td->width, td->height);
+      ok = dt_seg_encode_image(d->seg, rgb, out_w, out_h);
     else
       d->model_loaded = FALSE;
   }
 
-  g_free(td->rgb);
-  g_free(td);
+  g_free(rgb);
 
   g_atomic_int_set(&d->encode_state, ok ? ENCODE_READY : ENCODE_ERROR);
   return NULL;
@@ -184,11 +272,17 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
   const float *gp = dt_masks_dynbuf_buffer(gui->guipoints);
   const float *gpp = dt_masks_dynbuf_buffer(gui->guipoints_payload);
 
+  // Points are stored in preview pipe pixel space — scale to encoding space
+  float wd, ht, iwidth, iheight;
+  dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
+  const float sx = (wd > 0) ? (float)d->encode_w / wd : 1.0f;
+  const float sy = (ht > 0) ? (float)d->encode_h / ht : 1.0f;
+
   dt_seg_point_t *points = g_new(dt_seg_point_t, gui->guipoints_count);
   for(int i = 0; i < gui->guipoints_count; i++)
   {
-    points[i].x = gp[i * 2 + 0];
-    points[i].y = gp[i * 2 + 1];
+    points[i].x = gp[i * 2 + 0] * sx;
+    points[i].y = gp[i * 2 + 1] * sy;
     points[i].label = (int)gpp[i];
   }
 
@@ -240,6 +334,11 @@ _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui
   float wd, ht, iwidth, iheight;
   dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
 
+  // Vectorized coordinates are in mask space (encoding resolution).
+  // dt_dev_distort_backtransform expects preview pipe pixel space.
+  const float msx = (d->mask_w > 0) ? wd / (float)d->mask_w : 1.0f;
+  const float msy = (d->mask_h > 0) ? ht / (float)d->mask_h : 1.0f;
+
   for(GList *l = forms; l; l = g_list_next(l))
   {
     dt_masks_form_t *f = l->data;
@@ -260,6 +359,13 @@ _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui
       pts[i++] = pt->ctrl1[1];
       pts[i++] = pt->ctrl2[0];
       pts[i++] = pt->ctrl2[1];
+    }
+
+    // Scale from mask space (encoding resolution) to preview pipe space
+    for(int j = 0; j < npts * 6; j += 2)
+    {
+      pts[j + 0] *= msx;
+      pts[j + 1] *= msy;
     }
 
     dt_dev_distort_backtransform(darktable.develop, pts, npts * 3);
@@ -618,6 +724,7 @@ static void _object_events_post_expose(
     g_free(d->mask);
     d->mask = NULL;
     d->mask_w = d->mask_h = 0;
+    d->encode_w = d->encode_h = 0;
     d->encode_state = ENCODE_IDLE;
   }
 
@@ -634,47 +741,12 @@ static void _object_events_post_expose(
 
   if(d->encode_state == ENCODE_MSG_SHOWN)
   {
-    // Frame 2: log message is visible, copy backbuf and launch background thread
-    dt_dev_pixelpipe_t *preview = darktable.develop->preview_pipe;
-    if(!preview || !preview->backbuf)
-    {
-      dt_print(DT_DEBUG_AI, "[object mask] Preview buffer not available");
-      d->encode_state = ENCODE_ERROR;
-      return;
-    }
-
-    dt_pthread_mutex_lock(&preview->backbuf_mutex);
-    const int pw = preview->backbuf_width;
-    const int ph = preview->backbuf_height;
-    const uint8_t *src = preview->backbuf;
-    uint8_t *rgb = NULL;
-
-    if(src && pw > 0 && ph > 0)
-    {
-      rgb = g_try_malloc((size_t)pw * ph * 3);
-      if(rgb)
-      {
-        for(int i = 0; i < pw * ph; i++)
-        {
-          rgb[i * 3 + 0] = src[i * 4 + 2]; // R (backbuf is BGRA)
-          rgb[i * 3 + 1] = src[i * 4 + 1]; // G
-          rgb[i * 3 + 2] = src[i * 4 + 0]; // B
-        }
-      }
-    }
-    dt_pthread_mutex_unlock(&preview->backbuf_mutex);
-
-    if(!rgb)
-    {
-      d->encode_state = ENCODE_ERROR;
-      return;
-    }
-
+    // Frame 2: launch background thread to render and encode the image.
+    // The thread creates a temporary export pipe at high resolution
+    // instead of using the low-res preview backbuf.
     _encode_thread_data_t *td = g_new(_encode_thread_data_t, 1);
     td->d = d;
-    td->rgb = rgb;
-    td->width = pw;
-    td->height = ph;
+    td->imgid = cur_imgid;
 
     d->encoded_imgid = cur_imgid;
     d->encode_state = ENCODE_RUNNING;

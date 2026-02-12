@@ -43,6 +43,9 @@ struct dt_seg_context_t
   int64_t interm_shape[MAX_TENSOR_DIMS];  // interm_embeddings shape from model
   int interm_ndim;
 
+  // Decoder output: number of masks per decode (1 = single-mask, 3-4 = multi-mask)
+  int num_masks;
+
   // Cached encoder outputs
   float *image_embeddings;
   float *interm_embeddings;
@@ -158,8 +161,15 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id,
     return NULL;
   }
 
-  dt_print(DT_DEBUG_AI, "[segmentation] Model loaded: %s (embed_ndim=%d, interm_ndim=%d)",
-           model_id, ctx->embed_ndim, ctx->interm_ndim);
+  // Query decoder masks output shape to detect multi-mask support.
+  // Output 0 (masks) shape: [1, N, H, W] where N = num_masks (1 or 3-4).
+  int64_t dec_out_shape[MAX_TENSOR_DIMS];
+  const int dec_out_ndim = dt_ai_get_output_shape(decoder, 0, dec_out_shape, MAX_TENSOR_DIMS);
+  ctx->num_masks = (dec_out_ndim >= 4 && dec_out_shape[1] > 1) ? (int)dec_out_shape[1] : 1;
+
+  dt_print(DT_DEBUG_AI,
+           "[segmentation] Model loaded: %s (embed_ndim=%d, interm_ndim=%d, num_masks=%d)",
+           model_id, ctx->embed_ndim, ctx->interm_ndim, ctx->num_masks);
   return ctx;
 }
 
@@ -258,10 +268,12 @@ float *dt_seg_compute_mask(
   if(!ctx || !ctx->image_encoded || !points || n_points <= 0)
     return NULL;
 
-  // Build decoder inputs
-  // point_coords: [1, N, 2] — coordinates scaled to 1024-space
-  float *point_coords = g_new(float, n_points * 2);
-  float *point_labels = g_new(float, n_points);
+  // Build decoder inputs.
+  // SAM ONNX requires a padding point (0,0) with label -1 appended
+  // to every prompt (see SAM official onnx_model_example.ipynb).
+  const int total_points = n_points + 1;
+  float *point_coords = g_new(float, total_points * 2);
+  float *point_labels = g_new(float, total_points);
 
   for(int i = 0; i < n_points; i++)
   {
@@ -269,13 +281,17 @@ float *dt_seg_compute_mask(
     point_coords[i * 2 + 1] = points[i].y * ctx->scale;
     point_labels[i] = (float)points[i].label;
   }
+  // ONNX padding point
+  point_coords[n_points * 2 + 0] = 0.0f;
+  point_coords[n_points * 2 + 1] = 0.0f;
+  point_labels[n_points] = -1.0f;
 
   const float orig_im_size[2] = {(float)ctx->encoded_height, (float)ctx->encoded_width};
   const float has_mask = ctx->has_prev_mask ? 1.0f : 0.0f;
 
   // Decoder inputs (7 total, matching the ONNX model)
-  int64_t coords_shape[3] = {1, n_points, 2};
-  int64_t labels_shape[2] = {1, n_points};
+  int64_t coords_shape[3] = {1, total_points, 2};
+  int64_t labels_shape[2] = {1, total_points};
   int64_t mask_in_shape[4] = {1, 1, 256, 256};
   int64_t has_mask_shape[1] = {1};
   int64_t orig_size_shape[1] = {2};
@@ -294,12 +310,15 @@ float *dt_seg_compute_mask(
      .shape = orig_size_shape,
      .ndim = 1}};
 
-  // Decoder outputs (3 total)
-  // masks: [1, 1, H, W] where H,W = orig_im_size
+  // Decoder outputs: masks [1, N, H, W], iou [1, N], low_res [1, N, 256, 256]
+  // N = ctx->num_masks (1 for single-mask models, 3-4 for multi-mask)
+  const int nm = ctx->num_masks;
   const int mask_h = ctx->encoded_height;
   const int mask_w = ctx->encoded_width;
-  const size_t mask_size = (size_t)mask_h * mask_w;
-  float *masks = g_try_malloc(mask_size * sizeof(float));
+  const size_t per_mask = (size_t)mask_h * mask_w;
+  const size_t total_mask_size = (size_t)nm * per_mask;
+
+  float *masks = g_try_malloc(total_mask_size * sizeof(float));
   if(!masks)
   {
     g_free(point_coords);
@@ -307,9 +326,9 @@ float *dt_seg_compute_mask(
     return NULL;
   }
 
-  float iou_pred[1];
-  const size_t low_res_size = 1 * 1 * 256 * 256;
-  float *low_res = g_try_malloc(low_res_size * sizeof(float));
+  float iou_pred[8]; // max 8 masks
+  const size_t low_res_per = 256 * 256;
+  float *low_res = g_try_malloc((size_t)nm * low_res_per * sizeof(float));
   if(!low_res)
   {
     g_free(point_coords);
@@ -318,9 +337,9 @@ float *dt_seg_compute_mask(
     return NULL;
   }
 
-  int64_t masks_shape[4] = {1, 1, mask_h, mask_w};
-  int64_t iou_shape[2] = {1, 1};
-  int64_t low_res_shape[4] = {1, 1, 256, 256};
+  int64_t masks_shape[4] = {1, nm, mask_h, mask_w};
+  int64_t iou_shape[2] = {1, nm};
+  int64_t low_res_shape[4] = {1, nm, 256, 256};
 
   dt_ai_tensor_t outputs[3] = {
     {.data = masks, .type = DT_AI_FLOAT, .shape = masks_shape, .ndim = 4},
@@ -340,23 +359,43 @@ float *dt_seg_compute_mask(
     return NULL;
   }
 
-  dt_print(DT_DEBUG_AI, "[segmentation] Mask computed, IoU=%.3f", iou_pred[0]);
+  // Select the mask with the highest predicted IoU
+  int best = 0;
+  for(int m = 1; m < nm; m++)
+  {
+    if(iou_pred[m] > iou_pred[best])
+      best = m;
+  }
 
-  // Cache low-res mask for iterative refinement
-  memcpy(ctx->low_res_masks, low_res, sizeof(ctx->low_res_masks));
+  dt_print(DT_DEBUG_AI, "[segmentation] Mask computed, best=%d/%d IoU=%.3f",
+           best, nm, iou_pred[best]);
+
+  // Cache the best low-res mask for iterative refinement
+  memcpy(ctx->low_res_masks, low_res + (size_t)best * low_res_per,
+         sizeof(ctx->low_res_masks));
   g_free(low_res);
   ctx->has_prev_mask = TRUE;
 
-  // Apply sigmoid to convert logits to [0,1] probabilities
-  for(size_t i = 0; i < mask_size; i++)
-    masks[i] = 1.0f / (1.0f + expf(-masks[i]));
+  // Extract the best mask and apply sigmoid
+  float *result = g_try_malloc(per_mask * sizeof(float));
+  if(!result)
+  {
+    g_free(masks);
+    return NULL;
+  }
+
+  const float *best_mask = masks + (size_t)best * per_mask;
+  for(size_t i = 0; i < per_mask; i++)
+    result[i] = 1.0f / (1.0f + expf(-best_mask[i]));
+
+  g_free(masks);
 
   if(out_width)
     *out_width = mask_w;
   if(out_height)
     *out_height = mask_h;
 
-  return masks;
+  return result;
 }
 
 gboolean dt_seg_is_encoded(dt_seg_context_t *ctx)
