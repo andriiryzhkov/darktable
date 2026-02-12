@@ -81,11 +81,8 @@ endif()
 # ---------------------------------------------------------------------------
 if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
   if(ONNXRUNTIME_OFFLINE)
-    message(FATAL_ERROR
-      "ONNX Runtime not found and ONNXRUNTIME_OFFLINE is ON.\n"
-      "Please install ONNX Runtime manually to src/external/onnxruntime/ or set ONNXRUNTIME_OFFLINE=OFF.")
-  endif()
-
+    message(STATUS "ONNX Runtime not found and ONNXRUNTIME_OFFLINE is ON.")
+  else()
   # -- Determine package name for current platform --
   set(_ORT_VER "${ONNXRUNTIME_VERSION}")
 
@@ -257,6 +254,7 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
     PATHS "${_ORT_ROOT}/lib"
     NO_DEFAULT_PATH
   )
+  endif() # NOT ONNXRUNTIME_OFFLINE
 endif()
 
 # ---------------------------------------------------------------------------
