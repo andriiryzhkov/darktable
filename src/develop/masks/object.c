@@ -91,6 +91,9 @@ typedef struct _auto_data_t
   int cancel;          // cancellation flag (atomic)
 } _auto_data_t;
 
+// Minimum drag distance (preview pipe pixels) to distinguish click from box drag
+#define BOX_DRAG_THRESHOLD 5.0f
+
 typedef struct _object_data_t
 {
   dt_ai_environment_t *env; // AI environment for model registry
@@ -105,6 +108,11 @@ typedef struct _object_data_t
   GThread *encode_thread;   // background encoding thread
   gboolean busy;            // TRUE if dt_control_busy_enter() was called
   _auto_data_t *autodata;   // auto-segmentation data (NULL in prompt mode)
+  gboolean dragging;        // TRUE between press and release during potential box drag
+  float drag_start_x;       // press position (preview pipe pixel space)
+  float drag_start_y;
+  float drag_end_x;         // current drag position (updated in mouse_moved)
+  float drag_end_y;
 } _object_data_t;
 
 static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
@@ -998,30 +1006,15 @@ static int _object_events_button_pressed(
     if(!d || d->encode_state != ENCODE_READY)
       return 1;
 
-    // Initialize point buffers
-    if(!gui->guipoints)
-      gui->guipoints = dt_masks_dynbuf_init(200000, "object guipoints");
-    if(!gui->guipoints)
-      return 1;
-    if(!gui->guipoints_payload)
-      gui->guipoints_payload = dt_masks_dynbuf_init(100000, "object guipoints_payload");
-    if(!gui->guipoints_payload)
-      return 1;
-
-    // Coordinates in preview pipe pixel space
+    // Start drag tracking — actual point/box is added on button release
     float wd, ht, iwidth, iheight;
     dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
 
-    dt_masks_dynbuf_add_2(gui->guipoints, pzx * wd, pzy * ht);
-    dt_masks_dynbuf_add(
-      gui->guipoints_payload,
-      dt_modifier_is(state, GDK_SHIFT_MASK) ? 0.0f : 1.0f);
-    gui->guipoints_count++;
-
-    // Run decoder to update live preview
-    _run_decoder(gui);
-
-    dt_control_queue_redraw_center();
+    d->dragging = TRUE;
+    d->drag_start_x = pzx * wd;
+    d->drag_start_y = pzy * ht;
+    d->drag_end_x = d->drag_start_x;
+    d->drag_end_y = d->drag_start_y;
     return 1;
   }
   else if(gui->creation && which == 3)
@@ -1073,13 +1066,61 @@ static int _object_events_button_released(
   (void)module;
   (void)pzx;
   (void)pzy;
-  (void)which;
-  (void)state;
   (void)form;
   (void)parentid;
-  (void)gui;
   (void)index;
-  return 0;
+
+  if(!gui || which != 1)
+    return 0;
+
+  _object_data_t *d = _get_data(gui);
+  if(!d || !d->dragging)
+    return 0;
+
+  d->dragging = FALSE;
+
+  // Initialize point buffers if needed
+  if(!gui->guipoints)
+    gui->guipoints = dt_masks_dynbuf_init(200000, "object guipoints");
+  if(!gui->guipoints)
+    return 1;
+  if(!gui->guipoints_payload)
+    gui->guipoints_payload = dt_masks_dynbuf_init(100000, "object guipoints_payload");
+  if(!gui->guipoints_payload)
+    return 1;
+
+  const float dx = d->drag_end_x - d->drag_start_x;
+  const float dy = d->drag_end_y - d->drag_start_y;
+  const float dist = sqrtf(dx * dx + dy * dy);
+
+  if(dist < BOX_DRAG_THRESHOLD)
+  {
+    // Short click: single point (foreground or background)
+    const float label = dt_modifier_is(state, GDK_SHIFT_MASK) ? 0.0f : 1.0f;
+    dt_masks_dynbuf_add_2(gui->guipoints, d->drag_start_x, d->drag_start_y);
+    dt_masks_dynbuf_add(gui->guipoints_payload, label);
+    gui->guipoints_count++;
+  }
+  else
+  {
+    // Box drag: add top-left (label=2) and bottom-right (label=3) corners
+    const float x0 = MIN(d->drag_start_x, d->drag_end_x);
+    const float y0 = MIN(d->drag_start_y, d->drag_end_y);
+    const float x1 = MAX(d->drag_start_x, d->drag_end_x);
+    const float y1 = MAX(d->drag_start_y, d->drag_end_y);
+
+    dt_masks_dynbuf_add_2(gui->guipoints, x0, y0);
+    dt_masks_dynbuf_add(gui->guipoints_payload, 2.0f);
+    gui->guipoints_count++;
+
+    dt_masks_dynbuf_add_2(gui->guipoints, x1, y1);
+    dt_masks_dynbuf_add(gui->guipoints_payload, 3.0f);
+    gui->guipoints_count++;
+  }
+
+  _run_decoder(gui);
+  dt_control_queue_redraw_center();
+  return 1;
 }
 
 static int _object_events_mouse_moved(
@@ -1115,8 +1156,18 @@ static int _object_events_mouse_moved(
 
   if(gui->creation)
   {
-    // Auto mode: update hover_mask from label_map
     _object_data_t *d = _get_data(gui);
+
+    // Track drag position for box prompts (prompt mode)
+    if(d && d->dragging)
+    {
+      float wd, ht, iwidth, iheight;
+      dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
+      d->drag_end_x = pzx * wd;
+      d->drag_end_y = pzy * ht;
+    }
+
+    // Auto mode: update hover_mask from label_map
     if(d && d->autodata
        && g_atomic_int_get(&d->autodata->auto_state) == AUTO_READY
        && d->autodata->label_map)
@@ -1463,6 +1514,27 @@ static void _object_events_post_expose(
     cairo_line_to(cr, gui->posx, gui->posy + r);
     cairo_stroke(cr);
   }
+
+  // Draw dashed rectangle while dragging a box prompt
+  if(d->dragging)
+  {
+    const float box_lw = DT_PIXEL_APPLY_DPI(1.5f) / zoom_scale;
+    cairo_set_line_width(cr, box_lw);
+    cairo_set_source_rgba(cr, 0.9, 0.9, 0.9, 0.8);
+
+    const double dashes[] = { 4.0 / zoom_scale, 4.0 / zoom_scale };
+    cairo_set_dash(cr, dashes, 2, 0);
+
+    cairo_rectangle(cr,
+      MIN(d->drag_start_x, d->drag_end_x),
+      MIN(d->drag_start_y, d->drag_end_y),
+      fabsf(d->drag_end_x - d->drag_start_x),
+      fabsf(d->drag_end_y - d->drag_start_y));
+    cairo_stroke(cr);
+
+    cairo_set_dash(cr, NULL, 0, 0);
+  }
+
 }
 
 // --- Stub functions (object is transient — result is path masks) ---
@@ -1594,6 +1666,11 @@ static GSList *_object_setup_mouse_actions(const struct dt_masks_form_t *const f
     _("[OBJECT] add foreground point"));
   lm = dt_mouse_action_create_simple(
     lm,
+    DT_MOUSE_ACTION_LEFT_DRAG,
+    0,
+    _("[OBJECT] add box prompt"));
+  lm = dt_mouse_action_create_simple(
+    lm,
     DT_MOUSE_ACTION_LEFT,
     GDK_SHIFT_MASK,
     _("[OBJECT] add background point"));
@@ -1629,7 +1706,7 @@ static void _object_set_hint_message(
     g_snprintf(
       msgbuf,
       msgbuf_len,
-      _("<b>add</b>: click, <b>subtract</b>: shift+click, "
+      _("<b>add</b>: click, <b>box</b>: drag, <b>subtract</b>: shift+click, "
         "<b>clear</b>: alt+click, <b>apply</b>: right-click\n"
         "<b>opacity</b>: ctrl+scroll (%d%%)"),
       opacity);
