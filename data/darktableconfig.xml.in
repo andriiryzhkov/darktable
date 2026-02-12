@@ -3513,6 +3513,13 @@
     <longdescription>corner threshold for AI mask vectorization. 0 = all sharp corners (most points), 1.0 = balanced, 1.3 = maximum smoothing (fewest points).</longdescription>
   </dtconfig>
   <dtconfig>
+    <name>plugins/darkroom/masks/object/threshold</name>
+    <type min="0.3" max="0.9">float</type>
+    <default>0.5</default>
+    <shortdescription>AI mask binarization threshold</shortdescription>
+    <longdescription>sigmoid threshold for converting AI mask to binary. higher values (0.6-0.7) tighten boundaries, lower values include more area.</longdescription>
+  </dtconfig>
+  <dtconfig>
     <name>plugins/darkroom/masks/object/mode</name>
     <type>
       <enum>

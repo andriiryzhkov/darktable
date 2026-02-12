@@ -38,6 +38,7 @@
 #define CONF_OBJECT_MODEL_KEY "plugins/darkroom/masks/object/model"
 #define CONF_OBJECT_MODE_KEY "plugins/darkroom/masks/object/mode"
 #define CONF_OBJECT_AUTO_GRID_KEY "plugins/darkroom/masks/object/auto_grid"
+#define CONF_OBJECT_THRESHOLD_KEY "plugins/darkroom/masks/object/threshold"
 #define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // Target resolution for SAM encoding (longest side in pixels).
@@ -441,6 +442,7 @@ static gpointer _auto_thread_func(gpointer data)
   _auto_data_t *ad = d->autodata;
 
   const int grid_n = CLAMP(dt_conf_get_int(CONF_OBJECT_AUTO_GRID_KEY), 8, 64);
+  const float mask_threshold = CLAMP(dt_conf_get_float(CONF_OBJECT_THRESHOLD_KEY), 0.3f, 0.9f);
 
   int enc_w, enc_h;
   dt_seg_get_encoded_dims(d->seg, &enc_w, &enc_h);
@@ -509,7 +511,7 @@ static gpointer _auto_thread_func(gpointer data)
         int *runs = NULL;
         int area = 0;
         const int n_runs
-          = _mask_to_rle(mdata, mw, mh, 0.5f, &runs, &area);
+          = _mask_to_rle(mdata, mw, mh, mask_threshold, &runs, &area);
 
         // Filter 3: area bounds
         if(n_runs > 0 && area >= min_area && area <= max_area)
@@ -776,7 +778,8 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
     // Remove disconnected blobs: keep only the component at the seed point
     seed_x = CLAMP(seed_x, 0, mw - 1);
     seed_y = CLAMP(seed_y, 0, mh - 1);
-    _keep_seed_component(mask, mw, mh, 0.5f, seed_x, seed_y);
+    const float threshold = CLAMP(dt_conf_get_float(CONF_OBJECT_THRESHOLD_KEY), 0.3f, 0.9f);
+    _keep_seed_component(mask, mw, mh, threshold, seed_x, seed_y);
 
     g_free(d->mask);
     d->mask = mask;
@@ -1569,13 +1572,14 @@ static void _object_events_post_expose(
       unsigned char *buf = g_try_malloc0((size_t)stride * mh);
       if(buf)
       {
+        const float mask_thresh = CLAMP(dt_conf_get_float(CONF_OBJECT_THRESHOLD_KEY), 0.3f, 0.9f);
         for(int y = 0; y < mh; y++)
         {
           unsigned char *row = buf + y * stride;
           for(int x = 0; x < mw; x++)
           {
             const float val = d->mask[y * mw + x];
-            if(val > 0.5f)
+            if(val > mask_thresh)
             {
               const unsigned char alpha = 80;
               row[x * 4 + 0] = 0;     // B
