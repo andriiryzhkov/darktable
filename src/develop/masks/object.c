@@ -39,6 +39,7 @@
 #define CONF_OBJECT_MODE_KEY "plugins/darkroom/masks/object/mode"
 #define CONF_OBJECT_AUTO_GRID_KEY "plugins/darkroom/masks/object/auto_grid"
 #define CONF_OBJECT_THRESHOLD_KEY "plugins/darkroom/masks/object/threshold"
+#define CONF_OBJECT_REFINE_KEY "plugins/darkroom/masks/object/refine_passes"
 #define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // Target resolution for SAM encoding (longest side in pixels).
@@ -769,8 +770,21 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
     }
   }
 
-  int mw, mh;
-  float *mask = dt_seg_compute_mask(d->seg, points, gui->guipoints_count, &mw, &mh);
+  // Multi-pass iterative refinement: run decoder multiple times,
+  // feeding back the low-res mask each time to tighten boundaries.
+  dt_seg_reset_prev_mask(d->seg);
+  const int n_passes = CLAMP(dt_conf_get_int(CONF_OBJECT_REFINE_KEY), 1, 5);
+  int mw = 0, mh = 0;
+  float *mask = NULL;
+
+  for(int pass = 0; pass < n_passes; pass++)
+  {
+    float *new_mask = dt_seg_compute_mask(d->seg, points, gui->guipoints_count, &mw, &mh);
+    if(!new_mask)
+      break;
+    g_free(mask);
+    mask = new_mask;
+  }
   g_free(points);
 
   if(mask)
