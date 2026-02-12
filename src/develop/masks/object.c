@@ -134,7 +134,7 @@ static gpointer _encode_thread_func(gpointer data)
       d->env = dt_ai_env_init(NULL);
 
     char *model_id = dt_conf_get_string(CONF_OBJECT_MODEL_KEY);
-    d->seg = dt_seg_load(d->env, model_id);
+    d->seg = dt_seg_load(d->env, model_id, DT_AI_PROVIDER_AUTO);
     g_free(model_id);
 
     if(!d->seg)
@@ -148,7 +148,23 @@ static gpointer _encode_thread_func(gpointer data)
   }
 
   // Encode the image
-  const gboolean ok = dt_seg_encode_image(d->seg, td->rgb, td->width, td->height);
+  gboolean ok = dt_seg_encode_image(d->seg, td->rgb, td->width, td->height);
+
+  // If accelerated encoding failed, fall back to CPU
+  if(!ok)
+  {
+    dt_print(DT_DEBUG_AI, "[object mask] Encoding failed, retrying with CPU provider");
+    dt_seg_free(d->seg);
+    char *model_id = dt_conf_get_string(CONF_OBJECT_MODEL_KEY);
+    d->seg = dt_seg_load(d->env, model_id, DT_AI_PROVIDER_CPU);
+    g_free(model_id);
+
+    if(d->seg)
+      ok = dt_seg_encode_image(d->seg, td->rgb, td->width, td->height);
+    else
+      d->model_loaded = FALSE;
+  }
+
   g_free(td->rgb);
   g_free(td);
 
@@ -583,7 +599,9 @@ static void _object_events_post_expose(
 
   // Detect image change: reset encoding if we switched to a different image
   const dt_imgid_t cur_imgid = darktable.develop->image_storage.id;
-  if(g_atomic_int_get(&d->encode_state) == ENCODE_READY && d->encoded_imgid != cur_imgid)
+  const int cur_state = g_atomic_int_get(&d->encode_state);
+  if((cur_state == ENCODE_READY || cur_state == ENCODE_ERROR)
+     && d->encoded_imgid != cur_imgid)
   {
     if(d->encode_thread)
     {
@@ -689,13 +707,14 @@ static void _object_events_post_expose(
     {
       g_thread_join(d->encode_thread);
       d->encode_thread = NULL;
+      // Log only once when the thread is first joined
+      dt_control_log(_("AI mask encoding failed"));
     }
     if(d->busy)
     {
       dt_control_busy_leave();
       d->busy = FALSE;
     }
-    dt_control_log(_("AI mask encoding failed"));
     return;
   }
 

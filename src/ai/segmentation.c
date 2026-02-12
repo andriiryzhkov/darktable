@@ -29,14 +29,23 @@
 static const float IMG_MEAN[3] = {123.675f, 116.28f, 103.53f};
 static const float IMG_STD[3] = {58.395f, 57.12f, 57.375f};
 
+// Maximum number of dimensions for encoder output tensors
+#define MAX_TENSOR_DIMS 8
+
 struct dt_seg_context_t
 {
   dt_ai_context_t *encoder;
   dt_ai_context_t *decoder;
 
+  // Encoder output shapes (queried from model at load time)
+  int64_t embed_shape[MAX_TENSOR_DIMS];   // image_embeddings shape from model
+  int embed_ndim;
+  int64_t interm_shape[MAX_TENSOR_DIMS];  // interm_embeddings shape from model
+  int interm_ndim;
+
   // Cached encoder outputs
-  float *image_embeddings;  // [1, 256, 64, 64]
-  float *interm_embeddings; // [1, 1, 64, 64, 160]
+  float *image_embeddings;
+  float *interm_embeddings;
   size_t embed_size;        // total floats in image_embeddings
   size_t interm_size;       // total floats in interm_embeddings
 
@@ -110,13 +119,14 @@ _preprocess_image(const uint8_t *rgb_data, int width, int height, float *out_sca
 
 // --- Public API ---
 
-dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
+dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id,
+                              dt_ai_provider_t provider)
 {
   if(!env || !model_id)
     return NULL;
 
   dt_ai_context_t *encoder
-    = dt_ai_load_model(env, model_id, "encoder.onnx", DT_AI_PROVIDER_AUTO);
+    = dt_ai_load_model(env, model_id, "encoder.onnx", provider);
   if(!encoder)
   {
     dt_print(DT_DEBUG_AI, "[segmentation] Failed to load encoder for %s", model_id);
@@ -124,7 +134,7 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
   }
 
   dt_ai_context_t *decoder
-    = dt_ai_load_model(env, model_id, "decoder.onnx", DT_AI_PROVIDER_AUTO);
+    = dt_ai_load_model(env, model_id, "decoder.onnx", provider);
   if(!decoder)
   {
     dt_print(DT_DEBUG_AI, "[segmentation] Failed to load decoder for %s", model_id);
@@ -136,7 +146,20 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
   ctx->encoder = encoder;
   ctx->decoder = decoder;
 
-  dt_print(DT_DEBUG_AI, "[segmentation] Model loaded: %s", model_id);
+  // Query encoder output shapes from model metadata
+  ctx->embed_ndim = dt_ai_get_output_shape(encoder, 0, ctx->embed_shape, MAX_TENSOR_DIMS);
+  ctx->interm_ndim = dt_ai_get_output_shape(encoder, 1, ctx->interm_shape, MAX_TENSOR_DIMS);
+
+  if(ctx->embed_ndim <= 0 || ctx->interm_ndim <= 0)
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] Failed to query encoder output shapes for %s", model_id);
+    dt_seg_free(ctx);
+    return NULL;
+  }
+
+  dt_print(DT_DEBUG_AI, "[segmentation] Model loaded: %s (embed_ndim=%d, interm_ndim=%d)",
+           model_id, ctx->embed_ndim, ctx->interm_ndim);
   return ctx;
 }
 
@@ -160,9 +183,11 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
   dt_ai_tensor_t input
     = {.data = preprocessed, .type = DT_AI_FLOAT, .shape = input_shape, .ndim = 4};
 
-  // Allocate output buffers
-  // image_embeddings: [1, 256, 64, 64]
-  const size_t embed_size = 1 * 256 * 64 * 64;
+  // Allocate output buffers using shapes queried from model
+  size_t embed_size = 1;
+  for(int i = 0; i < ctx->embed_ndim; i++)
+    embed_size *= (size_t)ctx->embed_shape[i];
+
   float *embeddings = g_try_malloc(embed_size * sizeof(float));
   if(!embeddings)
   {
@@ -170,8 +195,10 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
     return FALSE;
   }
 
-  // interm_embeddings: [1, 1, 64, 64, 160]
-  const size_t interm_size = 1 * 1 * 64 * 64 * 160;
+  size_t interm_size = 1;
+  for(int i = 0; i < ctx->interm_ndim; i++)
+    interm_size *= (size_t)ctx->interm_shape[i];
+
   float *interm = g_try_malloc(interm_size * sizeof(float));
   if(!interm)
   {
@@ -180,12 +207,11 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
     return FALSE;
   }
 
-  int64_t embed_shape[4] = {1, 256, 64, 64};
-  int64_t interm_shape[5] = {1, 1, 64, 64, 160};
-
   dt_ai_tensor_t outputs[2] = {
-    {.data = embeddings, .type = DT_AI_FLOAT, .shape = embed_shape, .ndim = 4},
-    {.data = interm, .type = DT_AI_FLOAT, .shape = interm_shape, .ndim = 5}};
+    {.data = embeddings, .type = DT_AI_FLOAT,
+     .shape = ctx->embed_shape, .ndim = ctx->embed_ndim},
+    {.data = interm, .type = DT_AI_FLOAT,
+     .shape = ctx->interm_shape, .ndim = ctx->interm_ndim}};
 
   dt_print(
     DT_DEBUG_AI,
@@ -248,8 +274,6 @@ float *dt_seg_compute_mask(
   const float has_mask = ctx->has_prev_mask ? 1.0f : 0.0f;
 
   // Decoder inputs (7 total, matching the ONNX model)
-  int64_t embed_shape[4] = {1, 256, 64, 64};
-  int64_t interm_shape[5] = {1, 1, 64, 64, 160};
   int64_t coords_shape[3] = {1, n_points, 2};
   int64_t labels_shape[2] = {1, n_points};
   int64_t mask_in_shape[4] = {1, 1, 256, 256};
@@ -257,11 +281,10 @@ float *dt_seg_compute_mask(
   int64_t orig_size_shape[1] = {2};
 
   dt_ai_tensor_t inputs[7] = {
-    {.data = ctx->image_embeddings, .type = DT_AI_FLOAT, .shape = embed_shape, .ndim = 4},
-    {.data = ctx->interm_embeddings,
-     .type = DT_AI_FLOAT,
-     .shape = interm_shape,
-     .ndim = 5},
+    {.data = ctx->image_embeddings, .type = DT_AI_FLOAT,
+     .shape = ctx->embed_shape, .ndim = ctx->embed_ndim},
+    {.data = ctx->interm_embeddings, .type = DT_AI_FLOAT,
+     .shape = ctx->interm_shape, .ndim = ctx->interm_ndim},
     {.data = point_coords, .type = DT_AI_FLOAT, .shape = coords_shape, .ndim = 3},
     {.data = point_labels, .type = DT_AI_FLOAT, .shape = labels_shape, .ndim = 2},
     {.data = ctx->low_res_masks, .type = DT_AI_FLOAT, .shape = mask_in_shape, .ndim = 4},

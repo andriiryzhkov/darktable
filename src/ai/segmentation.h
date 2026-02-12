@@ -40,10 +40,12 @@ typedef struct dt_seg_point_t {
  *        Expects encoder.onnx and decoder.onnx in the model directory.
  * @param env AI environment (model registry).
  * @param model_id Model ID to look up in the registry.
+ * @param provider Execution provider (DT_AI_PROVIDER_AUTO for auto-detect).
  * @return Context, or NULL on error.
  */
 dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env,
-                              const char *model_id);
+                              const char *model_id,
+                              dt_ai_provider_t provider);
 
 /**
  * @brief Encode an image (run the SAM encoder once).

@@ -961,6 +961,59 @@ dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx, int index)
   return ctx->output_types[index];
 }
 
+int dt_ai_get_output_shape(dt_ai_context_t *ctx, int index,
+                           int64_t *shape, int max_dims)
+{
+  if(!ctx || !ctx->session || index < 0 || (size_t)index >= ctx->output_count
+     || !shape || max_dims <= 0)
+    return -1;
+
+  OrtTypeInfo *typeinfo = NULL;
+  OrtStatus *status = g_ort->SessionGetOutputTypeInfo(ctx->session, index, &typeinfo);
+  if(status)
+  {
+    g_ort->ReleaseStatus(status);
+    return -1;
+  }
+
+  const OrtTensorTypeAndShapeInfo *tensor_info = NULL;
+  status = g_ort->CastTypeInfoToTensorInfo(typeinfo, &tensor_info);
+  if(status)
+  {
+    g_ort->ReleaseStatus(status);
+    g_ort->ReleaseTypeInfo(typeinfo);
+    return -1;
+  }
+
+  size_t ndim = 0;
+  status = g_ort->GetDimensionsCount(tensor_info, &ndim);
+  if(status)
+  {
+    g_ort->ReleaseStatus(status);
+    g_ort->ReleaseTypeInfo(typeinfo);
+    return -1;
+  }
+
+  const int dims = (int)ndim < max_dims ? (int)ndim : max_dims;
+  int64_t full_shape[16];
+  if(ndim > 16)
+  {
+    g_ort->ReleaseTypeInfo(typeinfo);
+    return -1;
+  }
+
+  status = g_ort->GetDimensions(tensor_info, full_shape, ndim);
+  g_ort->ReleaseTypeInfo(typeinfo);
+  if(status)
+  {
+    g_ort->ReleaseStatus(status);
+    return -1;
+  }
+
+  memcpy(shape, full_shape, dims * sizeof(int64_t));
+  return (int)ndim;
+}
+
 void dt_ai_unload_model(dt_ai_context_t *ctx)
 {
   if(ctx)

@@ -201,6 +201,17 @@ dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
                                                   int index);
 
 /**
+ * @brief Get the shape of a model output by index.
+ * @param ctx The AI context.
+ * @param index Output index (0-based).
+ * @param shape Output array to fill with dimension sizes.
+ * @param max_dims Maximum number of dimensions to write.
+ * @return Number of dimensions, or -1 on error.
+ */
+int dt_ai_get_output_shape(dt_ai_context_t *ctx, int index,
+                           int64_t *shape, int max_dims);
+
+/**
  * @brief Unload a model and free execution context.
  * @param ctx The AI context to unload.
  */
