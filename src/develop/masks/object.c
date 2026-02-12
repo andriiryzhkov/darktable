@@ -36,11 +36,16 @@
 #include <string.h>
 
 #define CONF_OBJECT_MODEL_KEY "plugins/darkroom/masks/object/model"
+#define CONF_OBJECT_MODE_KEY "plugins/darkroom/masks/object/mode"
+#define CONF_OBJECT_AUTO_GRID_KEY "plugins/darkroom/masks/object/auto_grid"
 #define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // Target resolution for SAM encoding (longest side in pixels).
 // Higher than preview pipe for better segmentation quality.
 #define SAM_ENCODE_TARGET 2048
+
+// Maximum number of auto-segmented masks to keep after NMS
+#define AUTO_MAX_MASKS 256
 
 // --- Per-session segmentation state (stored in gui->scratchpad) ---
 
@@ -52,6 +57,39 @@ typedef enum _encode_state_t
   ENCODE_READY = 2,     // encoding complete, results available
   ENCODE_RUNNING = 3,   // background thread in progress
 } _encode_state_t;
+
+typedef enum _auto_state_t
+{
+  AUTO_ERROR = -1,
+  AUTO_IDLE = 0,
+  AUTO_RUNNING = 1,
+  AUTO_READY = 2,
+} _auto_state_t;
+
+// RLE-encoded binary mask (pairs of start_offset, length)
+typedef struct _auto_mask_t
+{
+  int *runs;       // pairs of (start_offset, length), n_runs * 2 ints
+  int n_runs;
+  int area;        // total foreground pixels
+  float iou_score;
+} _auto_mask_t;
+
+// Auto-segmentation state (allocated when mode=auto, after encoding)
+typedef struct _auto_data_t
+{
+  _auto_mask_t masks[AUTO_MAX_MASKS];
+  int n_masks;
+  int16_t *label_map;  // pixel -> mask_id (-1 = none)
+  int lw, lh;          // label map dimensions (= encoding dims)
+  gboolean selected[AUTO_MAX_MASKS];
+  int hover_mask;      // -1 = none (atomic access)
+  int auto_state;      // _auto_state_t (atomic access)
+  GThread *auto_thread;
+  int grid_total;
+  int grid_done;       // progress counter (atomic)
+  int cancel;          // cancellation flag (atomic)
+} _auto_data_t;
 
 typedef struct _object_data_t
 {
@@ -66,11 +104,130 @@ typedef struct _object_data_t
   guint modifier_poll_id;   // timer to detect shift key changes
   GThread *encode_thread;   // background encoding thread
   gboolean busy;            // TRUE if dt_control_busy_enter() was called
+  _auto_data_t *autodata;   // auto-segmentation data (NULL in prompt mode)
 } _object_data_t;
 
 static _object_data_t *_get_data(dt_masks_form_gui_t *gui)
 {
   return (gui && gui->scratchpad) ? (_object_data_t *)gui->scratchpad : NULL;
+}
+
+static gboolean _is_auto_mode(void)
+{
+  gchar *mode = dt_conf_get_string(CONF_OBJECT_MODE_KEY);
+  const gboolean is_auto = mode && g_strcmp0(mode, "auto") == 0;
+  g_free(mode);
+  return is_auto;
+}
+
+// --- RLE utilities for auto-segmentation ---
+
+// Convert a float mask to RLE. Returns number of runs (0 if empty).
+static int _mask_to_rle(const float *mask, int w, int h, float threshold,
+                         int **out_runs, int *out_area)
+{
+  const int npix = w * h;
+  int n_runs = 0;
+  int area = 0;
+  gboolean in_run = FALSE;
+
+  for(int i = 0; i < npix; i++)
+  {
+    if(mask[i] > threshold)
+    {
+      if(!in_run)
+      {
+        n_runs++;
+        in_run = TRUE;
+      }
+      area++;
+    }
+    else
+      in_run = FALSE;
+  }
+
+  if(n_runs == 0)
+  {
+    *out_runs = NULL;
+    *out_area = 0;
+    return 0;
+  }
+
+  int *runs = g_new(int, n_runs * 2);
+  int ri = 0;
+  in_run = FALSE;
+
+  for(int i = 0; i < npix; i++)
+  {
+    if(mask[i] > threshold)
+    {
+      if(!in_run)
+      {
+        runs[ri * 2] = i;
+        runs[ri * 2 + 1] = 1;
+        in_run = TRUE;
+      }
+      else
+        runs[ri * 2 + 1]++;
+    }
+    else
+    {
+      if(in_run)
+      {
+        ri++;
+        in_run = FALSE;
+      }
+    }
+  }
+
+  *out_runs = runs;
+  *out_area = area;
+  return n_runs;
+}
+
+// Compute IoU between two RLE masks (runs must be sorted by start offset)
+static float _rle_iou(const int *runs_a, int n_a, int area_a,
+                       const int *runs_b, int n_b, int area_b)
+{
+  if(area_a == 0 || area_b == 0)
+    return 0.0f;
+
+  int intersection = 0;
+  int ia = 0, ib = 0;
+
+  while(ia < n_a && ib < n_b)
+  {
+    const int a_start = runs_a[ia * 2];
+    const int a_end = a_start + runs_a[ia * 2 + 1];
+    const int b_start = runs_b[ib * 2];
+    const int b_end = b_start + runs_b[ib * 2 + 1];
+
+    const int ov_start = MAX(a_start, b_start);
+    const int ov_end = MIN(a_end, b_end);
+    if(ov_start < ov_end)
+      intersection += ov_end - ov_start;
+
+    if(a_end <= b_end)
+      ia++;
+    else
+      ib++;
+  }
+
+  const int union_area = area_a + area_b - intersection;
+  return union_area > 0 ? (float)intersection / (float)union_area : 0.0f;
+}
+
+// Free auto-segmentation data
+static void _auto_data_free(_auto_data_t *ad)
+{
+  if(!ad)
+    return;
+  if(ad->auto_thread)
+    g_thread_join(ad->auto_thread);
+  for(int i = 0; i < ad->n_masks; i++)
+    g_free(ad->masks[i].runs);
+  g_free(ad->label_map);
+  g_free(ad);
 }
 
 // Free all resources in _object_data_t (must be called after thread has joined)
@@ -84,6 +241,7 @@ static void _destroy_data(_object_data_t *d)
     g_source_remove(d->modifier_poll_id);
   if(d->encode_thread)
     g_thread_join(d->encode_thread);
+  _auto_data_free(d->autodata);
   if(d->seg)
     dt_seg_free(d->seg);
   if(d->env)
@@ -98,7 +256,9 @@ static gboolean _deferred_cleanup(gpointer data)
   _object_data_t *d = data;
   const int state = g_atomic_int_get(&d->encode_state);
   if(state == ENCODE_RUNNING)
-    return G_SOURCE_CONTINUE; // thread still running, try again later
+    return G_SOURCE_CONTINUE;
+  if(d->autodata && g_atomic_int_get(&d->autodata->auto_state) == AUTO_RUNNING)
+    return G_SOURCE_CONTINUE;
   _destroy_data(d);
   return G_SOURCE_REMOVE;
 }
@@ -110,8 +270,14 @@ static void _free_data(dt_masks_form_gui_t *gui)
     return;
   gui->scratchpad = NULL;
 
+  // Signal auto thread to cancel
+  if(d->autodata)
+    g_atomic_int_set(&d->autodata->cancel, 1);
+
   const int state = g_atomic_int_get(&d->encode_state);
-  if(state == ENCODE_RUNNING)
+  const gboolean auto_running
+    = d->autodata && g_atomic_int_get(&d->autodata->auto_state) == AUTO_RUNNING;
+  if(state == ENCODE_RUNNING || auto_running)
   {
     // Thread still running — defer cleanup so we don't block the UI
     g_timeout_add(200, _deferred_cleanup, d);
@@ -257,6 +423,201 @@ static gpointer _encode_thread_func(gpointer data)
   g_free(rgb);
 
   g_atomic_int_set(&d->encode_state, ok ? ENCODE_READY : ENCODE_ERROR);
+  return NULL;
+}
+
+// Background thread: generate auto-segmentation masks from dense grid prompts
+static gpointer _auto_thread_func(gpointer data)
+{
+  _object_data_t *d = data;
+  _auto_data_t *ad = d->autodata;
+
+  const int grid_n = CLAMP(dt_conf_get_int(CONF_OBJECT_AUTO_GRID_KEY), 8, 64);
+
+  int enc_w, enc_h;
+  dt_seg_get_encoded_dims(d->seg, &enc_w, &enc_h);
+
+  ad->lw = enc_w;
+  ad->lh = enc_h;
+  ad->grid_total = grid_n * grid_n;
+  g_atomic_int_set(&ad->grid_done, 0);
+
+  // Filtering thresholds (matching SAM SamAutomaticMaskGenerator defaults)
+  const float pred_iou_thresh = 0.88f;
+  const float stability_thresh = 0.95f;
+  // Stability score thresholds in sigmoid space: sigmoid(-1)=0.269, sigmoid(1)=0.731
+  const float stab_lo = 0.269f;
+  const float stab_hi = 0.731f;
+  const int total_pixels = enc_w * enc_h;
+  const int min_area = MAX(100, total_pixels / 1000); // 0.1% of image
+  const int max_area = (int)(total_pixels * 0.95f);   // 95% of image
+
+  // Phase 1: Decode all grid points, collect candidate masks
+  const int max_candidates = grid_n * grid_n * 8;
+  _auto_mask_t *candidates = g_new0(_auto_mask_t, max_candidates);
+  int n_candidates = 0;
+
+  for(int gy = 0; gy < grid_n && !g_atomic_int_get(&ad->cancel); gy++)
+  {
+    for(int gx = 0; gx < grid_n && !g_atomic_int_get(&ad->cancel); gx++)
+    {
+      const float px = ((float)gx + 0.5f) / (float)grid_n * (float)enc_w;
+      const float py = ((float)gy + 0.5f) / (float)grid_n * (float)enc_h;
+
+      dt_seg_point_t point = {.x = px, .y = py, .label = 1};
+
+      float *masks = NULL;
+      float *ious = NULL;
+      int n_masks = 0, mw = 0, mh = 0;
+
+      if(!dt_seg_compute_mask_raw(d->seg, &point, &masks, &ious, &n_masks, &mw, &mh))
+      {
+        g_atomic_int_add(&ad->grid_done, 1);
+        continue;
+      }
+
+      const size_t per_mask = (size_t)mw * mh;
+
+      for(int m = 0; m < n_masks && n_candidates < max_candidates; m++)
+      {
+        // Filter 1: predicted IoU quality
+        if(ious[m] < pred_iou_thresh)
+          continue;
+
+        // Filter 2: stability score — ratio of areas at two sigmoid thresholds.
+        // Stable masks have sharp boundaries: area_wide ≈ area_tight, score ≈ 1.0
+        const float *mdata = masks + m * per_mask;
+        int count_lo = 0, count_hi = 0;
+        for(size_t p = 0; p < per_mask; p++)
+        {
+          if(mdata[p] > stab_lo) count_lo++;
+          if(mdata[p] > stab_hi) count_hi++;
+        }
+        const float stability = count_hi > 0
+          ? (float)count_hi / (float)count_lo : 0.0f;
+        if(stability < stability_thresh)
+          continue;
+
+        int *runs = NULL;
+        int area = 0;
+        const int n_runs
+          = _mask_to_rle(mdata, mw, mh, 0.5f, &runs, &area);
+
+        // Filter 3: area bounds
+        if(n_runs > 0 && area >= min_area && area <= max_area)
+        {
+          candidates[n_candidates].runs = runs;
+          candidates[n_candidates].n_runs = n_runs;
+          candidates[n_candidates].area = area;
+          candidates[n_candidates].iou_score = ious[m];
+          n_candidates++;
+        }
+        else
+          g_free(runs);
+      }
+
+      g_free(masks);
+      g_free(ious);
+      g_atomic_int_add(&ad->grid_done, 1);
+    }
+  }
+
+  if(g_atomic_int_get(&ad->cancel))
+  {
+    for(int i = 0; i < n_candidates; i++)
+      g_free(candidates[i].runs);
+    g_free(candidates);
+    g_atomic_int_set(&ad->auto_state, AUTO_ERROR);
+    return NULL;
+  }
+
+  // Phase 2: NMS — sort by area descending, accept if IoU < 0.7 with all accepted
+  for(int i = 1; i < n_candidates; i++)
+  {
+    _auto_mask_t tmp = candidates[i];
+    int j = i - 1;
+    while(j >= 0 && candidates[j].area < tmp.area)
+    {
+      candidates[j + 1] = candidates[j];
+      j--;
+    }
+    candidates[j + 1] = tmp;
+  }
+
+  ad->n_masks = 0;
+  for(int i = 0; i < n_candidates && ad->n_masks < AUTO_MAX_MASKS; i++)
+  {
+    gboolean keep = TRUE;
+    for(int j = 0; j < ad->n_masks; j++)
+    {
+      const float iou
+        = _rle_iou(candidates[i].runs, candidates[i].n_runs, candidates[i].area,
+                    ad->masks[j].runs, ad->masks[j].n_runs, ad->masks[j].area);
+      if(iou > 0.7f)
+      {
+        keep = FALSE;
+        break;
+      }
+    }
+
+    if(keep)
+    {
+      ad->masks[ad->n_masks] = candidates[i];
+      candidates[i].runs = NULL; // ownership transferred
+      ad->n_masks++;
+    }
+  }
+
+  for(int i = 0; i < n_candidates; i++)
+    g_free(candidates[i].runs);
+  g_free(candidates);
+
+  // Phase 3: Build label map — smallest masks paint last (most specific wins hover)
+  ad->label_map = g_try_malloc((size_t)enc_w * enc_h * sizeof(int16_t));
+  if(!ad->label_map)
+  {
+    g_atomic_int_set(&ad->auto_state, AUTO_ERROR);
+    return NULL;
+  }
+  memset(ad->label_map, 0xFF, (size_t)enc_w * enc_h * sizeof(int16_t)); // -1
+
+  // Build index sorted by area ascending
+  int sort_idx[AUTO_MAX_MASKS];
+  for(int i = 0; i < ad->n_masks; i++)
+    sort_idx[i] = i;
+
+  for(int i = 1; i < ad->n_masks; i++)
+  {
+    const int tmp = sort_idx[i];
+    int j = i - 1;
+    while(j >= 0 && ad->masks[sort_idx[j]].area > ad->masks[tmp].area)
+    {
+      sort_idx[j + 1] = sort_idx[j];
+      j--;
+    }
+    sort_idx[j + 1] = tmp;
+  }
+
+  // Paint largest first, smallest last (smallest overwrites → hover picks most specific)
+  for(int si = ad->n_masks - 1; si >= 0; si--)
+  {
+    const int mi = sort_idx[si];
+    const _auto_mask_t *m = &ad->masks[mi];
+    for(int r = 0; r < m->n_runs; r++)
+    {
+      const int start = m->runs[r * 2];
+      const int len = m->runs[r * 2 + 1];
+      const int end = MIN(start + len, enc_w * enc_h);
+      for(int p = start; p < end; p++)
+        ad->label_map[p] = (int16_t)mi;
+    }
+  }
+
+  dt_print(DT_DEBUG_AI,
+           "[object mask] Auto-segmentation complete: %d masks from %d grid points",
+           ad->n_masks, grid_n * grid_n);
+
+  g_atomic_int_set(&ad->auto_state, AUTO_READY);
   return NULL;
 }
 
@@ -449,6 +810,61 @@ _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui
   dt_print(DT_DEBUG_AI, "[object mask] created %d paths", nbform);
 }
 
+// Finalize auto mode: union selected RLE masks into float mask and vectorize
+static void _finalize_auto_mask(dt_iop_module_t *module, dt_masks_form_t *form,
+                                 dt_masks_form_gui_t *gui)
+{
+  _object_data_t *d = _get_data(gui);
+  if(!d || !d->autodata)
+    return;
+
+  _auto_data_t *ad = d->autodata;
+  if(ad->n_masks == 0 || ad->lw <= 0 || ad->lh <= 0)
+    return;
+
+  // Check if any mask is selected
+  gboolean any_selected = FALSE;
+  for(int i = 0; i < ad->n_masks; i++)
+  {
+    if(ad->selected[i])
+    {
+      any_selected = TRUE;
+      break;
+    }
+  }
+  if(!any_selected)
+    return;
+
+  // Build union float mask from selected RLE masks
+  const size_t npix = (size_t)ad->lw * ad->lh;
+  float *mask = g_try_malloc0(npix * sizeof(float));
+  if(!mask)
+    return;
+
+  for(int i = 0; i < ad->n_masks; i++)
+  {
+    if(!ad->selected[i])
+      continue;
+    const _auto_mask_t *m = &ad->masks[i];
+    for(int r = 0; r < m->n_runs; r++)
+    {
+      const int start = m->runs[r * 2];
+      const int len = m->runs[r * 2 + 1];
+      const int end = MIN(start + len, (int)npix);
+      for(int p = start; p < end; p++)
+        mask[p] = 1.0f;
+    }
+  }
+
+  // Store in d->mask so _finalize_mask can use it
+  g_free(d->mask);
+  d->mask = mask;
+  d->mask_w = ad->lw;
+  d->mask_h = ad->lh;
+
+  _finalize_mask(module, form, gui);
+}
+
 // --- Mask Event Handlers ---
 
 static void _object_get_distance(
@@ -540,18 +956,45 @@ static int _object_events_button_pressed(
   if(!gui)
     return 0;
 
+  _object_data_t *d = _get_data(gui);
+  const gboolean auto_mode
+    = d && d->autodata && g_atomic_int_get(&d->autodata->auto_state) == AUTO_READY;
+
   if(gui->creation && which == 1 && dt_modifier_is(state, GDK_MOD1_MASK))
   {
-    // Alt+click: clear selection
-    _object_data_t *d = _get_data(gui);
-    if(d && d->encode_state == ENCODE_READY && gui->guipoints_count > 0)
-      _clear_selection(gui);
+    if(auto_mode)
+    {
+      // Alt+click: clear all selections
+      memset(d->autodata->selected, 0, sizeof(d->autodata->selected));
+      dt_control_queue_redraw_center();
+    }
+    else
+    {
+      // Alt+click: clear selection (prompt mode)
+      if(d && d->encode_state == ENCODE_READY && gui->guipoints_count > 0)
+        _clear_selection(gui);
+    }
     return 1;
   }
   else if(gui->creation && which == 1)
   {
-    // Only accept clicks after encoding is complete
-    _object_data_t *d = _get_data(gui);
+    if(auto_mode)
+    {
+      // Auto mode: click = select, shift+click = deselect
+      _auto_data_t *ad = d->autodata;
+      const int hover = g_atomic_int_get(&ad->hover_mask);
+      if(hover >= 0 && hover < ad->n_masks)
+      {
+        if(dt_modifier_is(state, GDK_SHIFT_MASK))
+          ad->selected[hover] = FALSE;
+        else
+          ad->selected[hover] = TRUE;
+      }
+      dt_control_queue_redraw_center();
+      return 1;
+    }
+
+    // Prompt mode: only accept clicks after encoding is complete
     if(!d || d->encode_state != ENCODE_READY)
       return 1;
 
@@ -583,13 +1026,16 @@ static int _object_events_button_pressed(
   }
   else if(gui->creation && which == 3)
   {
-    // Don't exit while background encoding is running
-    _object_data_t *d_rc = _get_data(gui);
-    if(d_rc && g_atomic_int_get(&d_rc->encode_state) == ENCODE_RUNNING)
+    // Don't exit while background threads are running
+    if(d && g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
+      return 1;
+    if(d && d->autodata && g_atomic_int_get(&d->autodata->auto_state) == AUTO_RUNNING)
       return 1;
 
     // Right-click: finalize mask
-    if(gui->guipoints_count > 0)
+    if(auto_mode)
+      _finalize_auto_mask(module, form, gui);
+    else if(gui->guipoints_count > 0)
       _finalize_mask(module, form, gui);
 
     // Cleanup and exit creation mode
@@ -668,7 +1114,28 @@ static int _object_events_mouse_moved(
   gui->point_border_selected = -1;
 
   if(gui->creation)
+  {
+    // Auto mode: update hover_mask from label_map
+    _object_data_t *d = _get_data(gui);
+    if(d && d->autodata
+       && g_atomic_int_get(&d->autodata->auto_state) == AUTO_READY
+       && d->autodata->label_map)
+    {
+      _auto_data_t *ad = d->autodata;
+
+      // pzx/pzy are normalized [0,1] — convert to label_map pixel coords
+      const int lx = (int)(pzx * (float)ad->lw);
+      const int ly = (int)(pzy * (float)ad->lh);
+
+      int new_hover = -1;
+      if(lx >= 0 && lx < ad->lw && ly >= 0 && ly < ad->lh)
+        new_hover = (int)ad->label_map[ly * ad->lw + lx];
+
+      g_atomic_int_set(&ad->hover_mask, new_hover);
+    }
+
     dt_control_queue_redraw_center();
+  }
 
   return 1;
 }
@@ -725,6 +1192,8 @@ static void _object_events_post_expose(
     d->mask = NULL;
     d->mask_w = d->mask_h = 0;
     d->encode_w = d->encode_h = 0;
+    _auto_data_free(d->autodata);
+    d->autodata = NULL;
     d->encode_state = ENCODE_IDLE;
   }
 
@@ -793,48 +1262,176 @@ static void _object_events_post_expose(
   if(d->encode_state != ENCODE_READY)
     return;
 
+  const gboolean auto_mode = _is_auto_mode();
+
+  // --- Auto mode: launch auto-segmentation after encoding ---
+  if(auto_mode && !d->autodata)
+  {
+    _auto_data_t *ad = g_new0(_auto_data_t, 1);
+    ad->hover_mask = -1;
+    ad->auto_state = AUTO_RUNNING;
+    d->autodata = ad;
+
+    dt_control_busy_enter();
+    d->busy = TRUE;
+
+    ad->auto_thread = g_thread_new("ai-mask-auto", _auto_thread_func, d);
+    dt_control_queue_redraw_center();
+    return;
+  }
+
+  if(auto_mode && d->autodata)
+  {
+    _auto_data_t *ad = d->autodata;
+    const int astate = g_atomic_int_get(&ad->auto_state);
+
+    if(astate == AUTO_RUNNING)
+    {
+      // Show progress
+      const int done = g_atomic_int_get(&ad->grid_done);
+      const int total = ad->grid_total;
+      if(total > 0)
+        dt_control_log(_("auto-segmenting: %d/%d grid points"), done, total);
+      return;
+    }
+
+    if(astate == AUTO_ERROR)
+    {
+      if(ad->auto_thread)
+      {
+        g_thread_join(ad->auto_thread);
+        ad->auto_thread = NULL;
+        dt_control_log(_("auto-segmentation failed"));
+      }
+      if(d->busy)
+      {
+        dt_control_busy_leave();
+        d->busy = FALSE;
+      }
+      return;
+    }
+
+    if(astate == AUTO_READY && ad->auto_thread)
+    {
+      g_thread_join(ad->auto_thread);
+      ad->auto_thread = NULL;
+      if(d->busy)
+      {
+        dt_control_busy_leave();
+        d->busy = FALSE;
+      }
+      dt_control_log(_("auto-segmentation: %d objects found"), ad->n_masks);
+    }
+
+    if(astate != AUTO_READY)
+      return;
+  }
+
   float wd, ht, iwidth, iheight;
   dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
 
-  // Draw reddish mask overlay
-  if(d->mask && d->mask_w > 0 && d->mask_h > 0)
+  // --- Auto mode drawing: red overlay for hover/selected masks ---
+  if(auto_mode && d->autodata)
   {
-    const int mw = d->mask_w;
-    const int mh = d->mask_h;
-    const int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, mw);
-    unsigned char *buf = g_try_malloc0((size_t)stride * mh);
-    if(buf)
+    _auto_data_t *ad = d->autodata;
+    if(ad->lw > 0 && ad->lh > 0 && ad->label_map)
     {
-      for(int y = 0; y < mh; y++)
+      const int mw = ad->lw;
+      const int mh = ad->lh;
+      const int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, mw);
+      unsigned char *buf = g_try_malloc0((size_t)stride * mh);
+      if(buf)
       {
-        unsigned char *row = buf + y * stride;
-        for(int x = 0; x < mw; x++)
+        const int hover = g_atomic_int_get(&ad->hover_mask);
+
+        for(int y = 0; y < mh; y++)
         {
-          const float val = d->mask[y * mw + x];
-          if(val > 0.5f)
+          unsigned char *row = buf + y * stride;
+          for(int x = 0; x < mw; x++)
           {
-            const unsigned char alpha = 80;
-            row[x * 4 + 0] = 0;     // B
-            row[x * 4 + 1] = 0;     // G
-            row[x * 4 + 2] = alpha; // R (premultiplied)
-            row[x * 4 + 3] = alpha; // A
+            const int16_t mid = ad->label_map[y * mw + x];
+            if(mid < 0 || mid >= ad->n_masks)
+              continue;
+
+            const gboolean is_selected = ad->selected[mid];
+            const gboolean is_hover = (mid == hover);
+
+            unsigned char alpha = 0;
+            if(is_selected && is_hover)
+              alpha = 120;
+            else if(is_selected)
+              alpha = 100;
+            else if(is_hover)
+              alpha = 60;
+
+            if(alpha > 0)
+            {
+              row[x * 4 + 0] = 0;     // B
+              row[x * 4 + 1] = 0;     // G
+              row[x * 4 + 2] = alpha; // R (premultiplied)
+              row[x * 4 + 3] = alpha; // A
+            }
           }
         }
+
+        cairo_surface_t *surface
+          = cairo_image_surface_create_for_data(buf, CAIRO_FORMAT_ARGB32, mw, mh, stride);
+
+        if(surface)
+        {
+          cairo_save(cr);
+          cairo_scale(cr, wd / mw, ht / mh);
+          cairo_set_source_surface(cr, surface, 0, 0);
+          cairo_paint(cr);
+          cairo_restore(cr);
+          cairo_surface_destroy(surface);
+        }
+        g_free(buf);
       }
-
-      cairo_surface_t *surface
-        = cairo_image_surface_create_for_data(buf, CAIRO_FORMAT_ARGB32, mw, mh, stride);
-
-      if(surface)
+    }
+  }
+  else
+  {
+    // --- Prompt mode drawing: red overlay of current mask ---
+    if(d->mask && d->mask_w > 0 && d->mask_h > 0)
+    {
+      const int mw = d->mask_w;
+      const int mh = d->mask_h;
+      const int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, mw);
+      unsigned char *buf = g_try_malloc0((size_t)stride * mh);
+      if(buf)
       {
-        cairo_save(cr);
-        cairo_scale(cr, wd / mw, ht / mh);
-        cairo_set_source_surface(cr, surface, 0, 0);
-        cairo_paint(cr);
-        cairo_restore(cr);
-        cairo_surface_destroy(surface);
+        for(int y = 0; y < mh; y++)
+        {
+          unsigned char *row = buf + y * stride;
+          for(int x = 0; x < mw; x++)
+          {
+            const float val = d->mask[y * mw + x];
+            if(val > 0.5f)
+            {
+              const unsigned char alpha = 80;
+              row[x * 4 + 0] = 0;     // B
+              row[x * 4 + 1] = 0;     // G
+              row[x * 4 + 2] = alpha; // R (premultiplied)
+              row[x * 4 + 3] = alpha; // A
+            }
+          }
+        }
+
+        cairo_surface_t *surface
+          = cairo_image_surface_create_for_data(buf, CAIRO_FORMAT_ARGB32, mw, mh, stride);
+
+        if(surface)
+        {
+          cairo_save(cr);
+          cairo_scale(cr, wd / mw, ht / mh);
+          cairo_set_source_surface(cr, surface, 0, 0);
+          cairo_paint(cr);
+          cairo_restore(cr);
+          cairo_surface_destroy(surface);
+        }
+        g_free(buf);
       }
-      g_free(buf);
     }
   }
 

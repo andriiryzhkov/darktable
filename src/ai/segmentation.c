@@ -463,6 +463,113 @@ float *dt_seg_compute_mask(
   return result;
 }
 
+gboolean dt_seg_compute_mask_raw(dt_seg_context_t *ctx,
+                                  const dt_seg_point_t *point,
+                                  float **out_masks,
+                                  float **out_ious,
+                                  int *out_n_masks,
+                                  int *out_width, int *out_height)
+{
+  if(!ctx || !ctx->image_encoded || !point || !out_masks || !out_ious
+     || !out_n_masks || !out_width || !out_height)
+    return FALSE;
+
+  // Single foreground point + ONNX padding point
+  float point_coords[4] = {
+    point->x * ctx->scale, point->y * ctx->scale,
+    0.0f, 0.0f  // padding point
+  };
+  float point_labels[2] = {(float)point->label, -1.0f};
+
+  const float orig_im_size[2] = {(float)ctx->encoded_height, (float)ctx->encoded_width};
+  // has_mask=0 means decoder ignores mask_input content, safe to pass ctx buffer
+  const float has_mask = 0.0f;
+
+  int64_t coords_shape[3] = {1, 2, 2};
+  int64_t labels_shape[2] = {1, 2};
+  int64_t mask_in_shape[4] = {1, 1, 256, 256};
+  int64_t has_mask_shape[1] = {1};
+  int64_t orig_size_shape[1] = {2};
+
+  dt_ai_tensor_t inputs[7] = {
+    {.data = ctx->image_embeddings, .type = DT_AI_FLOAT,
+     .shape = ctx->embed_shape, .ndim = ctx->embed_ndim},
+    {.data = ctx->interm_embeddings, .type = DT_AI_FLOAT,
+     .shape = ctx->interm_shape, .ndim = ctx->interm_ndim},
+    {.data = point_coords, .type = DT_AI_FLOAT, .shape = coords_shape, .ndim = 3},
+    {.data = point_labels, .type = DT_AI_FLOAT, .shape = labels_shape, .ndim = 2},
+    {.data = ctx->low_res_masks, .type = DT_AI_FLOAT, .shape = mask_in_shape, .ndim = 4},
+    {.data = (void *)&has_mask, .type = DT_AI_FLOAT, .shape = has_mask_shape, .ndim = 1},
+    {.data = (void *)orig_im_size, .type = DT_AI_FLOAT, .shape = orig_size_shape, .ndim = 1}};
+
+  const int nm = ctx->num_masks;
+  const int mask_h = ctx->encoded_height;
+  const int mask_w = ctx->encoded_width;
+  const size_t per_mask = (size_t)mask_h * mask_w;
+
+  float *masks = g_try_malloc((size_t)nm * per_mask * sizeof(float));
+  if(!masks)
+    return FALSE;
+
+  float iou_pred[8];
+  float *low_res = g_try_malloc((size_t)nm * 256 * 256 * sizeof(float));
+  if(!low_res)
+  {
+    g_free(masks);
+    return FALSE;
+  }
+
+  int64_t masks_shape[4] = {1, nm, mask_h, mask_w};
+  int64_t iou_shape[2] = {1, nm};
+  int64_t low_res_shape[4] = {1, nm, 256, 256};
+
+  dt_ai_tensor_t outputs[3] = {
+    {.data = masks, .type = DT_AI_FLOAT, .shape = masks_shape, .ndim = 4},
+    {.data = iou_pred, .type = DT_AI_FLOAT, .shape = iou_shape, .ndim = 2},
+    {.data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4}};
+
+  const int ret = dt_ai_run(ctx->decoder, inputs, 7, outputs, 3);
+  g_free(low_res);
+
+  if(ret != 0)
+  {
+    g_free(masks);
+    return FALSE;
+  }
+
+  // Apply sigmoid to all masks in-place
+  for(size_t i = 0; i < (size_t)nm * per_mask; i++)
+    masks[i] = 1.0f / (1.0f + expf(-masks[i]));
+
+  // Copy IoU predictions
+  float *ious = g_new(float, nm);
+  memcpy(ious, iou_pred, nm * sizeof(float));
+
+  *out_masks = masks;
+  *out_ious = ious;
+  *out_n_masks = nm;
+  *out_width = mask_w;
+  *out_height = mask_h;
+  return TRUE;
+}
+
+int dt_seg_get_num_masks(dt_seg_context_t *ctx)
+{
+  return ctx ? ctx->num_masks : 0;
+}
+
+void dt_seg_get_encoded_dims(dt_seg_context_t *ctx, int *width, int *height)
+{
+  if(!ctx)
+  {
+    if(width) *width = 0;
+    if(height) *height = 0;
+    return;
+  }
+  if(width) *width = ctx->encoded_width;
+  if(height) *height = ctx->encoded_height;
+}
+
 gboolean dt_seg_is_encoded(dt_seg_context_t *ctx)
 {
   return ctx ? ctx->image_encoded : FALSE;

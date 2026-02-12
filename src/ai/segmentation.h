@@ -102,6 +102,44 @@ void dt_seg_reset_encoding(dt_seg_context_t *ctx);
 void dt_seg_reset_prev_mask(dt_seg_context_t *ctx);
 
 /**
+ * @brief Compute ALL candidate masks from a single point prompt.
+ *        Unlike dt_seg_compute_mask(), this does NOT use iterative
+ *        refinement (always has_mask_input=0) and returns all N masks
+ *        instead of just the best one. Used by auto-segmentation mode.
+ * @param ctx Segmentation context (with cached embeddings).
+ * @param point Single foreground point prompt.
+ * @param out_masks Set to float buffer [n_masks * H * W] with sigmoid values.
+ *                  Caller frees with g_free().
+ * @param out_ious Set to float buffer [n_masks] with predicted IoU scores.
+ *                 Caller frees with g_free().
+ * @param out_n_masks Set to number of masks returned.
+ * @param out_width Set to mask width.
+ * @param out_height Set to mask height.
+ * @return TRUE on success, FALSE on error.
+ */
+gboolean dt_seg_compute_mask_raw(dt_seg_context_t *ctx,
+                                  const dt_seg_point_t *point,
+                                  float **out_masks,
+                                  float **out_ious,
+                                  int *out_n_masks,
+                                  int *out_width, int *out_height);
+
+/**
+ * @brief Get number of candidate masks per decode.
+ * @param ctx Segmentation context.
+ * @return Number of masks (1 for single-mask, 3-4 for multi-mask), or 0 if NULL.
+ */
+int dt_seg_get_num_masks(dt_seg_context_t *ctx);
+
+/**
+ * @brief Get encoded image dimensions.
+ * @param ctx Segmentation context.
+ * @param width Set to encoded width (NULL-safe).
+ * @param height Set to encoded height (NULL-safe).
+ */
+void dt_seg_get_encoded_dims(dt_seg_context_t *ctx, int *width, int *height);
+
+/**
  * @brief Free the segmentation context and all cached data.
  * @param ctx Context to free (NULL-safe).
  */
