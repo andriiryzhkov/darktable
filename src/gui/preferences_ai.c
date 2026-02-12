@@ -83,9 +83,10 @@ enum
 {
   COL_SELECTED,
   COL_NAME,
+  COL_TASK,
   COL_DESCRIPTION,
   COL_STATUS,
-  COL_REQUIRED,
+  COL_DEFAULT,
   COL_ID,
   NUM_COLS
 };
@@ -97,7 +98,7 @@ typedef struct dt_prefs_ai_data_t
   GtkWidget *model_list;
   GtkListStore *model_store;
   GtkWidget *download_selected_btn;
-  GtkWidget *download_required_btn;
+  GtkWidget *download_default_btn;
   GtkWidget *download_all_btn;
   GtkWidget *delete_selected_btn;
   GtkWidget *parent_dialog;
@@ -118,6 +119,33 @@ typedef struct dt_download_dialog_t
   gboolean cancelled;
   GMutex mutex;
 } dt_download_dialog_t;
+
+// Sort by task, then default (yes before no), then name
+static gint _model_sort_func(GtkTreeModel *model,
+                             GtkTreeIter *a,
+                             GtkTreeIter *b,
+                             gpointer user_data)
+{
+  gchar *task_a, *task_b, *default_a, *default_b, *name_a, *name_b;
+  gtk_tree_model_get(model, a, COL_TASK, &task_a, COL_DEFAULT, &default_a,
+                     COL_NAME, &name_a, -1);
+  gtk_tree_model_get(model, b, COL_TASK, &task_b, COL_DEFAULT, &default_b,
+                     COL_NAME, &name_b, -1);
+
+  int cmp = g_strcmp0(task_a, task_b);
+  if(cmp == 0)
+  {
+    // "yes" sorts before "no" (reverse alphabetical)
+    cmp = g_strcmp0(default_b, default_a);
+    if(cmp == 0)
+      cmp = g_strcmp0(name_a, name_b);
+  }
+
+  g_free(task_a); g_free(task_b);
+  g_free(default_a); g_free(default_b);
+  g_free(name_a); g_free(name_b);
+  return cmp;
+}
 
 static const char *_status_to_string(dt_ai_model_status_t status)
 {
@@ -170,12 +198,14 @@ static void _refresh_model_list(dt_prefs_ai_data_t *data)
       FALSE,
       COL_NAME,
       model->name ? model->name : model->id,
+      COL_TASK,
+      model->task ? model->task : "",
       COL_DESCRIPTION,
       model->description ? model->description : "",
       COL_STATUS,
       _status_to_string(model->status),
-      COL_REQUIRED,
-      model->required ? _("yes") : _("no"),
+      COL_DEFAULT,
+      model->is_default ? _("yes") : _("no"),
       COL_ID,
       model->id,
       -1);
@@ -524,11 +554,11 @@ static void _on_download_selected(GtkButton *button, gpointer user_data)
   _refresh_model_list(data);
 }
 
-static void _on_download_required(GtkButton *button, gpointer user_data)
+static void _on_download_default(GtkButton *button, gpointer user_data)
 {
   dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
 
-  // Download required models that need downloading
+  // Download default models that need downloading
   const int count = dt_ai_models_get_count(darktable.ai_registry);
   for(int i = 0; i < count; i++)
   {
@@ -536,7 +566,7 @@ static void _on_download_required(GtkButton *button, gpointer user_data)
     if(!model)
       continue;
     gboolean need_download
-      = (model->required && model->status == DT_AI_MODEL_NOT_DOWNLOADED);
+      = (model->is_default && model->status == DT_AI_MODEL_NOT_DOWNLOADED);
     char *id = need_download ? g_strdup(model->id) : NULL;
     dt_ai_model_free(model);
     if(need_download)
@@ -769,10 +799,18 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
     NUM_COLS,
     G_TYPE_BOOLEAN, // selected
     G_TYPE_STRING,  // name
+    G_TYPE_STRING,  // task
     G_TYPE_STRING,  // description
     G_TYPE_STRING,  // status
-    G_TYPE_STRING,  // required
+    G_TYPE_STRING,  // default
     G_TYPE_STRING); // id
+
+  // Sort by task, then default, then name
+  gtk_tree_sortable_set_default_sort_func(
+    GTK_TREE_SORTABLE(data->model_store), _model_sort_func, NULL, NULL);
+  gtk_tree_sortable_set_sort_column_id(
+    GTK_TREE_SORTABLE(data->model_store),
+    GTK_TREE_SORTABLE_DEFAULT_SORT_COLUMN_ID, GTK_SORT_ASCENDING);
 
   // Create tree view
   data->model_list = gtk_tree_view_new_with_model(GTK_TREE_MODEL(data->model_store));
@@ -826,6 +864,15 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   gtk_tree_view_column_set_expand(name_col, FALSE);
   gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), name_col);
 
+  // Task column
+  GtkTreeViewColumn *task_col = gtk_tree_view_column_new_with_attributes(
+    _("task"),
+    text_renderer,
+    "text",
+    COL_TASK,
+    NULL);
+  gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), task_col);
+
   // Description column
   GtkTreeViewColumn *desc_col = gtk_tree_view_column_new_with_attributes(
     _("description"),
@@ -845,14 +892,14 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
     NULL);
   gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), status_col);
 
-  // Required column
-  GtkTreeViewColumn *required_col = gtk_tree_view_column_new_with_attributes(
-    _("required"),
+  // Default column
+  GtkTreeViewColumn *default_col = gtk_tree_view_column_new_with_attributes(
+    _("default"),
     text_renderer,
     "text",
-    COL_REQUIRED,
+    COL_DEFAULT,
     NULL);
-  gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), required_col);
+  gtk_tree_view_append_column(GTK_TREE_VIEW(data->model_list), default_col);
 
   // Scrolled window for the list
   GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
@@ -881,14 +928,14 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
     data);
   gtk_box_pack_start(GTK_BOX(button_box), data->download_selected_btn, FALSE, FALSE, 0);
 
-  // Download required button
-  data->download_required_btn = gtk_button_new_with_label(_("download required"));
+  // Download default button
+  data->download_default_btn = gtk_button_new_with_label(_("download default"));
   g_signal_connect(
-    data->download_required_btn,
+    data->download_default_btn,
     "clicked",
-    G_CALLBACK(_on_download_required),
+    G_CALLBACK(_on_download_default),
     data);
-  gtk_box_pack_start(GTK_BOX(button_box), data->download_required_btn, FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(button_box), data->download_default_btn, FALSE, FALSE, 0);
 
   // Download all button
   data->download_all_btn = gtk_button_new_with_label(_("download all"));

@@ -31,7 +31,8 @@
 #include <math.h>
 #include <string.h>
 
-#define OBJECT_MODEL_ID "mask-light-hq-sam"
+#define CONF_OBJECT_MODEL_KEY "plugins/darkroom/masks/object/model"
+#define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // --- Per-session segmentation state (stored in gui->scratchpad) ---
 
@@ -132,7 +133,9 @@ static gpointer _encode_thread_func(gpointer data)
     if(!d->env)
       d->env = dt_ai_env_init(NULL);
 
-    d->seg = dt_seg_load(d->env, OBJECT_MODEL_ID);
+    char *model_id = dt_conf_get_string(CONF_OBJECT_MODEL_KEY);
+    d->seg = dt_seg_load(d->env, model_id);
+    g_free(model_id);
 
     if(!d->seg)
     {
@@ -1010,7 +1013,9 @@ gboolean dt_masks_object_available(void)
 {
   if(!darktable.ai_registry || !darktable.ai_registry->ai_enabled)
     return FALSE;
-  dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, OBJECT_MODEL_ID);
+  char *model_id = dt_conf_get_string(CONF_OBJECT_MODEL_KEY);
+  dt_ai_model_t *model = dt_ai_models_get_by_id(darktable.ai_registry, model_id);
+  g_free(model_id);
   const gboolean available = model && model->status == DT_AI_MODEL_DOWNLOADED;
   dt_ai_model_free(model);
   return available;

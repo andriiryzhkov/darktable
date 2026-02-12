@@ -375,6 +375,13 @@
     <longdescription>model ID for AI denoising</longdescription>
   </dtconfig>
   <dtconfig>
+    <name>plugins/darkroom/masks/object/model</name>
+    <type>string</type>
+    <default>mask-light-hq-sam</default>
+    <shortdescription>AI mask model</shortdescription>
+    <longdescription>model ID for AI object mask segmentation</longdescription>
+  </dtconfig>
+  <dtconfig>
     <name>plugins/ai/enabled</name>
     <type>bool</type>
     <default>true</default>

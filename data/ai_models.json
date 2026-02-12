@@ -7,7 +7,7 @@
       "description": "General-purpose image denoising trained on SIDD dataset",
       "task": "denoise",
       "github_asset": "denoise-nafnet.zip",
-      "required": true
+      "default": true
     },
     {
       "id": "mask-light-hq-sam",
@@ -15,7 +15,7 @@
       "description": "Light HQ Segment Anything Model for masking",
       "task": "mask",
       "github_asset": "mask-light-hq-sam.zip",
-      "required": true
+      "default": true
     }
   ]
 }

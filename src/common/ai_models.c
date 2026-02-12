@@ -71,7 +71,7 @@ static dt_ai_model_t *_model_copy(const dt_ai_model_t *src)
   copy->task = g_strdup(src->task);
   copy->github_asset = g_strdup(src->github_asset);
   copy->checksum = g_strdup(src->checksum);
-  copy->required = src->required;
+  copy->is_default = src->is_default;
   copy->enabled = src->enabled;
   copy->status = src->status;
   copy->download_progress = src->download_progress;
@@ -481,8 +481,8 @@ static dt_ai_model_t *_parse_model_json(JsonObject *obj)
     model->github_asset = g_strdup(json_object_get_string_member(obj, "github_asset"));
   if(json_object_has_member(obj, "checksum"))
     model->checksum = g_strdup(json_object_get_string_member(obj, "checksum"));
-  if(json_object_has_member(obj, "required"))
-    model->required = json_object_get_boolean_member(obj, "required");
+  if(json_object_has_member(obj, "default"))
+    model->is_default = json_object_get_boolean_member(obj, "default");
 
   return model;
 }
@@ -1341,7 +1341,7 @@ gboolean dt_ai_models_download(
   return TRUE;
 }
 
-gboolean dt_ai_models_download_required(
+gboolean dt_ai_models_download_default(
   dt_ai_registry_t *registry,
   dt_ai_progress_callback callback,
   gpointer user_data)
@@ -1355,7 +1355,7 @@ gboolean dt_ai_models_download_required(
   for(GList *l = registry->models; l; l = g_list_next(l))
   {
     dt_ai_model_t *model = (dt_ai_model_t *)l->data;
-    if(model->required && model->status == DT_AI_MODEL_NOT_DOWNLOADED)
+    if(model->is_default && model->status == DT_AI_MODEL_NOT_DOWNLOADED)
       ids = g_list_prepend(ids, g_strdup(model->id));
   }
   g_mutex_unlock(&registry->lock);

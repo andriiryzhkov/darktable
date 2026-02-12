@@ -50,7 +50,7 @@ typedef struct dt_ai_model_t {
   char *task;            // Task type: "denoise", "upscale", etc.
   char *github_asset;    // Asset filename in GitHub release
   char *checksum;        // SHA256 checksum (format: "sha256:...")
-  gboolean required;     // TRUE if model is required for basic functionality
+  gboolean is_default;   // TRUE if model is a default model for its task
   gboolean enabled;      // User preference (stored in darktablerc)
   dt_ai_model_status_t status;
   double download_progress;  // 0.0 to 1.0 during download
@@ -169,15 +169,15 @@ gboolean dt_ai_models_download(dt_ai_registry_t *registry, const char *model_id,
                                gpointer user_data);
 
 /**
- * @brief Download all required models (runs in background)
+ * @brief Download all default models (runs in background)
  * @param registry The registry
  * @param callback Progress callback (may be NULL)
  * @param user_data Data for callback
  * @return TRUE if downloads started successfully
  */
-gboolean dt_ai_models_download_required(dt_ai_registry_t *registry,
-                                        dt_ai_progress_callback callback,
-                                        gpointer user_data);
+gboolean dt_ai_models_download_default(dt_ai_registry_t *registry,
+                                       dt_ai_progress_callback callback,
+                                       gpointer user_data);
 
 /**
  * @brief Download all models (runs in background)

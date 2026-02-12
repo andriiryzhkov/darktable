@@ -769,9 +769,6 @@ void gui_init(dt_lib_module_t *self)
   d->env = dt_ai_env_init(NULL);
   d->box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 5));
 
-  // Read model ID from config (default: nafnet-sidd-width32)
-  if(!dt_conf_key_exists(CONF_MODEL_KEY))
-    dt_conf_set_string(CONF_MODEL_KEY, DEFAULT_MODEL_ID);
   d->model_id = dt_conf_get_string(CONF_MODEL_KEY);
 
   // Check if the configured model is available
