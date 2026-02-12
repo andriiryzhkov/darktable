@@ -629,6 +629,98 @@ static gpointer _auto_thread_func(gpointer data)
   return NULL;
 }
 
+// Keep only the connected component containing the seed pixel (seed_x, seed_y).
+// If the seed is outside any foreground region, keep the largest component instead.
+// Operates in-place: non-selected foreground pixels are zeroed.
+static void _keep_seed_component(float *mask, int w, int h, float threshold,
+                                  int seed_x, int seed_y)
+{
+  const int npix = w * h;
+  int16_t *labels = g_try_malloc0((size_t)npix * sizeof(int16_t));
+  if(!labels)
+    return;
+  int *stack = g_try_malloc((size_t)npix * sizeof(int));
+  if(!stack)
+  {
+    g_free(labels);
+    return;
+  }
+
+  int16_t n_labels = 0;
+  int16_t best_label = 0;
+  int best_area = 0;
+  int16_t seed_label = 0;
+
+  for(int i = 0; i < npix; i++)
+  {
+    if(mask[i] <= threshold || labels[i] != 0)
+      continue;
+    if(n_labels >= INT16_MAX)
+      break;
+
+    n_labels++;
+    const int16_t label = n_labels;
+    int area = 0;
+    int sp = 0;
+    stack[sp++] = i;
+    labels[i] = label;
+
+    while(sp > 0)
+    {
+      const int p = stack[--sp];
+      area++;
+      const int px = p % w;
+      const int py = p / w;
+
+      if(px == seed_x && py == seed_y)
+        seed_label = label;
+
+      // 4-connected neighbors
+      if(py > 0 && labels[p - w] == 0 && mask[p - w] > threshold)
+      {
+        labels[p - w] = label;
+        stack[sp++] = p - w;
+      }
+      if(py < h - 1 && labels[p + w] == 0 && mask[p + w] > threshold)
+      {
+        labels[p + w] = label;
+        stack[sp++] = p + w;
+      }
+      if(px > 0 && labels[p - 1] == 0 && mask[p - 1] > threshold)
+      {
+        labels[p - 1] = label;
+        stack[sp++] = p - 1;
+      }
+      if(px < w - 1 && labels[p + 1] == 0 && mask[p + 1] > threshold)
+      {
+        labels[p + 1] = label;
+        stack[sp++] = p + 1;
+      }
+    }
+
+    if(area > best_area)
+    {
+      best_area = area;
+      best_label = label;
+    }
+  }
+
+  // Prefer component containing the seed point; fall back to largest
+  const int16_t keep = (seed_label > 0) ? seed_label : best_label;
+
+  if(keep > 0)
+  {
+    for(int i = 0; i < npix; i++)
+    {
+      if(mask[i] > threshold && labels[i] != keep)
+        mask[i] = 0.0f;
+    }
+  }
+
+  g_free(stack);
+  g_free(labels);
+}
+
 // Run the decoder with accumulated points and update the cached mask
 static void _run_decoder(dt_masks_form_gui_t *gui)
 {
@@ -655,12 +747,37 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
     points[i].label = (int)gpp[i];
   }
 
+  // Find seed point for connected component filter:
+  // use last foreground point, or center of last box
+  int seed_x = -1, seed_y = -1;
+  for(int i = gui->guipoints_count - 1; i >= 0; i--)
+  {
+    if(points[i].label == 1)
+    {
+      seed_x = (int)points[i].x;
+      seed_y = (int)points[i].y;
+      break;
+    }
+    else if(points[i].label == 3 && i > 0 && points[i - 1].label == 2)
+    {
+      // Box: use center of the two corners
+      seed_x = (int)((points[i - 1].x + points[i].x) * 0.5f);
+      seed_y = (int)((points[i - 1].y + points[i].y) * 0.5f);
+      break;
+    }
+  }
+
   int mw, mh;
   float *mask = dt_seg_compute_mask(d->seg, points, gui->guipoints_count, &mw, &mh);
   g_free(points);
 
   if(mask)
   {
+    // Remove disconnected blobs: keep only the component at the seed point
+    seed_x = CLAMP(seed_x, 0, mw - 1);
+    seed_y = CLAMP(seed_y, 0, mh - 1);
+    _keep_seed_component(mask, mw, mh, 0.5f, seed_x, seed_y);
+
     g_free(d->mask);
     d->mask = mask;
     d->mask_w = mw;
