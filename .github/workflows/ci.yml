@@ -103,6 +103,8 @@ jobs:
       - name: Install compiler ${{ matrix.compiler.compiler }}
         run: |
           eatmydata apt-get --yes install ${{ matrix.compiler.packages }}
+      # NOTE: libonnx-dev is a workaround for Ubuntu 26.04 where libonnxruntime
+      # has broken linkage to libonnx. Remove when Ubuntu fixes the package.
       - name: Install Base Dependencies
         run: |
           eatmydata apt-get --yes install \
@@ -135,6 +137,7 @@ jobs:
             liblcms2-dev \
             liblensfun-dev \
             liblua5.4-dev \
+            libonnx-dev \
             libonnxruntime-dev \
             libopenexr-dev \
             libopenjp2-7-dev \
