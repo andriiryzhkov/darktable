@@ -45,6 +45,7 @@ struct dt_seg_context_t
 
   // Decoder output: number of masks per decode (1 = single-mask, 3-4 = multi-mask)
   int num_masks;
+  gboolean has_hq; // TRUE if decoder has high_res_masks output (SAM-HQ)
 
   // Cached encoder outputs
   float *image_embeddings;
@@ -167,9 +168,13 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id,
   const int dec_out_ndim = dt_ai_get_output_shape(decoder, 0, dec_out_shape, MAX_TENSOR_DIMS);
   ctx->num_masks = (dec_out_ndim >= 4 && dec_out_shape[1] > 1) ? (int)dec_out_shape[1] : 1;
 
+  // SAM-HQ models have a 4th decoder output (high_res_masks) at 1024x1024
+  // with sharper edges from encoder skip connections.
+  ctx->has_hq = (dt_ai_get_output_count(decoder) >= 4);
+
   dt_print(DT_DEBUG_AI,
-           "[segmentation] Model loaded: %s (embed_ndim=%d, interm_ndim=%d, num_masks=%d)",
-           model_id, ctx->embed_ndim, ctx->interm_ndim, ctx->num_masks);
+           "[segmentation] Model loaded: %s (embed_ndim=%d, interm_ndim=%d, num_masks=%d, hq=%d)",
+           model_id, ctx->embed_ndim, ctx->interm_ndim, ctx->num_masks, ctx->has_hq);
   return ctx;
 }
 
@@ -341,12 +346,27 @@ float *dt_seg_compute_mask(
   int64_t iou_shape[2] = {1, nm};
   int64_t low_res_shape[4] = {1, nm, 256, 256};
 
-  dt_ai_tensor_t outputs[3] = {
+  // Optional 4th output: SAM-HQ high_res_masks [1, N, 1024, 1024]
+  const size_t hq_per_mask = (size_t)SAM_INPUT_SIZE * SAM_INPUT_SIZE;
+  float *hq_masks = NULL;
+  int num_outputs = 3;
+
+  if(ctx->has_hq)
+  {
+    hq_masks = g_try_malloc((size_t)nm * hq_per_mask * sizeof(float));
+    if(hq_masks)
+      num_outputs = 4;
+  }
+
+  int64_t hq_shape[4] = {1, nm, SAM_INPUT_SIZE, SAM_INPUT_SIZE};
+
+  dt_ai_tensor_t outputs[4] = {
     {.data = masks, .type = DT_AI_FLOAT, .shape = masks_shape, .ndim = 4},
     {.data = iou_pred, .type = DT_AI_FLOAT, .shape = iou_shape, .ndim = 2},
-    {.data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4}};
+    {.data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4},
+    {.data = hq_masks, .type = DT_AI_FLOAT, .shape = hq_shape, .ndim = 4}};
 
-  const int ret = dt_ai_run(ctx->decoder, inputs, 7, outputs, 3);
+  const int ret = dt_ai_run(ctx->decoder, inputs, 7, outputs, num_outputs);
 
   g_free(point_coords);
   g_free(point_labels);
@@ -354,6 +374,7 @@ float *dt_seg_compute_mask(
   if(ret != 0)
   {
     dt_print(DT_DEBUG_AI, "[segmentation] Decoder failed: %d", ret);
+    g_free(hq_masks);
     g_free(low_res);
     g_free(masks);
     return NULL;
@@ -380,13 +401,57 @@ float *dt_seg_compute_mask(
   float *result = g_try_malloc(per_mask * sizeof(float));
   if(!result)
   {
+    g_free(hq_masks);
     g_free(masks);
     return NULL;
   }
 
-  const float *best_mask = masks + (size_t)best * per_mask;
-  for(size_t i = 0; i < per_mask; i++)
-    result[i] = 1.0f / (1.0f + expf(-best_mask[i]));
+  if(hq_masks)
+  {
+    // SAM-HQ path: bilinear crop+resize from 1024x1024 to encoded dims.
+    // The valid (non-padded) region in 1024-space corresponds to the
+    // scaled image area placed in the top-left corner during preprocessing.
+    const int valid_w = MIN((int)(ctx->encoded_width * ctx->scale + 0.5f), SAM_INPUT_SIZE);
+    const int valid_h = MIN((int)(ctx->encoded_height * ctx->scale + 0.5f), SAM_INPUT_SIZE);
+    const float *best_hq = hq_masks + (size_t)best * hq_per_mask;
+
+    for(int y = 0; y < mask_h; y++)
+    {
+      const float src_y = (float)y * (float)(valid_h - 1) / (float)(mask_h - 1);
+      const int y0 = MIN((int)src_y, valid_h - 1);
+      const int y1 = MIN(y0 + 1, valid_h - 1);
+      const float fy = src_y - (float)y0;
+
+      for(int x = 0; x < mask_w; x++)
+      {
+        const float src_x = (float)x * (float)(valid_w - 1) / (float)(mask_w - 1);
+        const int x0 = MIN((int)src_x, valid_w - 1);
+        const int x1 = MIN(x0 + 1, valid_w - 1);
+        const float fx = src_x - (float)x0;
+
+        const float v00 = best_hq[y0 * SAM_INPUT_SIZE + x0];
+        const float v01 = best_hq[y0 * SAM_INPUT_SIZE + x1];
+        const float v10 = best_hq[y1 * SAM_INPUT_SIZE + x0];
+        const float v11 = best_hq[y1 * SAM_INPUT_SIZE + x1];
+
+        const float val = v00 * (1.0f - fx) * (1.0f - fy) + v01 * fx * (1.0f - fy)
+          + v10 * (1.0f - fx) * fy + v11 * fx * fy;
+
+        result[y * mask_w + x] = 1.0f / (1.0f + expf(-val));
+      }
+    }
+
+    dt_print(DT_DEBUG_AI, "[segmentation] Using HQ mask (valid=%dx%d -> %dx%d)",
+             valid_w, valid_h, mask_w, mask_h);
+    g_free(hq_masks);
+  }
+  else
+  {
+    // Standard path: extract best mask from orig_im_size output
+    const float *best_mask = masks + (size_t)best * per_mask;
+    for(size_t i = 0; i < per_mask; i++)
+      result[i] = 1.0f / (1.0f + expf(-best_mask[i]));
+  }
 
   g_free(masks);
 
