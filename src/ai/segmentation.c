@@ -463,12 +463,14 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
     height,
     scale);
 
+  const double enc_start = dt_get_wtime();
   const int ret = dt_ai_run(ctx->encoder, &input, 1, outputs, ctx->n_enc_outputs);
+  const double enc_elapsed = dt_get_wtime() - enc_start;
   g_free(preprocessed);
 
   if(ret != 0)
   {
-    dt_print(DT_DEBUG_AI, "[segmentation] Encoder failed: %d", ret);
+    dt_print(DT_DEBUG_AI, "[segmentation] Encoder failed: %d (%.1fs)", ret, enc_elapsed);
     for(int i = 0; i < ctx->n_enc_outputs; i++) g_free(enc_bufs[i]);
     return FALSE;
   }
@@ -492,7 +494,7 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
   ctx->image_encoded = TRUE;
   ctx->has_prev_mask = FALSE;
 
-  dt_print(DT_DEBUG_AI, "[segmentation] Image encoded successfully");
+  dt_print(DT_DEBUG_AI, "[segmentation] Image encoded successfully (%.3fs)", enc_elapsed);
   return TRUE;
 }
 
@@ -667,14 +669,16 @@ float *dt_seg_compute_mask(
     }
   }
 
+  const double dec_start = dt_get_wtime();
   const int ret = dt_ai_run(ctx->decoder, inputs, ni, dec_outputs, num_outputs);
+  const double dec_elapsed = dt_get_wtime() - dec_start;
 
   g_free(point_coords);
   g_free(point_labels);
 
   if(ret != 0)
   {
-    dt_print(DT_DEBUG_AI, "[segmentation] Decoder failed: %d", ret);
+    dt_print(DT_DEBUG_AI, "[segmentation] Decoder failed: %d (%.3fs)", ret, dec_elapsed);
     g_free(hq_masks);
     g_free(low_res);
     g_free(masks);
@@ -689,8 +693,8 @@ float *dt_seg_compute_mask(
       best = m;
   }
 
-  dt_print(DT_DEBUG_AI, "[segmentation] Mask computed, best=%d/%d IoU=%.3f",
-           best, nm, iou_pred[best]);
+  dt_print(DT_DEBUG_AI, "[segmentation] Mask computed (%.3fs), best=%d/%d IoU=%.3f",
+           dec_elapsed, best, nm, iou_pred[best]);
 
   // Cache the best low-res mask for iterative refinement (only if low_res output exists)
   if(low_res)
@@ -855,14 +859,20 @@ gboolean dt_seg_compute_mask_raw(dt_seg_context_t *ctx,
       .data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4};
   }
 
+  const double dec_start = dt_get_wtime();
   const int ret = dt_ai_run(ctx->decoder, inputs, ni, dec_outputs, num_outputs);
+  const double dec_elapsed = dt_get_wtime() - dec_start;
   g_free(low_res);
 
   if(ret != 0)
   {
+    dt_print(DT_DEBUG_AI, "[segmentation] Raw decoder failed: %d (%.3fs)", ret, dec_elapsed);
     g_free(masks);
     return FALSE;
   }
+
+  dt_print(DT_DEBUG_AI, "[segmentation] Raw decode (%.3fs), %d masks at %dx%d",
+           dec_elapsed, nm, dec_w, dec_h);
 
   // Apply sigmoid to all masks in-place
   for(size_t i = 0; i < (size_t)nm * per_mask; i++)
