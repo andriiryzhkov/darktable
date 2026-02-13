@@ -40,6 +40,7 @@
 #define CONF_OBJECT_AUTO_GRID_KEY "plugins/darkroom/masks/object/auto_grid"
 #define CONF_OBJECT_THRESHOLD_KEY "plugins/darkroom/masks/object/threshold"
 #define CONF_OBJECT_REFINE_KEY "plugins/darkroom/masks/object/refine_passes"
+#define CONF_OBJECT_MORPH_KEY "plugins/darkroom/masks/object/morph_radius"
 #define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // Target resolution for SAM encoding (longest side in pixels).
@@ -724,6 +725,90 @@ static void _keep_seed_component(float *mask, int w, int h, float threshold,
   g_free(labels);
 }
 
+// Morphological erode: output pixel is 1 only if all pixels in the
+// square structuring element of given radius are 1.
+static void _morph_erode(const uint8_t *src, uint8_t *dst, int w, int h, int radius)
+{
+  for(int y = 0; y < h; y++)
+  {
+    const int y0 = MAX(y - radius, 0);
+    const int y1 = MIN(y + radius, h - 1);
+    for(int x = 0; x < w; x++)
+    {
+      const int x0 = MAX(x - radius, 0);
+      const int x1 = MIN(x + radius, w - 1);
+      uint8_t val = 1;
+      for(int ny = y0; ny <= y1 && val; ny++)
+        for(int nx = x0; nx <= x1 && val; nx++)
+          if(!src[ny * w + nx]) val = 0;
+      dst[y * w + x] = val;
+    }
+  }
+}
+
+// Morphological dilate: output pixel is 1 if any pixel in the
+// square structuring element of given radius is 1.
+static void _morph_dilate(const uint8_t *src, uint8_t *dst, int w, int h, int radius)
+{
+  for(int y = 0; y < h; y++)
+  {
+    const int y0 = MAX(y - radius, 0);
+    const int y1 = MIN(y + radius, h - 1);
+    for(int x = 0; x < w; x++)
+    {
+      const int x0 = MAX(x - radius, 0);
+      const int x1 = MIN(x + radius, w - 1);
+      uint8_t val = 0;
+      for(int ny = y0; ny <= y1 && !val; ny++)
+        for(int nx = x0; nx <= x1 && !val; nx++)
+          if(src[ny * w + nx]) val = 1;
+      dst[y * w + x] = val;
+    }
+  }
+}
+
+// Morphological open+close on a float mask.
+// Open (erode->dilate) removes small protrusions/bridges.
+// Close (dilate->erode) fills small holes/gaps.
+static void _morph_open_close(float *mask, int w, int h, float threshold, int radius)
+{
+  if(radius <= 0) return;
+
+  const size_t n = (size_t)w * h;
+  uint8_t *bin = g_try_malloc(n);
+  uint8_t *tmp = g_try_malloc(n);
+  if(!bin || !tmp)
+  {
+    g_free(bin);
+    g_free(tmp);
+    return;
+  }
+
+  // Binarize
+  for(size_t i = 0; i < n; i++)
+    bin[i] = mask[i] > threshold ? 1 : 0;
+
+  // Open: erode into tmp, then dilate back into bin
+  _morph_erode(bin, tmp, w, h, radius);
+  _morph_dilate(tmp, bin, w, h, radius);
+
+  // Close: dilate into tmp, then erode back into bin
+  _morph_dilate(bin, tmp, w, h, radius);
+  _morph_erode(tmp, bin, w, h, radius);
+
+  // Apply result back to float mask
+  for(size_t i = 0; i < n; i++)
+  {
+    if(bin[i] && mask[i] <= threshold)
+      mask[i] = 1.0f;  // filled by close
+    else if(!bin[i] && mask[i] > threshold)
+      mask[i] = 0.0f;  // removed by open
+  }
+
+  g_free(bin);
+  g_free(tmp);
+}
+
 // Run the decoder with accumulated points and update the cached mask
 static void _run_decoder(dt_masks_form_gui_t *gui)
 {
@@ -794,6 +879,10 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
     seed_y = CLAMP(seed_y, 0, mh - 1);
     const float threshold = CLAMP(dt_conf_get_float(CONF_OBJECT_THRESHOLD_KEY), 0.3f, 0.9f);
     _keep_seed_component(mask, mw, mh, threshold, seed_x, seed_y);
+
+    // Morphological open+close to remove small protrusions and fill holes
+    const int morph_radius = CLAMP(dt_conf_get_int(CONF_OBJECT_MORPH_KEY), 0, 5);
+    _morph_open_close(mask, mw, mh, threshold, morph_radius);
 
     g_free(d->mask);
     d->mask = mask;
