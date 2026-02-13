@@ -41,6 +41,7 @@
 #define CONF_OBJECT_THRESHOLD_KEY "plugins/darkroom/masks/object/threshold"
 #define CONF_OBJECT_REFINE_KEY "plugins/darkroom/masks/object/refine_passes"
 #define CONF_OBJECT_MORPH_KEY "plugins/darkroom/masks/object/morph_radius"
+#define CONF_OBJECT_EDGE_REFINE_KEY "plugins/darkroom/masks/object/edge_refine"
 #define DEFAULT_OBJECT_MODEL_ID "mask-light-hq-sam"
 
 // Target resolution for SAM encoding (longest side in pixels).
@@ -107,6 +108,8 @@ typedef struct _object_data_t
   int encode_state;         // uses _encode_state_t values (atomic access)
   dt_imgid_t encoded_imgid; // image ID that was encoded
   int encode_w, encode_h;   // encoding resolution (for coordinate mapping)
+  uint8_t *encode_rgb;      // stored RGB from encoding (uint8, HWC, 3ch)
+  int encode_rgb_w, encode_rgb_h;
   guint modifier_poll_id;   // timer to detect shift key changes
   GThread *encode_thread;   // background encoding thread
   gboolean busy;            // TRUE if dt_control_busy_enter() was called
@@ -258,6 +261,7 @@ static void _destroy_data(_object_data_t *d)
   if(d->env)
     dt_ai_env_destroy(d->env);
   g_free(d->mask);
+  g_free(d->encode_rgb);
   g_free(d);
 }
 
@@ -431,7 +435,11 @@ static gpointer _encode_thread_func(gpointer data)
       d->model_loaded = FALSE;
   }
 
-  g_free(rgb);
+  // Store the RGB image for edge-aware mask refinement
+  g_free(d->encode_rgb);
+  d->encode_rgb = rgb;
+  d->encode_rgb_w = out_w;
+  d->encode_rgb_h = out_h;
 
   g_atomic_int_set(&d->encode_state, ok ? ENCODE_READY : ENCODE_ERROR);
   return NULL;
@@ -809,6 +817,75 @@ static void _morph_open_close(float *mask, int w, int h, float threshold, int ra
   g_free(tmp);
 }
 
+// Edge-aware threshold refinement: near strong image edges the binarization
+// threshold is raised by up to edge_boost, snapping the mask boundary to
+// actual object contours.  Uses Scharr gradient of the stored RGB image.
+static void _edge_refine_threshold(float *mask, int mw, int mh,
+                                    const uint8_t *rgb, int rgb_w, int rgb_h,
+                                    float base_threshold, float edge_boost)
+{
+  if(edge_boost <= 0.0f || !rgb || rgb_w < 3 || rgb_h < 3)
+    return;
+  if(mw != rgb_w || mh != rgb_h)
+    return;
+
+  const size_t npix = (size_t)mw * mh;
+
+  // Step 1: Convert uint8 RGB to float luminance (Rec.601)
+  float *lum = g_try_malloc(npix * sizeof(float));
+  if(!lum) return;
+
+  for(size_t i = 0; i < npix; i++)
+    lum[i] = (0.299f * (float)rgb[i * 3]
+            + 0.587f * (float)rgb[i * 3 + 1]
+            + 0.114f * (float)rgb[i * 3 + 2]) / 255.0f;
+
+  // Step 2: Compute Scharr gradient magnitude, track max for normalization
+  float *grad = g_try_malloc(npix * sizeof(float));
+  if(!grad)
+  {
+    g_free(lum);
+    return;
+  }
+
+  float grad_max = 0.0f;
+
+  for(int y = 0; y < mh; y++)
+  {
+    for(int x = 0; x < mw; x++)
+    {
+      float g = 0.0f;
+      if(y >= 1 && y < mh - 1 && x >= 1 && x < mw - 1)
+      {
+        const float *p = &lum[y * mw + x];
+        const float gx = (47.0f / 255.0f) * (p[-mw - 1] - p[-mw + 1]
+                                             + p[mw - 1] - p[mw + 1])
+                        + (162.0f / 255.0f) * (p[-1] - p[1]);
+        const float gy = (47.0f / 255.0f) * (p[-mw - 1] - p[mw - 1]
+                                             + p[-mw + 1] - p[mw + 1])
+                        + (162.0f / 255.0f) * (p[-mw] - p[mw]);
+        g = sqrtf(gx * gx + gy * gy);
+      }
+      grad[y * mw + x] = g;
+      if(g > grad_max) grad_max = g;
+    }
+  }
+
+  g_free(lum);
+
+  // Step 3: Normalize and apply spatially-varying threshold
+  const float inv_max = (grad_max > 1e-6f) ? 1.0f / grad_max : 0.0f;
+
+  for(size_t i = 0; i < npix; i++)
+  {
+    const float g_norm = grad[i] * inv_max;
+    const float effective_thresh = base_threshold + edge_boost * g_norm;
+    mask[i] = (mask[i] > effective_thresh) ? 1.0f : 0.0f;
+  }
+
+  g_free(grad);
+}
+
 // Run the decoder with accumulated points and update the cached mask
 static void _run_decoder(dt_masks_form_gui_t *gui)
 {
@@ -878,6 +955,14 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
     seed_x = CLAMP(seed_x, 0, mw - 1);
     seed_y = CLAMP(seed_y, 0, mh - 1);
     const float threshold = CLAMP(dt_conf_get_float(CONF_OBJECT_THRESHOLD_KEY), 0.3f, 0.9f);
+
+    // Edge-aware threshold refinement: snap mask boundary to image edges
+    const float edge_boost = CLAMP(dt_conf_get_float(CONF_OBJECT_EDGE_REFINE_KEY), 0.0f, 0.5f);
+    if(edge_boost > 0.0f && d->encode_rgb)
+      _edge_refine_threshold(mask, mw, mh,
+                             d->encode_rgb, d->encode_rgb_w, d->encode_rgb_h,
+                             threshold, edge_boost);
+
     _keep_seed_component(mask, mw, mh, threshold, seed_x, seed_y);
 
     // Morphological open+close to remove small protrusions and fill holes
@@ -1466,6 +1551,9 @@ static void _object_events_post_expose(
     d->mask = NULL;
     d->mask_w = d->mask_h = 0;
     d->encode_w = d->encode_h = 0;
+    g_free(d->encode_rgb);
+    d->encode_rgb = NULL;
+    d->encode_rgb_w = d->encode_rgb_h = 0;
     _auto_data_free(d->autodata);
     d->autodata = NULL;
     d->encode_state = ENCODE_IDLE;
