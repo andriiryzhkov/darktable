@@ -19,6 +19,7 @@
 #include "segmentation.h"
 #include "backend.h"
 #include "common/darktable.h"
+#include <inttypes.h>
 #include <math.h>
 #include <string.h>
 
@@ -34,6 +35,10 @@ static const float IMG_STD[3] = {58.395f, 57.12f, 57.375f};
 
 // Maximum number of encoder output tensors (2 for SAM-HQ, 3 for SAM2.1)
 #define MAX_ENCODER_OUTPUTS 4
+
+// Maximum number of masks the decoder can produce per decode pass.
+// Stack buffers (iou_pred[]) are sized to this limit.
+#define MAX_NUM_MASKS 8
 
 struct dt_seg_context_t
 {
@@ -286,6 +291,13 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
     ctx->num_masks = (iou_ndim >= 2 && iou_shape[1] > 0) ? (int)iou_shape[1] : 1;
   }
 
+  if(ctx->num_masks > MAX_NUM_MASKS)
+  {
+    dt_print(DT_DEBUG_AI, "[segmentation] Clamping num_masks from %d to %d",
+             ctx->num_masks, MAX_NUM_MASKS);
+    ctx->num_masks = MAX_NUM_MASKS;
+  }
+
   // Detect decoder mask output dimensions (may be dynamic = -1)
   ctx->dec_mask_h = (dec_out_ndim >= 4 && dec_out_shape[2] > 0) ? (int)dec_out_shape[2] : -1;
   ctx->dec_mask_w = (dec_out_ndim >= 4 && dec_out_shape[3] > 0) ? (int)dec_out_shape[3] : -1;
@@ -333,6 +345,8 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
       if(iou_ndim >= 2 && iou_shape[1] > 0)
         ctx->num_masks = (int)iou_shape[1];
     }
+
+    ctx->num_masks = MIN(ctx->num_masks, MAX_NUM_MASKS);
 
     dt_print(DT_DEBUG_AI,
              "[segmentation] After reload: dec_dims=%dx%d, num_masks=%d",
@@ -412,7 +426,18 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
   {
     size_t sz = 1;
     for(int d = 0; d < ctx->enc_ndims[i]; d++)
+    {
+      if(ctx->enc_shapes[i][d] <= 0)
+      {
+        dt_print(DT_DEBUG_AI,
+                 "[segmentation] Encoder output[%d] has non-positive dim[%d]=%" PRId64,
+                 i, d, ctx->enc_shapes[i][d]);
+        for(int j = 0; j < i; j++) g_free(enc_bufs[j]);
+        g_free(preprocessed);
+        return FALSE;
+      }
       sz *= (size_t)ctx->enc_shapes[i][d];
+    }
     enc_buf_sizes[i] = sz;
     enc_bufs[i] = g_try_malloc(sz * sizeof(float));
     if(!enc_bufs[i])
@@ -585,7 +610,7 @@ float *dt_seg_compute_mask(
     return NULL;
   }
 
-  float iou_pred[8]; // max 8 masks
+  float iou_pred[MAX_NUM_MASKS];
   const size_t low_res_per = (size_t)lr_dim * lr_dim;
 
   // low_res output only exists for SAM/SAM-HQ (not SAM2)

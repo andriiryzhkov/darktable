@@ -282,14 +282,19 @@ void dt_ai_env_set_provider(dt_ai_environment_t *env, dt_ai_provider_t provider)
 {
   if(!env)
     return;
+  g_mutex_lock(&env->lock);
   env->provider = provider;
+  g_mutex_unlock(&env->lock);
 }
 
 dt_ai_provider_t dt_ai_env_get_provider(dt_ai_environment_t *env)
 {
   if(!env)
     return DT_AI_PROVIDER_AUTO;
-  return env->provider;
+  g_mutex_lock(&env->lock);
+  const dt_ai_provider_t p = env->provider;
+  g_mutex_unlock(&env->lock);
+  return p;
 }
 
 // --- Backend-specific load (defined in backend_onnx.c) ---
@@ -323,11 +328,11 @@ dt_ai_context_t *dt_ai_load_model_ext(
   if(!env || !model_id)
     return NULL;
 
-  // Resolve AUTO to environment-level provider preference
+  g_mutex_lock(&env->lock);
+
+  // Resolve AUTO to environment-level provider preference (under lock)
   if(provider == DT_AI_PROVIDER_AUTO)
     provider = env->provider;
-
-  g_mutex_lock(&env->lock);
   const char *model_dir_orig
     = (const char *)g_hash_table_lookup(env->model_paths, model_id);
   char *model_dir = model_dir_orig ? g_strdup(model_dir_orig) : NULL;

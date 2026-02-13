@@ -1131,9 +1131,8 @@ _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui
     }
   }
 
-  // Register the group
+  // Register the group (history item added by caller after blend mask assignment)
   dev->forms = g_list_append(dev->forms, grp);
-  dt_dev_add_masks_history_item(dev, NULL, TRUE);
 
   g_list_free(signs);
 
@@ -1361,21 +1360,24 @@ static int _object_events_button_pressed(
     }
 
     // Add the new group to the module's blend mask group
-    if(new_grp && module)
+    if(new_grp)
     {
       dt_develop_t *dev = darktable.develop;
-      dt_masks_form_t *mod_grp
-        = dt_masks_get_from_id(dev, module->blend_params->mask_id);
-      if(!mod_grp)
+      if(module)
       {
-        mod_grp = dt_masks_create(DT_MASKS_GROUP);
-        snprintf(mod_grp->name, sizeof(mod_grp->name), "grp %s", module->op);
-        dev->forms = g_list_append(dev->forms, mod_grp);
-        module->blend_params->mask_id = mod_grp->formid;
+        dt_masks_form_t *mod_grp
+          = dt_masks_get_from_id(dev, module->blend_params->mask_id);
+        if(!mod_grp)
+        {
+          mod_grp = dt_masks_create(DT_MASKS_GROUP);
+          snprintf(mod_grp->name, sizeof(mod_grp->name), "grp %s", module->op);
+          dev->forms = g_list_append(dev->forms, mod_grp);
+          module->blend_params->mask_id = mod_grp->formid;
+        }
+        dt_masks_point_group_t *grpt = dt_masks_group_add_form(mod_grp, new_grp);
+        if(grpt)
+          grpt->opacity = dt_conf_get_float("plugins/darkroom/masks/opacity");
       }
-      dt_masks_point_group_t *grpt = dt_masks_group_add_form(mod_grp, new_grp);
-      if(grpt)
-        grpt->opacity = dt_conf_get_float("plugins/darkroom/masks/opacity");
       dt_dev_add_masks_history_item(dev, module, TRUE);
     }
 
