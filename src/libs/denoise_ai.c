@@ -36,7 +36,8 @@ DT_MODULE(1)
 
 // Config key for the model ID to use
 #define CONF_MODEL_KEY "plugins/lighttable/denoise_ai/model"
-#define DEFAULT_MODEL_ID "nafnet-sidd-width32"
+// NAFNet diverges on uniformly dark tiles; other models (NIND UNet) do not.
+#define DARK_TILE_BOOST FALSE
 
 /**
  * @struct dt_lib_denoise_ai_t
@@ -137,34 +138,37 @@ static int _run_patch(
   }
 
   // Brightness-boost dark tiles so the model sees values in its trained range.
-  // NAFNet (and similar models) diverge on uniformly dark tiles (max sRGB < ~0.3).
+  // NAFNet diverges on uniformly dark tiles (max sRGB < ~0.3).
   // We scale values up before inference and scale the output back down.
-  const float DARK_THRESHOLD = 0.3f;
-  const float BOOST_TARGET = 0.5f;
-  const float MAX_BOOST = 3.0f;
-  float srgb_max = 0.0f;
-  for(int i = 0; i < total_pixels; i++)
-  {
-    if(in_patch[i] > srgb_max)
-      srgb_max = in_patch[i];
-  }
-
   float boost = 1.0f;
-  if(srgb_max > 0.0f && srgb_max < DARK_THRESHOLD)
+  if(DARK_TILE_BOOST)
   {
-    boost = BOOST_TARGET / srgb_max;
-    if(boost > MAX_BOOST)
-      boost = MAX_BOOST;
+    const float DARK_THRESHOLD = 0.3f;
+    const float BOOST_TARGET = 0.5f;
+    const float MAX_BOOST = 3.0f;
+    float srgb_max = 0.0f;
     for(int i = 0; i < total_pixels; i++)
-      in_patch[i] *= boost;
-    dt_print(
-      DT_DEBUG_AI,
-      "[denoise_ai] Tile %d: dark tile (max sRGB=%.4f), boost=%.2fx%s, boosted max=%.4f",
-      tile_idx,
-      srgb_max,
-      boost,
-      (BOOST_TARGET / srgb_max > MAX_BOOST) ? " (capped)" : "",
-      srgb_max * boost);
+    {
+      if(in_patch[i] > srgb_max)
+        srgb_max = in_patch[i];
+    }
+
+    if(srgb_max > 0.0f && srgb_max < DARK_THRESHOLD)
+    {
+      boost = BOOST_TARGET / srgb_max;
+      if(boost > MAX_BOOST)
+        boost = MAX_BOOST;
+      for(int i = 0; i < total_pixels; i++)
+        in_patch[i] *= boost;
+      dt_print(
+        DT_DEBUG_AI,
+        "[denoise_ai] Tile %d: dark tile (max sRGB=%.4f), boost=%.2fx%s, boosted max=%.4f",
+        tile_idx,
+        srgb_max,
+        boost,
+        (BOOST_TARGET / srgb_max > MAX_BOOST) ? " (capped)" : "",
+        srgb_max * boost);
+    }
   }
 
 // Image input: BCHW {1, 3, H, W}
