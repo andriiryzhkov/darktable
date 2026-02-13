@@ -518,10 +518,11 @@ static void _get_decoder_mask_dims(const dt_seg_context_t *ctx, int *out_h, int 
   }
   else
   {
-    // SAM2 with dynamic output dims: mask output matches mask_input
-    // resolution (low_res_dim, typically 256x256)
-    *out_h = ctx->low_res_dim;
-    *out_w = ctx->low_res_dim;
+    // SAM2 with dynamic output dims: allocate at SAM_INPUT_SIZE (1024)
+    // which is the maximum any SAM decoder outputs.  The backend will
+    // report actual dims after inference via the shape array.
+    *out_h = SAM_INPUT_SIZE;
+    *out_w = SAM_INPUT_SIZE;
   }
 }
 
@@ -597,11 +598,12 @@ float *dt_seg_compute_mask(
   // N = ctx->num_masks (1 for single-mask models, 3-4 for multi-mask)
   const int nm = ctx->num_masks;
 
-  // Determine decoder mask output resolution
+  // Determine decoder mask output resolution (may be updated after run
+  // for dynamic-output models when the backend reports actual dims).
   int dec_h, dec_w;
   _get_decoder_mask_dims(ctx, &dec_h, &dec_w);
 
-  const size_t per_mask = (size_t)dec_h * dec_w;
+  size_t per_mask = (size_t)dec_h * dec_w;
   const size_t total_mask_size = (size_t)nm * per_mask;
 
   float *masks = g_try_malloc(total_mask_size * sizeof(float));
@@ -683,6 +685,19 @@ float *dt_seg_compute_mask(
     g_free(low_res);
     g_free(masks);
     return NULL;
+  }
+
+  // Re-read actual mask dimensions from shape array — the backend updates
+  // these for dynamic-output models after ORT reports the real tensor shape.
+  if(masks_shape[2] > 0 && masks_shape[3] > 0
+     && ((int)masks_shape[2] != dec_h || (int)masks_shape[3] != dec_w))
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] Actual decoder output: %"PRId64"x%"PRId64" (expected %dx%d)",
+             masks_shape[2], masks_shape[3], dec_h, dec_w);
+    dec_h = (int)masks_shape[2];
+    dec_w = (int)masks_shape[3];
+    per_mask = (size_t)dec_h * dec_w;
   }
 
   // Select the mask with the highest predicted IoU
@@ -818,10 +833,11 @@ gboolean dt_seg_compute_mask_raw(dt_seg_context_t *ctx,
 
   const int nm = ctx->num_masks;
 
-  // Use decoder mask dims for buffer allocation
+  // Use decoder mask dims for buffer allocation (may be updated after
+  // run for dynamic-output models when the backend reports actual dims).
   int dec_h, dec_w;
   _get_decoder_mask_dims(ctx, &dec_h, &dec_w);
-  const size_t per_mask = (size_t)dec_h * dec_w;
+  size_t per_mask = (size_t)dec_h * dec_w;
 
   float *masks = g_try_malloc((size_t)nm * per_mask * sizeof(float));
   if(!masks)
@@ -869,6 +885,19 @@ gboolean dt_seg_compute_mask_raw(dt_seg_context_t *ctx,
     dt_print(DT_DEBUG_AI, "[segmentation] Raw decoder failed: %d (%.3fs)", ret, dec_elapsed);
     g_free(masks);
     return FALSE;
+  }
+
+  // Re-read actual mask dimensions from shape array — the backend updates
+  // these for dynamic-output models after ORT reports the real tensor shape.
+  if(masks_shape[2] > 0 && masks_shape[3] > 0
+     && ((int)masks_shape[2] != dec_h || (int)masks_shape[3] != dec_w))
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] Actual raw decoder output: %"PRId64"x%"PRId64" (expected %dx%d)",
+             masks_shape[2], masks_shape[3], dec_h, dec_w);
+    dec_h = (int)masks_shape[2];
+    dec_w = (int)masks_shape[3];
+    per_mask = (size_t)dec_h * dec_w;
   }
 
   dt_print(DT_DEBUG_AI, "[segmentation] Raw decode (%.3fs), %d masks at %dx%d",

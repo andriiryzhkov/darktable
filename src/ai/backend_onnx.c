@@ -944,6 +944,21 @@ int dt_ai_run(
         g_ort->ReleaseStatus(status);
         continue;
       }
+      // Update caller's shape array with actual ORT output dimensions.
+      // This is essential for dynamic-shape models where the caller's
+      // pre-assumed shape may differ from what ORT actually produced.
+      size_t actual_ndim = 0;
+      OrtStatus *dim_st = g_ort->GetDimensionsCount(tensor_info, &actual_ndim);
+      if(!dim_st && actual_ndim > 0 && (int)actual_ndim <= outputs[i].ndim)
+      {
+        OrtStatus *get_st = g_ort->GetDimensions(tensor_info, outputs[i].shape, actual_ndim);
+        if(!get_st)
+          outputs[i].ndim = (int)actual_ndim;
+        else
+          g_ort->ReleaseStatus(get_st);
+      }
+      if(dim_st) g_ort->ReleaseStatus(dim_st);
+
       size_t ort_element_count = 0;
       status = g_ort->GetTensorShapeElementCount(tensor_info, &ort_element_count);
       g_ort->ReleaseTensorTypeAndShapeInfo(tensor_info);
