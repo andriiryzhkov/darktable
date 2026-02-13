@@ -508,7 +508,7 @@ static void _get_decoder_mask_dims(const dt_seg_context_t *ctx, int *out_h, int 
     *out_h = ctx->dec_mask_h;
     *out_w = ctx->dec_mask_w;
   }
-  else if(ctx->has_orig_im_size)
+  else if(ctx->has_orig_im_size && ctx->encoded_height > 0 && ctx->encoded_width > 0)
   {
     // SAM/SAM-HQ: decoder produces output at orig_im_size = encoded dims
     *out_h = ctx->encoded_height;
@@ -653,7 +653,14 @@ float *dt_seg_compute_mask(
   if(ctx->has_hq)
   {
     hq_masks = g_try_malloc((size_t)nm * hq_per_mask * sizeof(float));
-    if(hq_masks)
+    if(!hq_masks)
+    {
+      dt_print(DT_DEBUG_AI, "[segmentation] HQ mask alloc failed (%zu bytes), "
+               "falling back to standard masks",
+               (size_t)nm * hq_per_mask * sizeof(float));
+      ctx->has_hq = FALSE;
+    }
+    else
     {
       dec_outputs[num_outputs++] = (dt_ai_tensor_t){
         .data = hq_masks, .type = DT_AI_FLOAT, .shape = hq_shape, .ndim = 4};
