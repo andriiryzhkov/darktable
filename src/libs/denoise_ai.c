@@ -80,8 +80,7 @@ const char *name(dt_lib_module_t *self) { return _("ai denoise"); }
 const char *description(dt_lib_module_t *self)
 {
   return _(
-    "denoise the current image\n"
-    "using generative ai models");
+    "denoise using ai model");
 }
 dt_view_type_flags_t views(dt_lib_module_t *self) { return DT_VIEW_DARKROOM; }
 uint32_t container(dt_lib_module_t *self) { return DT_UI_CONTAINER_PANEL_LEFT_CENTER; }
