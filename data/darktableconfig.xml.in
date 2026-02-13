@@ -370,7 +370,7 @@
   <dtconfig>
     <name>plugins/lighttable/denoise_ai/model</name>
     <type>string</type>
-    <default>nafnet-sidd-width32</default>
+    <default>denoise-nind</default>
     <shortdescription>AI denoise model</shortdescription>
     <longdescription>model ID for AI denoising</longdescription>
   </dtconfig>

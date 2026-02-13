@@ -2,11 +2,11 @@
   "version": 1,
   "models": [
     {
-      "id": "denoise-nafnet",
-      "name": "denoise nafnet",
-      "description": "General-purpose image denoising trained on SIDD dataset",
+      "id": "denoise-nind",
+      "name": "denoise nind",
+      "description": "UNet denoiser trained on NIND dataset",
       "task": "denoise",
-      "github_asset": "denoise-nafnet.zip",
+      "github_asset": "denoise-nind.zip",
       "default": true
     },
     {
