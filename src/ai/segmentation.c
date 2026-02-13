@@ -143,14 +143,14 @@ static void _crop_resize_mask(const float *src, int src_w, int src_h,
 
   for(int y = 0; y < dst_h; y++)
   {
-    const float sy = (float)y * (float)(valid_h - 1) / (float)(dst_h - 1);
+    const float sy = (dst_h > 1) ? (float)y * (float)(valid_h - 1) / (float)(dst_h - 1) : 0.0f;
     const int y0 = MIN((int)sy, valid_h - 1);
     const int y1 = MIN(y0 + 1, valid_h - 1);
     const float fy = sy - (float)y0;
 
     for(int x = 0; x < dst_w; x++)
     {
-      const float sx = (float)x * (float)(valid_w - 1) / (float)(dst_w - 1);
+      const float sx = (dst_w > 1) ? (float)x * (float)(valid_w - 1) / (float)(dst_w - 1) : 0.0f;
       const int x0 = MIN((int)sx, valid_w - 1);
       const int x1 = MIN(x0 + 1, valid_w - 1);
       const float fx = sx - (float)x0;
