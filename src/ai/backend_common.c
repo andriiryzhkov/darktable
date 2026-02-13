@@ -18,9 +18,23 @@
 
 #include "backend.h"
 #include "common/darktable.h"
+#include "control/conf.h"
 #include <glib.h>
 #include <json-glib/json-glib.h>
 #include <string.h>
+
+#define CONF_AI_PROVIDER_KEY "plugins/ai/provider"
+
+static dt_ai_provider_t _provider_from_string(const char *str)
+{
+  if(!str || g_ascii_strcasecmp(str, "auto") == 0) return DT_AI_PROVIDER_AUTO;
+  if(g_ascii_strcasecmp(str, "cpu") == 0) return DT_AI_PROVIDER_CPU;
+  if(g_ascii_strcasecmp(str, "coreml") == 0) return DT_AI_PROVIDER_COREML;
+  if(g_ascii_strcasecmp(str, "cuda") == 0) return DT_AI_PROVIDER_CUDA;
+  if(g_ascii_strcasecmp(str, "rocm") == 0) return DT_AI_PROVIDER_ROCM;
+  if(g_ascii_strcasecmp(str, "directml") == 0) return DT_AI_PROVIDER_DIRECTML;
+  return DT_AI_PROVIDER_AUTO;
+}
 
 // --- Internal Structures ---
 
@@ -34,6 +48,9 @@ struct dt_ai_environment_t
 
   // Remembered for refresh
   char *search_paths;
+
+  // Default execution provider (read from config at init, override with dt_ai_env_set_provider)
+  dt_ai_provider_t provider; // DT_AI_PROVIDER_AUTO = platform auto-detect
 
   GMutex lock; // Thread safety for model list access
 };
@@ -174,6 +191,11 @@ dt_ai_environment_t *dt_ai_env_init(const char *search_paths)
   env->model_paths = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
   env->search_paths = g_strdup(search_paths);
 
+  // Read user's preferred execution provider from config
+  char *prov_str = dt_conf_get_string(CONF_AI_PROVIDER_KEY);
+  env->provider = _provider_from_string(prov_str);
+  g_free(prov_str);
+
   _scan_all_paths(env);
   env->models = g_list_reverse(env->models);
 
@@ -256,10 +278,26 @@ void dt_ai_env_destroy(dt_ai_environment_t *env)
   g_free(env);
 }
 
+void dt_ai_env_set_provider(dt_ai_environment_t *env, dt_ai_provider_t provider)
+{
+  if(!env)
+    return;
+  env->provider = provider;
+}
+
+dt_ai_provider_t dt_ai_env_get_provider(dt_ai_environment_t *env)
+{
+  if(!env)
+    return DT_AI_PROVIDER_AUTO;
+  return env->provider;
+}
+
 // --- Backend-specific load (defined in backend_onnx.c) ---
 
 extern dt_ai_context_t *
-dt_ai_onnx_load(const char *model_dir, const char *model_file, dt_ai_provider_t provider);
+dt_ai_onnx_load_ext(const char *model_dir, const char *model_file,
+                    dt_ai_provider_t provider, dt_ai_opt_level_t opt_level,
+                    const dt_ai_dim_override_t *dim_overrides, int n_overrides);
 
 // --- Model Loading with Backend Dispatch ---
 
@@ -269,17 +307,32 @@ dt_ai_context_t *dt_ai_load_model(
   const char *model_file,
   dt_ai_provider_t provider)
 {
+  return dt_ai_load_model_ext(env, model_id, model_file, provider,
+                               DT_AI_OPT_ALL, NULL, 0);
+}
+
+dt_ai_context_t *dt_ai_load_model_ext(
+  dt_ai_environment_t *env,
+  const char *model_id,
+  const char *model_file,
+  dt_ai_provider_t provider,
+  dt_ai_opt_level_t opt_level,
+  const dt_ai_dim_override_t *dim_overrides,
+  int n_overrides)
+{
   if(!env || !model_id)
     return NULL;
 
-  // Copy model_dir and backend under lock to avoid race with dt_ai_env_refresh
+  // Resolve AUTO to environment-level provider preference
+  if(provider == DT_AI_PROVIDER_AUTO)
+    provider = env->provider;
+
   g_mutex_lock(&env->lock);
   const char *model_dir_orig
     = (const char *)g_hash_table_lookup(env->model_paths, model_id);
   char *model_dir = model_dir_orig ? g_strdup(model_dir_orig) : NULL;
 
-  // Find backend type for this model
-  const char *backend = "onnx"; // default
+  const char *backend = "onnx";
   for(GList *l = env->models; l != NULL; l = l->next)
   {
     dt_ai_model_info_t *info = (dt_ai_model_info_t *)l->data;
@@ -303,7 +356,8 @@ dt_ai_context_t *dt_ai_load_model(
 
   if(strcmp(backend_copy, "onnx") == 0)
   {
-    ctx = dt_ai_onnx_load(model_dir, model_file, provider);
+    ctx = dt_ai_onnx_load_ext(model_dir, model_file, provider, opt_level,
+                               dim_overrides, n_overrides);
   }
   else
   {

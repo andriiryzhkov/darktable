@@ -325,7 +325,7 @@ static gpointer _encode_thread_func(gpointer data)
       d->env = dt_ai_env_init(NULL);
 
     char *model_id = dt_conf_get_string(CONF_OBJECT_MODEL_KEY);
-    d->seg = dt_seg_load(d->env, model_id, DT_AI_PROVIDER_AUTO);
+    d->seg = dt_seg_load(d->env, model_id);
     g_free(model_id);
 
     if(!d->seg)
@@ -425,8 +425,9 @@ static gpointer _encode_thread_func(gpointer data)
   {
     dt_print(DT_DEBUG_AI, "[object mask] Encoding failed, retrying with CPU provider");
     dt_seg_free(d->seg);
+    dt_ai_env_set_provider(d->env, DT_AI_PROVIDER_CPU);
     char *model_id = dt_conf_get_string(CONF_OBJECT_MODEL_KEY);
-    d->seg = dt_seg_load(d->env, model_id, DT_AI_PROVIDER_CPU);
+    d->seg = dt_seg_load(d->env, model_id);
     g_free(model_id);
 
     if(d->seg)
@@ -468,9 +469,9 @@ static gpointer _auto_thread_func(gpointer data)
   // Stability score thresholds in sigmoid space: sigmoid(-1)=0.269, sigmoid(1)=0.731
   const float stab_lo = 0.269f;
   const float stab_hi = 0.731f;
-  const int total_pixels = enc_w * enc_h;
-  const int min_area = MAX(100, total_pixels / 1000); // 0.1% of image
-  const int max_area = (int)(total_pixels * 0.95f);   // 95% of image
+  int total_pixels = enc_w * enc_h;
+  int min_area = MAX(100, total_pixels / 1000); // 0.1% of image
+  int max_area = (int)(total_pixels * 0.95f);   // 95% of image
 
   // Phase 1: Decode all grid points, collect candidate masks
   const int max_candidates = grid_n * grid_n * 8;
@@ -494,6 +495,16 @@ static gpointer _auto_thread_func(gpointer data)
       {
         g_atomic_int_add(&ad->grid_done, 1);
         continue;
+      }
+
+      // Update mask dims from first successful decode (SAM2 may differ from encoded dims)
+      if(ad->lw != mw || ad->lh != mh)
+      {
+        ad->lw = mw;
+        ad->lh = mh;
+        total_pixels = mw * mh;
+        min_area = MAX(100, total_pixels / 1000);
+        max_area = (int)(total_pixels * 0.95f);
       }
 
       const size_t per_mask = (size_t)mw * mh;
@@ -593,13 +604,15 @@ static gpointer _auto_thread_func(gpointer data)
   g_free(candidates);
 
   // Phase 3: Build label map — smallest masks paint last (most specific wins hover)
-  ad->label_map = g_try_malloc((size_t)enc_w * enc_h * sizeof(int16_t));
+  // Use ad->lw/lh (decoder mask dims, may differ from enc_w/enc_h for SAM2)
+  const size_t label_npix = (size_t)ad->lw * ad->lh;
+  ad->label_map = g_try_malloc(label_npix * sizeof(int16_t));
   if(!ad->label_map)
   {
     g_atomic_int_set(&ad->auto_state, AUTO_ERROR);
     return NULL;
   }
-  memset(ad->label_map, 0xFF, (size_t)enc_w * enc_h * sizeof(int16_t)); // -1
+  memset(ad->label_map, 0xFF, label_npix * sizeof(int16_t)); // -1
 
   // Build index sorted by area ascending
   int sort_idx[AUTO_MAX_MASKS];
@@ -627,7 +640,7 @@ static gpointer _auto_thread_func(gpointer data)
     {
       const int start = m->runs[r * 2];
       const int len = m->runs[r * 2 + 1];
-      const int end = MIN(start + len, enc_w * enc_h);
+      const int end = MIN(start + len, (int)label_npix);
       for(int p = start; p < end; p++)
         ad->label_map[p] = (int16_t)mi;
     }
@@ -976,20 +989,21 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
   }
 }
 
-// Finalize: vectorize the mask and register as a group of path forms
-static void
+// Finalize: vectorize the mask and register as a group of path forms.
+// Returns the created group form, or NULL on failure.
+static dt_masks_form_t *
 _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
   if(!d || !d->mask)
-    return;
+    return NULL;
 
   // Invert mask for potrace (potrace traces dark regions)
   // Our mask: 1.0 = foreground; potrace expects: 0.0 = foreground
   const size_t n = (size_t)d->mask_w * d->mask_h;
   float *inv_mask = g_try_malloc(n * sizeof(float));
   if(!inv_mask)
-    return;
+    return NULL;
 
   for(size_t i = 0; i < n; i++)
     inv_mask[i] = 1.0f - d->mask[i];
@@ -1067,7 +1081,7 @@ _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui
   {
     g_list_free(signs);
     dt_control_log(_("no mask extracted from AI segmentation"));
-    return;
+    return NULL;
   }
 
   // Always wrap paths in a group — holes use difference mode
@@ -1124,19 +1138,21 @@ _finalize_mask(dt_iop_module_t *module, dt_masks_form_t *form, dt_masks_form_gui
   g_list_free(signs);
 
   dt_print(DT_DEBUG_AI, "[object mask] created %d paths", nbform);
+  return grp;
 }
 
 // Finalize auto mode: union selected RLE masks into float mask and vectorize
-static void _finalize_auto_mask(dt_iop_module_t *module, dt_masks_form_t *form,
-                                 dt_masks_form_gui_t *gui)
+static dt_masks_form_t *
+_finalize_auto_mask(dt_iop_module_t *module, dt_masks_form_t *form,
+                    dt_masks_form_gui_t *gui)
 {
   _object_data_t *d = _get_data(gui);
   if(!d || !d->autodata)
-    return;
+    return NULL;
 
   _auto_data_t *ad = d->autodata;
   if(ad->n_masks == 0 || ad->lw <= 0 || ad->lh <= 0)
-    return;
+    return NULL;
 
   // Check if any mask is selected
   gboolean any_selected = FALSE;
@@ -1149,13 +1165,13 @@ static void _finalize_auto_mask(dt_iop_module_t *module, dt_masks_form_t *form,
     }
   }
   if(!any_selected)
-    return;
+    return NULL;
 
   // Build union float mask from selected RLE masks
   const size_t npix = (size_t)ad->lw * ad->lh;
   float *mask = g_try_malloc0(npix * sizeof(float));
   if(!mask)
-    return;
+    return NULL;
 
   for(int i = 0; i < ad->n_masks; i++)
   {
@@ -1178,7 +1194,7 @@ static void _finalize_auto_mask(dt_iop_module_t *module, dt_masks_form_t *form,
   d->mask_w = ad->lw;
   d->mask_h = ad->lh;
 
-  _finalize_mask(module, form, gui);
+  return _finalize_mask(module, form, gui);
 }
 
 // --- Mask Event Handlers ---
@@ -1334,10 +1350,34 @@ static int _object_events_button_pressed(
       return 1;
 
     // Right-click: finalize mask
+    dt_masks_form_t *new_grp = NULL;
     if(auto_mode)
-      _finalize_auto_mask(module, form, gui);
+    {
+      new_grp = _finalize_auto_mask(module, form, gui);
+    }
     else if(gui->guipoints_count > 0)
-      _finalize_mask(module, form, gui);
+    {
+      new_grp = _finalize_mask(module, form, gui);
+    }
+
+    // Add the new group to the module's blend mask group
+    if(new_grp && module)
+    {
+      dt_develop_t *dev = darktable.develop;
+      dt_masks_form_t *mod_grp
+        = dt_masks_get_from_id(dev, module->blend_params->mask_id);
+      if(!mod_grp)
+      {
+        mod_grp = dt_masks_create(DT_MASKS_GROUP);
+        snprintf(mod_grp->name, sizeof(mod_grp->name), "grp %s", module->op);
+        dev->forms = g_list_append(dev->forms, mod_grp);
+        module->blend_params->mask_id = mod_grp->formid;
+      }
+      dt_masks_point_group_t *grpt = dt_masks_group_add_form(mod_grp, new_grp);
+      if(grpt)
+        grpt->opacity = dt_conf_get_float("plugins/darkroom/masks/opacity");
+      dt_dev_add_masks_history_item(dev, module, TRUE);
+    }
 
     // Cleanup and exit creation mode
     _free_data(gui);
@@ -1351,8 +1391,19 @@ static int _object_events_button_pressed(
     gui->creation_continuous = FALSE;
     gui->creation_continuous_module = NULL;
 
-    dt_masks_set_edit_mode(module, DT_MASKS_EDIT_FULL);
-    dt_masks_iop_update(module);
+    // Exit creation mode and select the new group.
+    // dt_masks_set_edit_mode requires a non-NULL module (it returns
+    // immediately otherwise), so clear the form directly when
+    // module is NULL (standalone mask creation).
+    if(module)
+    {
+      dt_masks_set_edit_mode(module, DT_MASKS_EDIT_FULL);
+      dt_masks_iop_update(module);
+    }
+    else
+    {
+      dt_masks_change_form_gui(NULL);
+    }
     dt_control_queue_redraw_center();
     return 1;
   }

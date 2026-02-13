@@ -33,6 +33,20 @@ typedef enum {
 } dt_ai_provider_t;
 
 /**
+ * @brief Graph Optimization Level
+ *
+ * Models with fully dynamic output shapes (e.g. SAM2 decoder) can fail
+ * under aggressive graph optimization because ONNX Runtime's shape
+ * inference mis-computes intermediate tensor sizes.  Use DT_AI_OPT_BASIC
+ * for such models to avoid internal shape validation errors.
+ */
+typedef enum {
+  DT_AI_OPT_ALL = 0,      ///< All optimizations (default, fastest)
+  DT_AI_OPT_BASIC = 1,    ///< Basic only (constant folding, redundant node elimination)
+  DT_AI_OPT_DISABLED = 2, ///< No optimization (reserved for future use)
+} dt_ai_opt_level_t;
+
+/**
  * @brief Library Environment Handle
  * Opaque handle representing the initialized AI library environment.
  */
@@ -101,6 +115,22 @@ void dt_ai_env_refresh(dt_ai_environment_t *env);
  */
 void dt_ai_env_destroy(dt_ai_environment_t *env);
 
+/**
+ * @brief Set the default execution provider for this environment.
+ *        When dt_ai_load_model / dt_ai_load_model_opts is called with
+ *        DT_AI_PROVIDER_AUTO, the environment's provider is used instead.
+ * @param env The environment handle.
+ * @param provider The provider to use (DT_AI_PROVIDER_AUTO = platform auto-detect).
+ */
+void dt_ai_env_set_provider(dt_ai_environment_t *env, dt_ai_provider_t provider);
+
+/**
+ * @brief Get the default execution provider for this environment.
+ * @param env The environment handle.
+ * @return The currently set provider.
+ */
+dt_ai_provider_t dt_ai_env_get_provider(dt_ai_environment_t *env);
+
 /* --- Execution --- */
 
 /**
@@ -115,6 +145,35 @@ dt_ai_context_t *dt_ai_load_model(dt_ai_environment_t *env,
                                   const char *model_id,
                                   const char *model_file,
                                   dt_ai_provider_t provider);
+
+/**
+ * @brief Symbolic dimension override for models with dynamic shapes.
+ */
+typedef struct {
+  const char *name;  ///< Symbolic dimension name (e.g. "num_labels")
+  int64_t value;     ///< Concrete value to use
+} dt_ai_dim_override_t;
+
+/**
+ * @brief Load a model with optimization options and symbolic dimension overrides.
+ *        Dimension overrides fix shape inference for models with symbolic dims
+ *        that prevent ONNX Runtime from resolving intermediate tensor shapes.
+ * @param env Library environment.
+ * @param model_id ID of the model to load.
+ * @param model_file Filename within the model directory (NULL = "model.onnx").
+ * @param provider Execution provider to use for hardware acceleration.
+ * @param opt_level Graph optimization level.
+ * @param dim_overrides Array of symbolic dimension overrides (NULL = none).
+ * @param n_overrides Number of overrides.
+ * @return dt_ai_context_t* Context ready for inference, or NULL.
+ */
+dt_ai_context_t *dt_ai_load_model_ext(dt_ai_environment_t *env,
+                                       const char *model_id,
+                                       const char *model_file,
+                                       dt_ai_provider_t provider,
+                                       dt_ai_opt_level_t opt_level,
+                                       const dt_ai_dim_override_t *dim_overrides,
+                                       int n_overrides);
 
 /**
  * @brief Tensor Data Types

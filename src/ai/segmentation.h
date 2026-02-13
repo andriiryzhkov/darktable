@@ -36,16 +36,16 @@ typedef struct dt_seg_point_t {
 } dt_seg_point_t;
 
 /**
- * @brief Load a SAM-HQ segmentation model from the model registry.
+ * @brief Load a SAM segmentation model from the model registry.
  *        Expects encoder.onnx and decoder.onnx in the model directory.
+ *        The execution provider is taken from the environment (read from
+ *        the plugins/ai/provider config key at dt_ai_env_init time).
  * @param env AI environment (model registry).
  * @param model_id Model ID to look up in the registry.
- * @param provider Execution provider (DT_AI_PROVIDER_AUTO for auto-detect).
  * @return Context, or NULL on error.
  */
 dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env,
-                              const char *model_id,
-                              dt_ai_provider_t provider);
+                              const char *model_id);
 
 /**
  * @brief Encode an image (run the SAM encoder once).

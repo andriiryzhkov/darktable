@@ -10,11 +10,11 @@
       "default": true
     },
     {
-      "id": "mask-light-hq-sam",
-      "name": "mask light sam-hq",
-      "description": "Light HQ Segment Anything Model for masking",
+      "id": "mask-sam21-small",
+      "name": "mask sam2.1 hiera small",
+      "description": "Segment Anything 2.1 (Hiera Small) for masking",
       "task": "mask",
-      "github_asset": "mask-light-hq-sam.zip",
+      "github_asset": "mask-sam21-small.zip",
       "default": true
     }
   ]

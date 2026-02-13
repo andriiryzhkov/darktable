@@ -377,7 +377,7 @@
   <dtconfig>
     <name>plugins/darkroom/masks/object/model</name>
     <type>string</type>
-    <default>mask-light-hq-sam</default>
+    <default>mask-sam21-small</default>
     <shortdescription>AI mask model</shortdescription>
     <longdescription>model ID for AI object mask segmentation</longdescription>
   </dtconfig>

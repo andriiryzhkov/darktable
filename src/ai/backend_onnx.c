@@ -20,6 +20,7 @@
 #include "common/darktable.h"
 #include <glib.h>
 #include <onnxruntime_c_api.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,6 +46,10 @@ struct dt_ai_context_t
   dt_ai_dtype_t *input_types;
   size_t output_count;
   dt_ai_dtype_t *output_types;
+
+  // TRUE when any output has symbolic/dynamic shape dims.
+  // In that case dt_ai_run() lets ORT allocate outputs and copies back.
+  gboolean dynamic_outputs;
 };
 
 // Global singletons (initialized exactly once via g_once)
@@ -397,10 +402,12 @@ _enable_acceleration(OrtSessionOptions *session_opts, dt_ai_provider_t provider)
 
 // --- ONNX Model Loading ---
 
-// Load ONNX model from model_dir/model_file.
+// Load ONNX model from model_dir/model_file with dimension overrides.
 // If model_file is NULL, defaults to "model.onnx".
 dt_ai_context_t *
-dt_ai_onnx_load(const char *model_dir, const char *model_file, dt_ai_provider_t provider)
+dt_ai_onnx_load_ext(const char *model_dir, const char *model_file,
+                    dt_ai_provider_t provider, dt_ai_opt_level_t opt_level,
+                    const dt_ai_dim_override_t *dim_overrides, int n_overrides)
 {
   if(!model_dir)
     return NULL;
@@ -467,7 +474,11 @@ dt_ai_onnx_load(const char *model_dir, const char *model_file, dt_ai_provider_t 
     return NULL;
   }
 
-  status = g_ort->SetSessionGraphOptimizationLevel(session_opts, ORT_ENABLE_ALL);
+  const GraphOptimizationLevel ort_opt
+    = (opt_level == DT_AI_OPT_DISABLED) ? ORT_DISABLE_ALL
+    : (opt_level == DT_AI_OPT_BASIC)    ? ORT_ENABLE_BASIC
+                                         : ORT_ENABLE_ALL;
+  status = g_ort->SetSessionGraphOptimizationLevel(session_opts, ort_opt);
   if(status)
   {
     g_ort->ReleaseStatus(status);
@@ -475,6 +486,20 @@ dt_ai_onnx_load(const char *model_dir, const char *model_file, dt_ai_provider_t 
     g_free(onnx_path);
     dt_ai_unload_model(ctx);
     return NULL;
+  }
+
+  // Override symbolic dimensions (fixes shape inference for dynamic-shape models)
+  for(int i = 0; i < n_overrides; i++)
+  {
+    if(!dim_overrides[i].name) continue;
+    status = g_ort->AddFreeDimensionOverrideByName(
+      session_opts, dim_overrides[i].name, dim_overrides[i].value);
+    if(status)
+    {
+      dt_print(DT_DEBUG_AI, "[darktable_ai] Dim override '%s' failed: %s",
+               dim_overrides[i].name, g_ort->GetErrorMessage(status));
+      g_ort->ReleaseStatus(status);
+    }
   }
 
   // Optimize: Enable Hardware Acceleration
@@ -652,6 +677,31 @@ dt_ai_onnx_load(const char *model_dir, const char *model_file, dt_ai_provider_t 
     g_ort->ReleaseTypeInfo(typeinfo);
   }
 
+  // Detect dynamic output shapes (any dim <= 0 means symbolic/unknown).
+  // When detected, dt_ai_run() will let ORT allocate outputs during
+  // execution and copy the results back to the caller's buffer.
+  ctx->dynamic_outputs = FALSE;
+  for(size_t i = 0; i < ctx->output_count; i++)
+  {
+    int64_t shape[16];
+    int ndim = dt_ai_get_output_shape(ctx, (int)i, shape, 16);
+    if(ndim > 0)
+    {
+      for(int d = 0; d < ndim; d++)
+      {
+        if(shape[d] <= 0)
+        {
+          ctx->dynamic_outputs = TRUE;
+          dt_print(DT_DEBUG_AI,
+                   "[darktable_ai] Output[%zu] has dynamic dims — using ORT-allocated outputs",
+                   i);
+          break;
+        }
+      }
+    }
+    if(ctx->dynamic_outputs) break;
+  }
+
   return ctx;
 }
 
@@ -774,15 +824,15 @@ int dt_ai_run(
     }
   }
 
-  // Create Output Tensors (Pre-allocated)
+  // Create Output Tensors
   const char **output_names = (const char **)ctx->output_names;
 
   for(int i = 0; i < num_outputs; i++)
   {
-    // Check for Type Mismatch (Float16 -> Float)
-    if(outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16)
+    // Dynamic outputs or Float16 mismatch: let ORT allocate during Run()
+    if(ctx->dynamic_outputs
+       || (outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16))
     {
-      // Let ORT allocate the output tensor (Float16)
       output_tensors[i] = NULL;
       continue;
     }
@@ -859,43 +909,99 @@ int dt_ai_run(
   }
   else
   {
-    // Post-Run: Auto-convert Output (Half -> Float)
+    // Post-Run: Copy data from ORT-allocated outputs to caller's buffers.
+    // This handles both dynamic-shape models (where we can't pre-allocate
+    // because ORT's shape inference disagrees with the actual output shape)
+    // and Float16→Float auto-conversion.
     for(int i = 0; i < num_outputs; i++)
     {
-      if(outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16)
+      const gboolean ort_allocated = ctx->dynamic_outputs
+        || (outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16);
+      if(!ort_allocated || !output_tensors[i]) continue;
+
+      void *raw_data = NULL;
+      status = g_ort->GetTensorMutableData(output_tensors[i], &raw_data);
+      if(status)
       {
-        if(output_tensors[i])
+        dt_print(
+          DT_DEBUG_AI,
+          "[darktable_ai] GetTensorMutableData Output[%d] failed: %s",
+          i,
+          g_ort->GetErrorMessage(status));
+        g_ort->ReleaseStatus(status);
+        continue;
+      }
+
+      // Query ORT's actual tensor size to avoid reading past its allocation.
+      // The caller's expected shape may differ from what ORT produced
+      // (e.g., dynamic-shape models).
+      OrtTensorTypeAndShapeInfo *tensor_info = NULL;
+      status = g_ort->GetTensorTypeAndShape(output_tensors[i], &tensor_info);
+      if(status)
+      {
+        dt_print(DT_DEBUG_AI, "[darktable_ai] GetTensorTypeAndShape Output[%d] failed: %s",
+                 i, g_ort->GetErrorMessage(status));
+        g_ort->ReleaseStatus(status);
+        continue;
+      }
+      size_t ort_element_count = 0;
+      status = g_ort->GetTensorShapeElementCount(tensor_info, &ort_element_count);
+      g_ort->ReleaseTensorTypeAndShapeInfo(tensor_info);
+      if(status)
+      {
+        dt_print(DT_DEBUG_AI, "[darktable_ai] GetTensorShapeElementCount Output[%d] failed: %s",
+                 i, g_ort->GetErrorMessage(status));
+        g_ort->ReleaseStatus(status);
+        continue;
+      }
+
+      const int64_t caller_count
+        = _safe_element_count(outputs[i].shape, outputs[i].ndim);
+      if(caller_count < 0)
+      {
+        dt_print(
+          DT_DEBUG_AI,
+          "[darktable_ai] Invalid shape for Output[%d] post-copy",
+          i);
+        continue;
+      }
+
+      // Use the smaller of ORT's actual size and caller's expected size
+      const int64_t element_count = ((int64_t)ort_element_count < caller_count)
+        ? (int64_t)ort_element_count
+        : caller_count;
+
+      if(element_count != caller_count)
+      {
+        dt_print(DT_DEBUG_AI,
+                 "[darktable_ai] Output[%d] shape mismatch: ORT has %zu elements, "
+                 "caller expects %" PRId64,
+                 i, ort_element_count, caller_count);
+      }
+
+      if(ctx->output_types[i] == DT_AI_FLOAT16 && outputs[i].type == DT_AI_FLOAT)
+      {
+        // Float16 → Float conversion
+        uint16_t *half_data = (uint16_t *)raw_data;
+        float *dst = (float *)outputs[i].data;
+        for(int64_t k = 0; k < element_count; k++)
+          dst[k] = _half_to_float(half_data[k]);
+      }
+      else
+      {
+        // Same-type copy from ORT allocation to caller's buffer
+        ONNXTensorElementDataType onnx_type;
+        size_t type_size;
+        if(!_dtype_to_onnx(outputs[i].type, &onnx_type, &type_size))
         {
-          void *raw_data = NULL;
-          status = g_ort->GetTensorMutableData(output_tensors[i], &raw_data);
-          if(status)
-          {
-            dt_print(
-              DT_DEBUG_AI,
-              "[darktable_ai] GetTensorMutableData failed: %s",
-              g_ort->GetErrorMessage(status));
-            g_ort->ReleaseStatus(status);
-            continue;
-          }
-
-          const int64_t element_count
-            = _safe_element_count(outputs[i].shape, outputs[i].ndim);
-          if(element_count < 0)
-          {
-            dt_print(
-              DT_DEBUG_AI,
-              "[darktable_ai] Invalid or overflowing shape for Output[%d]",
-              i);
-            continue;
-          }
-
-          uint16_t *half_data = (uint16_t *)raw_data;
-          float *dst = (float *)outputs[i].data;
-          for(int64_t k = 0; k < element_count; k++)
-          {
-            dst[k] = _half_to_float(half_data[k]);
-          }
+          dt_print(
+            DT_DEBUG_AI,
+            "[darktable_ai] Unknown dtype %d for Output[%d] post-copy",
+            outputs[i].type,
+            i);
+          continue;
         }
+        memcpy(outputs[i].data, raw_data, element_count * type_size);
       }
     }
   }
