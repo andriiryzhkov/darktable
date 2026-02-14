@@ -558,6 +558,26 @@ float *dt_seg_compute_mask(
   const float has_mask = ctx->has_prev_mask ? 1.0f : 0.0f;
   const int lr_dim = ctx->low_res_dim;
 
+  // Debug: log mask feedback state
+  if(ctx->has_prev_mask)
+  {
+    float lr_min = ctx->low_res_masks[0], lr_max = ctx->low_res_masks[0];
+    for(int k = 1; k < lr_dim * lr_dim; k++)
+    {
+      if(ctx->low_res_masks[k] < lr_min) lr_min = ctx->low_res_masks[k];
+      if(ctx->low_res_masks[k] > lr_max) lr_max = ctx->low_res_masks[k];
+    }
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] has_mask=%.0f, low_res range=[%.3f, %.3f], n_points=%d",
+             has_mask, lr_min, lr_max, n_points);
+  }
+  else
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] has_mask=%.0f (no previous mask), n_points=%d",
+             has_mask, n_points);
+  }
+
   // Build decoder inputs: encoder outputs first, then prompt tensors
   int64_t coords_shape[3] = {1, total_points, 2};
   int64_t labels_shape[2] = {1, total_points};
@@ -717,6 +737,23 @@ float *dt_seg_compute_mask(
     memcpy(ctx->low_res_masks, low_res + (size_t)best * low_res_per,
            low_res_per * sizeof(float));
     ctx->has_prev_mask = TRUE;
+
+    // Debug: log cached mask stats
+    float cached_min = ctx->low_res_masks[0], cached_max = ctx->low_res_masks[0];
+    for(size_t k = 1; k < low_res_per; k++)
+    {
+      if(ctx->low_res_masks[k] < cached_min) cached_min = ctx->low_res_masks[k];
+      if(ctx->low_res_masks[k] > cached_max) cached_max = ctx->low_res_masks[k];
+    }
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] Cached low_res mask: range=[%.3f, %.3f], has_low_res=%d",
+             cached_min, cached_max, ctx->has_low_res);
+  }
+  else
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] No low_res output to cache (has_low_res=%d)",
+             ctx->has_low_res);
   }
   g_free(low_res);
 

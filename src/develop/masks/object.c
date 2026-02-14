@@ -917,8 +917,15 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
   const float sx = (wd > 0) ? (float)d->encode_w / wd : 1.0f;
   const float sy = (ht > 0) ? (float)d->encode_h / ht : 1.0f;
 
-  dt_seg_point_t *points = g_new(dt_seg_point_t, gui->guipoints_count);
-  for(int i = 0; i < gui->guipoints_count; i++)
+  // Always send all accumulated points.  On the first click reset the
+  // previous mask; on subsequent clicks keep it so the decoder gets
+  // both all points AND the previous mask as boundary context.
+  const int n_prompt_points = gui->guipoints_count;
+  if(gui->guipoints_count <= 1)
+    dt_seg_reset_prev_mask(d->seg);
+
+  dt_seg_point_t *points = g_new(dt_seg_point_t, n_prompt_points);
+  for(int i = 0; i < n_prompt_points; i++)
   {
     points[i].x = gp[i * 2 + 0] * sx;
     points[i].y = gp[i * 2 + 1] * sy;
@@ -926,35 +933,35 @@ static void _run_decoder(dt_masks_form_gui_t *gui)
   }
 
   // Find seed point for connected component filter:
-  // use last foreground point, or center of last box
+  // always search ALL accumulated points (not just prompt points)
   int seed_x = -1, seed_y = -1;
   for(int i = gui->guipoints_count - 1; i >= 0; i--)
   {
-    if(points[i].label == 1)
+    const int label = (int)gpp[i];
+    if(label == 1)
     {
-      seed_x = (int)points[i].x;
-      seed_y = (int)points[i].y;
+      seed_x = (int)(gp[i * 2 + 0] * sx);
+      seed_y = (int)(gp[i * 2 + 1] * sy);
       break;
     }
-    else if(points[i].label == 3 && i > 0 && points[i - 1].label == 2)
+    else if(label == 3 && i > 0 && (int)gpp[i - 1] == 2)
     {
       // Box: use center of the two corners
-      seed_x = (int)((points[i - 1].x + points[i].x) * 0.5f);
-      seed_y = (int)((points[i - 1].y + points[i].y) * 0.5f);
+      seed_x = (int)((gp[(i - 1) * 2 + 0] + gp[i * 2 + 0]) * 0.5f * sx);
+      seed_y = (int)((gp[(i - 1) * 2 + 1] + gp[i * 2 + 1]) * 0.5f * sy);
       break;
     }
   }
 
   // Multi-pass iterative refinement: run decoder multiple times,
   // feeding back the low-res mask each time to tighten boundaries.
-  dt_seg_reset_prev_mask(d->seg);
   const int n_passes = CLAMP(dt_conf_get_int(CONF_OBJECT_REFINE_KEY), 1, 5);
   int mw = 0, mh = 0;
   float *mask = NULL;
 
   for(int pass = 0; pass < n_passes; pass++)
   {
-    float *new_mask = dt_seg_compute_mask(d->seg, points, gui->guipoints_count, &mw, &mh);
+    float *new_mask = dt_seg_compute_mask(d->seg, points, n_prompt_points, &mw, &mh);
     if(!new_mask)
       break;
     g_free(mask);
