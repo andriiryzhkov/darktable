@@ -1868,23 +1868,27 @@ static void _object_events_post_expose(
     gdk_window_get_device_position(win, pointer, NULL, NULL, &mod);
   const gboolean shift_held = (mod & GDK_SHIFT_MASK) != 0;
 
-  // Draw +/- cursor indicator (white, like other mask controls)
-  const float r = DT_PIXEL_APPLY_DPI(8.0f) / zoom_scale;
-  const float lw = DT_PIXEL_APPLY_DPI(2.0f) / zoom_scale;
-  cairo_set_line_width(cr, lw);
-  cairo_set_source_rgba(cr, 0.9, 0.9, 0.9, 0.9);
-
-  // Horizontal line (common to both + and -)
-  cairo_move_to(cr, gui->posx - r, gui->posy);
-  cairo_line_to(cr, gui->posx + r, gui->posy);
-  cairo_stroke(cr);
-
-  if(!shift_held)
+  // Draw +/- cursor indicator (white, like other mask controls).
+  // Hide during box drag — boxes are always foreground.
+  if(!d->dragging)
   {
-    // Add mode: vertical line to form "+"
-    cairo_move_to(cr, gui->posx, gui->posy - r);
-    cairo_line_to(cr, gui->posx, gui->posy + r);
+    const float r = DT_PIXEL_APPLY_DPI(8.0f) / zoom_scale;
+    const float lw = DT_PIXEL_APPLY_DPI(2.0f) / zoom_scale;
+    cairo_set_line_width(cr, lw);
+    cairo_set_source_rgba(cr, 0.9, 0.9, 0.9, 0.9);
+
+    // Horizontal line (common to both + and -)
+    cairo_move_to(cr, gui->posx - r, gui->posy);
+    cairo_line_to(cr, gui->posx + r, gui->posy);
     cairo_stroke(cr);
+
+    if(!shift_held)
+    {
+      // Add mode: vertical line to form "+"
+      cairo_move_to(cr, gui->posx, gui->posy - r);
+      cairo_line_to(cr, gui->posx, gui->posy + r);
+      cairo_stroke(cr);
+    }
   }
 
   // Draw dashed rectangle while dragging a box prompt
