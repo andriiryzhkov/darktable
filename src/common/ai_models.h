@@ -140,6 +140,15 @@ dt_ai_model_t *dt_ai_models_get_by_index(dt_ai_registry_t *registry, int index);
 dt_ai_model_t *dt_ai_models_get_by_id(dt_ai_registry_t *registry,
                                        const char *model_id);
 
+/**
+ * @brief Get the default model ID for a given task (e.g. "depth", "denoise")
+ * @param registry The registry
+ * @param task The task string to match
+ * @return Model ID string (caller must free with g_free), or NULL if none found
+ */
+gchar *dt_ai_models_get_default_for_task(dt_ai_registry_t *registry,
+                                          const char *task);
+
 // --- Download Operations ---
 
 /**

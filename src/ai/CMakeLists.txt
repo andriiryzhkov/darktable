@@ -6,6 +6,8 @@ add_library(darktable_ai STATIC
   backend_onnx.c
   segmentation.h
   segmentation.c
+  depth.h
+  depth.c
 )
 
 # Find ONNX Runtime (auto-downloads if not present)

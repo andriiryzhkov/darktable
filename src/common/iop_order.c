@@ -215,6 +215,7 @@ const dt_iop_order_entry_t v30_order[] = {
   { {26.0f }, "profile_gamma", 0},
   { {27.0f }, "equalizer", 0},
   { {28.0f }, "colorin", 0},
+  { {28.05f}, "dgrade", 0},          // depth-based grading (exposure + warmth by AI depth map)
   { {28.5f }, "channelmixerrgb", 0},
   { {28.5f }, "diffuse", 0},
   { {28.5f }, "censorize", 0},
@@ -333,6 +334,7 @@ const dt_iop_order_entry_t v50_order[] = {
   { {26.0f }, "profile_gamma", 0},
   { {27.0f }, "equalizer", 0},
   { {28.0f }, "colorin", 0},
+  { {28.05f}, "dgrade", 0},          // depth-based grading (exposure + warmth by AI depth map)
   { {28.5f }, "channelmixerrgb", 0},
   { {28.5f }, "diffuse", 0},
   { {28.5f }, "censorize", 0},
@@ -452,6 +454,7 @@ const dt_iop_order_entry_t v30_jpg_order[] = {
   { { 28.0f }, "profile_gamma", 0},
   { { 28.0f }, "equalizer", 0},
   // from there, it's the same as the raw order
+  { { 28.05f}, "dgrade", 0},          // depth-based grading (exposure + warmth by AI depth map)
   { { 28.5f }, "channelmixerrgb", 0 },
   { { 28.5f }, "diffuse", 0 },
   { { 28.5f }, "censorize", 0 },
@@ -573,6 +576,7 @@ const dt_iop_order_entry_t v50_jpg_order[] = {
   { { 28.0f }, "profile_gamma", 0},
   { { 28.0f }, "equalizer", 0},
   // from there, it's the same as the raw order
+  { { 28.05f}, "dgrade", 0},          // depth-based grading (exposure + warmth by AI depth map)
   { { 28.5f }, "channelmixerrgb", 0 },
   { { 28.5f }, "diffuse", 0 },
   { { 28.5f }, "censorize", 0 },
@@ -1185,6 +1189,7 @@ GList *dt_ioppr_get_iop_order_list(const dt_imgid_t imgid,
           _insert_before(iop_order_list, "filmicrgb", "agx");
           _insert_before(iop_order_list, "colorbalancergb", "colorequal");
           _insert_before(iop_order_list, "highlights", "rasterfile");
+          _insert_before(iop_order_list, "channelmixerrgb", "dgrade");
         }
       }
       else if(version >= DT_IOP_ORDER_LEGACY
