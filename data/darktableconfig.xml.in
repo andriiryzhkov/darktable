@@ -3560,6 +3560,13 @@
     <longdescription>grid points per axis for auto-segmentation. higher values find smaller objects but take longer.</longdescription>
   </dtconfig>
   <dtconfig>
+    <name>plugins/darkroom/masks/depth/model</name>
+    <type>string</type>
+    <default>mask-depth-da2-small</default>
+    <shortdescription>AI depth mask model</shortdescription>
+    <longdescription>model ID for AI depth estimation used by the depth mask tool</longdescription>
+  </dtconfig>
+  <dtconfig>
     <name>plugins/darkroom/ashift/near_delta</name>
     <type>float</type>
     <default>20.0</default>

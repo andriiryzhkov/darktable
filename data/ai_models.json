@@ -16,6 +16,14 @@
       "task": "mask",
       "github_asset": "mask-sam21-small.zip",
       "default": true
+    },
+    {
+      "id": "mask-depth-da2-small",
+      "name": "mask depth anything v2 small",
+      "description": "Depth Anything V2 (ViT-S) for depth-based masking",
+      "task": "depth",
+      "github_asset": "mask-depth-da2-small.zip",
+      "default": false
     }
   ]
 }
