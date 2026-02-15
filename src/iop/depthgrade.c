@@ -272,8 +272,12 @@ static float *_get_depth_map(dt_iop_module_t *self,
     dt_ai_environment_t *env = dt_ai_env_init(NULL);
     if(env)
     {
+      const double load_start = dt_get_wtime();
       cd->ctx = dt_depth_load(env, model_id);
-      if(!cd->ctx)
+      if(cd->ctx)
+        dt_print(DT_DEBUG_AI, "[dgrade] model '%s' loaded in %.1f ms",
+                 model_id, (dt_get_wtime() - load_start) * 1000.0);
+      else
         dt_print(DT_DEBUG_AI, "[dgrade] failed to load depth model '%s'", model_id);
     }
     g_free(model_id);
@@ -295,8 +299,10 @@ static float *_get_depth_map(dt_iop_module_t *self,
 
   // Run depth model
   int out_w = 0, out_h = 0;
+  const double compute_start = dt_get_wtime();
   float *depth = dt_depth_compute(cd->ctx, rgb_u8, req_w, req_h,
                                    &out_w, &out_h);
+  const double compute_elapsed = dt_get_wtime() - compute_start;
   g_free(rgb_u8);
 
   if(!depth)
@@ -312,7 +318,8 @@ static float *_get_depth_map(dt_iop_module_t *self,
   cd->height = out_h;
   cd->hash = hash;
 
-  dt_print(DT_DEBUG_AI, "[dgrade] depth map computed %dx%d", out_w, out_h);
+  dt_print(DT_DEBUG_AI, "[dgrade] depth map %dx%d computed in %.1f ms",
+           out_w, out_h, compute_elapsed * 1000.0);
 
   // Return at requested resolution
   const size_t npixels = (size_t)req_w * req_h;
