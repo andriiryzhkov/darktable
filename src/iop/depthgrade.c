@@ -33,6 +33,7 @@
 
 #ifdef HAVE_AI
 #include "ai/depth.h"
+#include "common/ai_models.h"
 #endif
 
 #include <math.h>
@@ -118,6 +119,22 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
                                             dt_dev_pixelpipe_iop_t *piece)
 {
   return IOP_CS_RGB;
+}
+
+void reload_defaults(dt_iop_module_t *self)
+{
+#ifdef HAVE_AI
+  const gboolean ai_available = darktable.ai_registry
+                                && darktable.ai_registry->ai_enabled;
+  if(!ai_available)
+  {
+    self->hide_enable_button = TRUE;
+    self->default_enabled = FALSE;
+  }
+#else
+  self->hide_enable_button = TRUE;
+  self->default_enabled = FALSE;
+#endif
 }
 
 int legacy_params(dt_iop_module_t *self,
@@ -320,6 +337,10 @@ void commit_params(dt_iop_module_t *self,
                    dt_dev_pixelpipe_iop_t *piece)
 {
   memcpy(piece->data, p1, self->params_size);
+
+  // When AI is unavailable the module becomes a no-op in the pipeline
+  if(self->hide_enable_button)
+    piece->enabled = FALSE;
 
   g_hash_table_remove_all(self->raster_mask.source.masks);
   g_hash_table_insert(self->raster_mask.source.masks,
