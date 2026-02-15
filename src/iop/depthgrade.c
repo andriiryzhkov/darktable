@@ -683,6 +683,94 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
   return FALSE;
 }
 
+int button_pressed(dt_iop_module_t *self,
+                   const float pzx,
+                   const float pzy,
+                   const double pressure,
+                   const int which,
+                   const int type,
+                   const uint32_t state,
+                   const float zoom_scale)
+{
+  if(which != 1 || !self->enabled) return 0;
+
+  dt_iop_dgrade_gui_data_t *g = self->gui_data;
+  if(!g) return 0;
+
+  // Transform from normalized preview space to module input pixel space
+  float wd, ht;
+  dt_dev_get_preview_size(self->dev, &wd, &ht);
+  float pts[2] = { pzx * wd, pzy * ht };
+
+  dt_dev_distort_backtransform_plus(self->dev, self->dev->preview_pipe,
+                                     self->iop_order,
+                                     DT_DEV_TRANSFORM_DIR_FORW_EXCL,
+                                     pts, 1);
+
+  dt_iop_gui_enter_critical_section(self);
+  float depth_value = -1.0f;
+
+  if(g->depth_valid && g->depth_thumb && g->thumb_w > 0 && g->thumb_h > 0)
+  {
+    const int dx = (int)pts[0];
+    const int dy = (int)pts[1];
+
+    if(dx >= 0 && dx < g->thumb_w && dy >= 0 && dy < g->thumb_h)
+      depth_value = g->depth_thumb[dy * g->thumb_w + dx];
+  }
+  dt_iop_gui_leave_critical_section(self);
+
+  if(depth_value >= 0.0f)
+  {
+    dt_bauhaus_slider_set(g->center, depth_value);
+    return 1;
+  }
+
+  return 0;
+}
+
+static gboolean _area_button_press(GtkWidget *widget, GdkEventButton *event, dt_iop_module_t *self)
+{
+  if(event->button != 1) return FALSE;
+
+  dt_iop_dgrade_gui_data_t *g = self->gui_data;
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  const int width = allocation.width;
+  const int height = allocation.height - DT_RESIZE_HANDLE_SIZE;
+
+  dt_iop_gui_enter_critical_section(self);
+  const gboolean valid = g->depth_valid;
+  const int tw = g->thumb_w;
+  const int th = g->thumb_h;
+  float depth_value = -1.0f;
+
+  if(valid && g->depth_thumb && tw > 0 && th > 0)
+  {
+    const double scale_x = (double)width / tw;
+    const double scale_y = (double)height / th;
+    const double scale = MIN(scale_x, scale_y);
+    const double ox = (width - tw * scale) * 0.5;
+    const double oy = (height - th * scale) * 0.5;
+
+    const int dx = (int)((event->x - ox) / scale);
+    const int dy = (int)((event->y - oy) / scale);
+
+    if(dx >= 0 && dx < tw && dy >= 0 && dy < th)
+      depth_value = g->depth_thumb[dy * tw + dx];
+  }
+  dt_iop_gui_leave_critical_section(self);
+
+  if(depth_value >= 0.0f)
+  {
+    dt_bauhaus_slider_set(g->center, depth_value);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 void gui_init(dt_iop_module_t *self)
 {
   dt_iop_dgrade_gui_data_t *g = IOP_GUI_ALLOC(dgrade);
@@ -702,8 +790,11 @@ void gui_init(dt_iop_module_t *self)
                                                "plugins/darkroom/dgrade/graphheight"));
   gtk_widget_set_tooltip_text(GTK_WIDGET(g->area),
                               _("depth map preview — bright areas are far, dark areas are near.\n"
-                                "highlighted region shows the selected depth band."));
+                                "highlighted region shows the selected depth band.\n"
+                                "click to pick distance at that point."));
   g_signal_connect(G_OBJECT(g->area), "draw", G_CALLBACK(_area_draw), self);
+  gtk_widget_add_events(GTK_WIDGET(g->area), GDK_BUTTON_PRESS_MASK);
+  g_signal_connect(G_OBJECT(g->area), "button-press-event", G_CALLBACK(_area_button_press), self);
   dt_gui_box_add(self->widget, GTK_WIDGET(g->area));
 
   g->center = dt_bauhaus_slider_from_params(self, "center");
