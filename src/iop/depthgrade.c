@@ -26,6 +26,8 @@
 #include "develop/imageop.h"
 #include "develop/imageop_gui.h"
 #include "control/control.h"
+#include "common/gaussian.h"
+#include "common/guided_filter.h"
 #include "gui/gtk.h"
 #include "iop/iop_api.h"
 
@@ -43,19 +45,27 @@ DT_MODULE_INTROSPECTION(1, dt_iop_dgrade_params_t)
 
 typedef struct dt_iop_dgrade_params_t
 {
-  float center;   // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 0.5 $DESCRIPTION: "distance"
-  float range;    // $MIN: 0.01 $MAX: 1.0 $DEFAULT: 0.5 $DESCRIPTION: "range"
-  float exposure; // $MIN: -3.0 $MAX: 3.0 $DEFAULT: 0.0 $DESCRIPTION: "exposure"
-  float warmth;   // $MIN: -1.0 $MAX: 1.0 $DEFAULT: 0.0 $DESCRIPTION: "warmth"
+  float center;    // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 0.5 $DESCRIPTION: "distance"
+  float range;     // $MIN: 0.01 $MAX: 1.0 $DEFAULT: 0.5 $DESCRIPTION: "range"
+  float exposure;  // $MIN: -3.0 $MAX: 3.0 $DEFAULT: 0.0 $DESCRIPTION: "exposure"
+  float warmth;    // $MIN: -1.0 $MAX: 1.0 $DEFAULT: 0.0 $DESCRIPTION: "warmth"
+  float falloff;   // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 1.0 $DESCRIPTION: "falloff"
+  float feather;   // $MIN: 0.0 $MAX: 100.0 $DEFAULT: 0.0 $DESCRIPTION: "feather"
+  float clip_near; // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 0.0 $DESCRIPTION: "near clip"
+  float clip_far;  // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 1.0 $DESCRIPTION: "far clip"
+  float refine;    // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 0.0 $DESCRIPTION: "edge refine"
+  float gamma;     // $MIN: 0.1 $MAX: 4.0 $DEFAULT: 1.0 $DESCRIPTION: "gamma"
+  gboolean invert; // $MIN: FALSE $MAX: TRUE $DEFAULT: FALSE $DESCRIPTION: "invert"
 } dt_iop_dgrade_params_t;
 
 typedef struct dt_iop_dgrade_gui_data_t
 {
   GtkDrawingArea *area;
-  GtkWidget *center;
-  GtkWidget *range;
-  GtkWidget *exposure;
-  GtkWidget *warmth;
+  GtkWidget *center, *range, *exposure, *warmth;
+
+  // Advanced mask controls (collapsible section)
+  dt_gui_collapsible_section_t cs_mask;
+  GtkWidget *falloff, *feather, *clip_near, *clip_far, *refine, *gamma_w, *invert;
 
   // Depth map thumbnail for GUI visualization (set from preview pipe)
   float *depth_thumb;       // downscaled depth map [0,1], size thumb_w * thumb_h
@@ -374,11 +384,12 @@ void process(dt_iop_module_t *self,
     dt_control_queue_redraw_widget(GTK_WIDGET(g->area));
   }
 
-  // Build gradient mask from depth map + center/range parameters.
-  // Peak (1.0) at center, fading linearly to 0.0 at center ± range/2.
+  // Build gradient mask from depth map + center/range/falloff parameters.
   const float center = d->center;
   const float half_range = MAX(d->range * 0.5f, 0.001f);
   const float inv_half_range = 1.0f / half_range;
+  const float falloff = MAX(d->falloff, 0.001f);
+  const float fo_edge = 1.0f - falloff;
 
   const size_t npixels = (size_t)roi_out->width * roi_out->height;
   float *band_mask = dt_alloc_align_float(npixels);
@@ -388,15 +399,60 @@ void process(dt_iop_module_t *self,
     return;
   }
 
+  // Raised cosine with parameterized falloff:
+  // falloff=1.0: full smooth cosine (default). falloff→0: hard binary cutoff.
   DT_OMP_FOR()
   for(size_t i = 0; i < npixels; i++)
   {
     const float dist = fabsf(depth_map[i] - center);
     const float t = CLAMPF(dist * inv_half_range, 0.0f, 1.0f);
-    band_mask[i] = 0.5f * (1.0f + cosf(M_PI * t));
+    const float tt = CLAMPF((t - fo_edge) / falloff, 0.0f, 1.0f);
+    band_mask[i] = 0.5f * (1.0f + cosf(M_PI * tt));
+  }
+
+  // Clip: zero out mask outside near/far depth boundaries
+  if(d->clip_near > 0.0f || d->clip_far < 1.0f)
+  {
+    DT_OMP_FOR()
+    for(size_t i = 0; i < npixels; i++)
+      if(depth_map[i] < d->clip_near || depth_map[i] > d->clip_far)
+        band_mask[i] = 0.0f;
   }
 
   dt_free_align(depth_map);
+
+  // Feather: gaussian blur on mask for spatial light bleed
+  if(d->feather > 0.0f)
+  {
+    const float sigma = d->feather * roi_out->scale / piece->iscale;
+    if(sigma > 0.1f)
+      dt_gaussian_fast_blur(band_mask, band_mask, roi_out->width, roi_out->height,
+                            sigma, 0.0f, 1.0f, 1);
+  }
+
+  // Edge refine: guided filter snaps mask to image edges
+  if(d->refine > 0.0f)
+  {
+    const int w = CLAMP((int)(MIN(roi_out->width, roi_out->height) * 0.02f), 1, 20);
+    const float sqrt_eps = 1.0f - 0.999f * d->refine;
+    guided_filter((const float *)ivoid, band_mask, band_mask,
+                  roi_out->width, roi_out->height, 4, w, sqrt_eps, 1.0f, 0.0f, 1.0f);
+  }
+
+  // Gamma + invert
+  if(d->gamma != 1.0f || d->invert)
+  {
+    const float gam = d->gamma;
+    const gboolean inv = d->invert;
+    DT_OMP_FOR()
+    for(size_t i = 0; i < npixels; i++)
+    {
+      float m = band_mask[i];
+      if(gam != 1.0f) m = powf(m, gam);
+      if(inv) m = 1.0f - m;
+      band_mask[i] = m;
+    }
+  }
 
   // Apply exposure + warmth effect
   if(has_effect)
@@ -508,6 +564,10 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
     const float center = p->center;
     const float half_range = MAX(p->range * 0.5f, 0.001f);
     const float inv_half_range = 1.0f / half_range;
+    const float falloff = MAX(p->falloff, 0.001f);
+    const float fo_edge = 1.0f - falloff;
+    const float gam = p->gamma;
+    const gboolean inv = p->invert;
 
     // Create an image surface from depth data
     cairo_surface_t *depth_surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, tw, th);
@@ -521,10 +581,19 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
       {
         const float depth = thumb[y * tw + x];
 
-        // Raised cosine mask: smooth peak at center, fading to zero at ± half_range
+        // Band mask with parameterized falloff
         const float dist = fabsf(depth - center);
         const float t = CLAMPF(dist * inv_half_range, 0.0f, 1.0f);
-        const float mask = 0.5f * (1.0f + cosf(M_PI * t));
+        const float tt = CLAMPF((t - fo_edge) / falloff, 0.0f, 1.0f);
+        float mask = 0.5f * (1.0f + cosf(M_PI * tt));
+
+        // Clip
+        if(depth < p->clip_near || depth > p->clip_far)
+          mask = 0.0f;
+
+        // Gamma + invert (skip feather/refine — spatial ops)
+        if(gam != 1.0f) mask = powf(mask, gam);
+        if(inv) mask = 1.0f - mask;
 
         // Grayscale depth value
         const float gray = depth * 255.0f;
@@ -651,13 +720,59 @@ void gui_init(dt_iop_module_t *self)
   g->warmth = dt_bauhaus_slider_from_params(self, "warmth");
   dt_bauhaus_slider_set_soft_range(g->warmth, -1.0f, 1.0f);
   gtk_widget_set_tooltip_text(g->warmth, _("color temperature shift (negative = cool, positive = warm)"));
+
+  // Advanced mask controls — collapsed by default
+  dt_gui_new_collapsible_section(&g->cs_mask,
+                                 "plugins/darkroom/dgrade/expand_mask",
+                                 _("mask refinement"),
+                                 GTK_BOX(self->widget),
+                                 DT_ACTION(self));
+  GtkWidget *saved = self->widget;
+  self->widget = GTK_WIDGET(g->cs_mask.container);
+
+  g->falloff = dt_bauhaus_slider_from_params(self, "falloff");
+  dt_bauhaus_slider_set_format(g->falloff, "%");
+  dt_bauhaus_slider_set_factor(g->falloff, 100.0f);
+  gtk_widget_set_tooltip_text(g->falloff, _("transition steepness at band edges\n"
+                                             "100%% = smooth cosine, 0%% = hard cutoff"));
+
+  g->feather = dt_bauhaus_slider_from_params(self, "feather");
+  dt_bauhaus_slider_set_format(g->feather, _(" px"));
+  dt_bauhaus_slider_set_soft_range(g->feather, 0.0f, 50.0f);
+  gtk_widget_set_tooltip_text(g->feather, _("spatial blur on the mask — creates light bleed across depth edges"));
+
+  g->clip_near = dt_bauhaus_slider_from_params(self, "clip_near");
+  dt_bauhaus_slider_set_format(g->clip_near, "%");
+  dt_bauhaus_slider_set_factor(g->clip_near, 100.0f);
+  gtk_widget_set_tooltip_text(g->clip_near, _("exclude foreground — mask forced to zero for depth below this value"));
+
+  g->clip_far = dt_bauhaus_slider_from_params(self, "clip_far");
+  dt_bauhaus_slider_set_format(g->clip_far, "%");
+  dt_bauhaus_slider_set_factor(g->clip_far, 100.0f);
+  gtk_widget_set_tooltip_text(g->clip_far, _("exclude background — mask forced to zero for depth above this value"));
+
+  g->refine = dt_bauhaus_slider_from_params(self, "refine");
+  dt_bauhaus_slider_set_format(g->refine, "%");
+  dt_bauhaus_slider_set_factor(g->refine, 100.0f);
+  gtk_widget_set_tooltip_text(g->refine, _("snap mask boundaries to actual object edges in the image"));
+
+  g->gamma_w = dt_bauhaus_slider_from_params(self, "gamma");
+  dt_bauhaus_slider_set_soft_range(g->gamma_w, 0.1f, 4.0f);
+  gtk_widget_set_tooltip_text(g->gamma_w, _("reshape mask: < 1.0 broadens, > 1.0 narrows"));
+
+  g->invert = dt_bauhaus_toggle_from_params(self, "invert");
+  gtk_widget_set_tooltip_text(g->invert, _("flip the mask — select everything except the depth band"));
+
+  self->widget = saved;
 }
 
 void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
 {
   dt_iop_dgrade_gui_data_t *g = self->gui_data;
-  // Redraw the depth visualization when mask sliders change
-  if(w == g->center || w == g->range)
+  // Redraw the depth visualization when mask shape sliders change
+  if(w == g->center || w == g->range || w == g->falloff
+     || w == g->clip_near || w == g->clip_far
+     || w == g->gamma_w || w == g->invert)
     gtk_widget_queue_draw(GTK_WIDGET(g->area));
 }
 
