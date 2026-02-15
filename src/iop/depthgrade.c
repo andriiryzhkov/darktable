@@ -28,6 +28,9 @@
 #include "control/control.h"
 #include "common/gaussian.h"
 #include "common/guided_filter.h"
+#include "common/database.h"
+#include "common/file_location.h"
+#include "common/grealpath.h"
 #include "gui/gtk.h"
 #include "iop/iop_api.h"
 
@@ -36,9 +39,11 @@
 #include "common/ai_models.h"
 #endif
 
+#include <glib/gstdio.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 DT_MODULE_INTROSPECTION(1, dt_iop_dgrade_params_t)
 
@@ -81,6 +86,21 @@ typedef struct dt_dgrade_cache_t
   float *volatile depth_map;  // normalized [0,1] depth map
   dt_depth_context_t *ctx;    // loaded model (persists across images)
 } dt_dgrade_cache_t;
+
+// Disk cache: persistent depth maps across sessions
+#define DT_DEPTH_CACHE_MAGIC   0xD714DE9F
+#define DT_DEPTH_CACHE_VERSION 1
+#define DT_DEPTH_CACHE_SUBDIR  "depth.d"
+
+typedef struct dt_depth_cache_header_t
+{
+  uint32_t magic;
+  uint32_t version;
+  int32_t  width;
+  int32_t  height;
+  uint32_t uncompressed_size;  // width * height * sizeof(float)
+  uint32_t compressed_size;    // bytes of zlib payload following header
+} dt_depth_cache_header_t;
 
 #endif // HAVE_AI
 
@@ -194,6 +214,186 @@ static void _clear_cache(dt_dgrade_cache_t *cache)
   cache->hash = DT_INVALID_HASH;
 }
 
+// Build disk cache file path for a given image ID.
+// Includes SHA1 hash of the database path to separate caches per library,
+// matching the mipmap cache convention (e.g. depth-{sha1}.d/123.depth).
+// Returns newly-allocated string (caller must g_free) or NULL.
+static gchar *_disk_cache_path(dt_imgid_t imgid)
+{
+  char cachedir[PATH_MAX] = { 0 };
+  dt_loc_get_user_cache_dir(cachedir, sizeof(cachedir));
+
+  const gchar *dbpath = dt_database_get_path(darktable.db);
+  if(!dbpath || !strcmp(dbpath, ":memory:"))
+    return g_strdup_printf("%s/%s/%" PRId32 ".depth", cachedir, DT_DEPTH_CACHE_SUBDIR, imgid);
+
+  gchar *abspath = g_realpath(dbpath);
+  if(!abspath) abspath = g_strdup(dbpath);
+
+  GChecksum *chk = g_checksum_new(G_CHECKSUM_SHA1);
+  g_checksum_update(chk, (guchar *)abspath, strlen(abspath));
+  const gchar *hash = g_checksum_get_string(chk);
+
+  gchar *path = g_strdup_printf("%s/%s-%s/%" PRId32 ".depth",
+                                cachedir, DT_DEPTH_CACHE_SUBDIR, hash, imgid);
+
+  g_checksum_free(chk);
+  g_free(abspath);
+  return path;
+}
+
+// Try to read a cached depth map from disk.
+// On success: sets *out_w, *out_h and returns a dt_alloc_align_float buffer.
+// On failure: returns NULL. Corrupt files are deleted.
+static float *_disk_cache_read(dt_imgid_t imgid, int *out_w, int *out_h)
+{
+  float *result = NULL;
+  gchar *path = _disk_cache_path(imgid);
+  if(!path) return NULL;
+
+  FILE *f = g_fopen(path, "rb");
+  if(!f)
+  {
+    g_free(path);
+    return NULL;
+  }
+
+  dt_depth_cache_header_t hdr;
+  if(fread(&hdr, sizeof(hdr), 1, f) != 1)
+    goto read_error;
+
+  if(hdr.magic != DT_DEPTH_CACHE_MAGIC
+     || hdr.version != DT_DEPTH_CACHE_VERSION
+     || hdr.width <= 0 || hdr.height <= 0
+     || hdr.uncompressed_size != (uint32_t)hdr.width * (uint32_t)hdr.height * sizeof(float)
+     || hdr.compressed_size == 0)
+    goto read_error;
+
+  {
+    unsigned char *comp_buf = g_try_malloc(hdr.compressed_size);
+    if(!comp_buf) goto read_error;
+
+    if(fread(comp_buf, 1, hdr.compressed_size, f) != hdr.compressed_size)
+    {
+      g_free(comp_buf);
+      goto read_error;
+    }
+
+    result = dt_alloc_align_float((size_t)hdr.width * hdr.height);
+    if(!result)
+    {
+      g_free(comp_buf);
+      goto read_error;
+    }
+
+    uLongf dest_len = hdr.uncompressed_size;
+    if(uncompress((Bytef *)result, &dest_len,
+                  (const Bytef *)comp_buf, hdr.compressed_size) != Z_OK
+       || dest_len != hdr.uncompressed_size)
+    {
+      dt_free_align(result);
+      result = NULL;
+      g_free(comp_buf);
+      goto read_error;
+    }
+
+    g_free(comp_buf);
+  }
+
+  *out_w = hdr.width;
+  *out_h = hdr.height;
+  fclose(f);
+  dt_print(DT_DEBUG_AI, "[dgrade] disk cache hit for imgid %" PRId32 " (%dx%d)",
+           imgid, hdr.width, hdr.height);
+  g_free(path);
+  return result;
+
+read_error:
+  fclose(f);
+  dt_print(DT_DEBUG_AI, "[dgrade] disk cache invalid for imgid %" PRId32 ", deleting", imgid);
+  g_unlink(path);
+  g_free(path);
+  return NULL;
+}
+
+// Write a depth map to the disk cache. Non-fatal on failure.
+static gboolean _disk_cache_write(dt_imgid_t imgid,
+                                   const float *depth_map,
+                                   int width, int height)
+{
+  gchar *path = _disk_cache_path(imgid);
+  if(!path) return FALSE;
+
+  if(g_file_test(path, G_FILE_TEST_EXISTS))
+  {
+    g_free(path);
+    return TRUE;
+  }
+
+  // Ensure directory exists
+  {
+    gchar *dir = g_path_get_dirname(path);
+    if(g_mkdir_with_parents(dir, 0750) != 0)
+    {
+      g_free(dir);
+      g_free(path);
+      return FALSE;
+    }
+    g_free(dir);
+  }
+
+  const uLong src_len = (uLong)width * height * sizeof(float);
+  uLongf comp_len = compressBound(src_len);
+  unsigned char *comp_buf = g_try_malloc(comp_len);
+  if(!comp_buf)
+  {
+    g_free(path);
+    return FALSE;
+  }
+
+  if(compress(comp_buf, &comp_len, (const Bytef *)depth_map, src_len) != Z_OK)
+  {
+    g_free(comp_buf);
+    g_free(path);
+    return FALSE;
+  }
+
+  FILE *f = g_fopen(path, "wb");
+  if(!f)
+  {
+    g_free(comp_buf);
+    g_free(path);
+    return FALSE;
+  }
+
+  dt_depth_cache_header_t hdr = {
+    .magic = DT_DEPTH_CACHE_MAGIC,
+    .version = DT_DEPTH_CACHE_VERSION,
+    .width = width,
+    .height = height,
+    .uncompressed_size = (uint32_t)src_len,
+    .compressed_size = (uint32_t)comp_len
+  };
+
+  gboolean ok = (fwrite(&hdr, sizeof(hdr), 1, f) == 1)
+                && (fwrite(comp_buf, 1, comp_len, f) == comp_len);
+  fclose(f);
+  g_free(comp_buf);
+
+  if(!ok)
+  {
+    g_unlink(path);
+    g_free(path);
+    return FALSE;
+  }
+
+  dt_print(DT_DEBUG_AI, "[dgrade] disk cache written for imgid %" PRId32
+           " (%dx%d, %.1f KB compressed)",
+           imgid, width, height, (double)comp_len / 1024.0);
+  g_free(path);
+  return TRUE;
+}
+
 // Convert linear RGB float4 to sRGB uint8 RGB (3ch)
 static uint8_t *_float4_to_srgb_u8(const float *in, int width, int height)
 {
@@ -254,8 +454,34 @@ static float *_get_depth_map(dt_iop_module_t *self,
     return result;
   }
 
-  // Cache miss (different image or empty) — need to compute
+  // Cache miss (different image or empty) — try disk, then compute
   _clear_cache(cd);
+
+  // Try disk cache before running inference
+  {
+    const dt_imgid_t imgid = self->dev->image_storage.id;
+    int disk_w = 0, disk_h = 0;
+    float *disk_depth = _disk_cache_read(imgid, &disk_w, &disk_h);
+    if(disk_depth)
+    {
+      cd->depth_map = disk_depth;
+      cd->width = disk_w;
+      cd->height = disk_h;
+      cd->hash = hash;
+
+      const size_t npixels = (size_t)req_w * req_h;
+      result = dt_alloc_align_float(npixels);
+      if(result)
+      {
+        if(disk_w == req_w && disk_h == req_h)
+          memcpy(result, disk_depth, npixels * sizeof(float));
+        else
+          _resize_bilinear(disk_depth, disk_w, disk_h, result, req_w, req_h);
+      }
+      dt_pthread_mutex_unlock(&cd->lock);
+      return result;
+    }
+  }
 
   // Load model if not loaded yet
   if(!cd->ctx)
@@ -320,6 +546,9 @@ static float *_get_depth_map(dt_iop_module_t *self,
 
   dt_print(DT_DEBUG_AI, "[dgrade] depth map %dx%d computed in %.1f ms",
            out_w, out_h, compute_elapsed * 1000.0);
+
+  // Persist to disk cache (failure is non-fatal)
+  _disk_cache_write(self->dev->image_storage.id, depth, out_w, out_h);
 
   // Return at requested resolution
   const size_t npixels = (size_t)req_w * req_h;
