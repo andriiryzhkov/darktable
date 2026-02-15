@@ -55,7 +55,6 @@ typedef struct dt_iop_dgrade_params_t
   float clip_far;  // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 1.0 $DESCRIPTION: "far clip"
   float refine;    // $MIN: 0.0 $MAX: 1.0 $DEFAULT: 0.0 $DESCRIPTION: "edge refine"
   float mask_contrast; // $MIN: 0.1 $MAX: 4.0 $DEFAULT: 1.0 $DESCRIPTION: "mask contrast"
-  gboolean invert; // $MIN: FALSE $MAX: TRUE $DEFAULT: FALSE $DESCRIPTION: "invert"
 } dt_iop_dgrade_params_t;
 
 typedef struct dt_iop_dgrade_gui_data_t
@@ -65,7 +64,7 @@ typedef struct dt_iop_dgrade_gui_data_t
 
   // Advanced mask controls (collapsible section)
   dt_gui_collapsible_section_t cs_mask;
-  GtkWidget *falloff, *feather, *clip_near, *clip_far, *refine, *mask_contrast, *invert;
+  GtkWidget *falloff, *feather, *clip_near, *clip_far, *refine, *mask_contrast;
 
   // Depth map thumbnail for GUI visualization (set from preview pipe)
   float *depth_thumb;       // downscaled depth map [0,1], size thumb_w * thumb_h
@@ -441,19 +440,13 @@ void process(dt_iop_module_t *self,
                   roi_out->width, roi_out->height, 4, w, sqrt_eps, 1.0f, 0.0f, 1.0f);
   }
 
-  // Mask contrast + invert
-  if(d->mask_contrast != 1.0f || d->invert)
+  // Mask contrast
+  if(d->mask_contrast != 1.0f)
   {
     const float mc = d->mask_contrast;
-    const gboolean inv = d->invert;
     DT_OMP_FOR()
     for(size_t i = 0; i < npixels; i++)
-    {
-      float m = band_mask[i];
-      if(mc != 1.0f) m = powf(m, mc);
-      if(inv) m = 1.0f - m;
-      band_mask[i] = m;
-    }
+      band_mask[i] = powf(band_mask[i], mc);
   }
 
   // Apply exposure + warmth effect
@@ -571,7 +564,6 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
     const float falloff = MAX(p->falloff, 0.001f);
     const float fo_edge = 1.0f - falloff;
     const float mc = p->mask_contrast;
-    const gboolean inv = p->invert;
 
     // Create an image surface from depth data
     cairo_surface_t *depth_surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, tw, th);
@@ -595,9 +587,8 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
         if(depth < p->clip_near || depth > p->clip_far)
           mask = 0.0f;
 
-        // Mask contrast + invert (skip feather/refine — spatial ops)
+        // Mask contrast (skip feather/refine — spatial ops)
         if(mc != 1.0f) mask = powf(mask, mc);
-        if(inv) mask = 1.0f - mask;
 
         // Grayscale depth value
         const float gray = depth * 255.0f;
@@ -884,9 +875,6 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_soft_range(g->mask_contrast, 0.1f, 4.0f);
   gtk_widget_set_tooltip_text(g->mask_contrast, _("reshape mask: < 1.0 broadens, > 1.0 narrows"));
 
-  g->invert = dt_bauhaus_toggle_from_params(self, "invert");
-  gtk_widget_set_tooltip_text(g->invert, _("flip the mask — select everything except the depth band"));
-
   self->widget = saved;
 }
 
@@ -896,7 +884,7 @@ void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
   // Redraw the depth visualization when mask shape sliders change
   if(w == g->center || w == g->range || w == g->falloff
      || w == g->clip_near || w == g->clip_far
-     || w == g->mask_contrast || w == g->invert)
+     || w == g->mask_contrast)
     gtk_widget_queue_draw(GTK_WIDGET(g->area));
 }
 
