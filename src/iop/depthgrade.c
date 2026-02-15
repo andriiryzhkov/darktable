@@ -656,9 +656,36 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
     cairo_rectangle(cr, band_x0, bar_y, band_x1 - band_x0, bar_h);
     cairo_fill(cr);
 
+    // Clip regions — darken areas outside near/far boundaries
+    if(p->clip_near > 0.0f)
+    {
+      const float clip_x = p->clip_near * width;
+      cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.6);
+      cairo_rectangle(cr, 0, bar_y, clip_x, bar_h);
+      cairo_fill(cr);
+      cairo_set_source_rgba(cr, 1.0, 0.4, 0.4, 0.9);
+      cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
+      cairo_move_to(cr, clip_x, bar_y);
+      cairo_line_to(cr, clip_x, bar_y + bar_h);
+      cairo_stroke(cr);
+    }
+    if(p->clip_far < 1.0f)
+    {
+      const float clip_x = p->clip_far * width;
+      cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.6);
+      cairo_rectangle(cr, clip_x, bar_y, width - clip_x, bar_h);
+      cairo_fill(cr);
+      cairo_set_source_rgba(cr, 1.0, 0.4, 0.4, 0.9);
+      cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
+      cairo_move_to(cr, clip_x, bar_y);
+      cairo_line_to(cr, clip_x, bar_y + bar_h);
+      cairo_stroke(cr);
+    }
+
     // Center marker
     const float cx = CLAMPF(center, 0.0f, 1.0f) * width;
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9);
+    cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.0));
     cairo_move_to(cr, cx, bar_y);
     cairo_line_to(cr, cx, bar_y + bar_h);
     cairo_stroke(cr);
