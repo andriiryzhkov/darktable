@@ -807,6 +807,8 @@ void gui_init(dt_iop_module_t *self)
   dt_bauhaus_slider_set_factor(g->range, 100.0f);
   gtk_widget_set_tooltip_text(g->range, _("width of the depth band around center"));
 
+  dt_gui_box_add(self->widget, dt_ui_section_label_new(C_("section", "effect")));
+
   g->exposure = dt_bauhaus_slider_from_params(self, "exposure");
   dt_bauhaus_slider_set_format(g->exposure, _(" EV"));
   dt_bauhaus_slider_set_soft_range(g->exposure, -3.0f, 3.0f);
