@@ -146,6 +146,7 @@ static inline dt_hash_t _get_cache_hash(dt_iop_module_t *self)
 static void _resize_bilinear(const float *src, int src_w, int src_h,
                               float *dst, int dst_w, int dst_h)
 {
+  DT_OMP_FOR()
   for(int y = 0; y < dst_h; y++)
   {
     const float sy = (dst_h > 1) ? (float)y * (float)(src_h - 1) / (float)(dst_h - 1) : 0.0f;
@@ -187,6 +188,7 @@ static uint8_t *_float4_to_srgb_u8(const float *in, int width, int height)
   if(!out)
     return NULL;
 
+  DT_OMP_FOR()
   for(size_t i = 0; i < npixels; i++)
   {
     for(int c = 0; c < 3; c++)
@@ -457,19 +459,21 @@ void process(dt_iop_module_t *self,
   // Apply exposure + warmth effect
   if(has_effect)
   {
-    float *const out = (float *)ovoid;
+    float *const restrict out = (float *const restrict)ovoid;
+    const float *const restrict mask = band_mask;
+    const float exposure = d->exposure;
+    const float warmth = d->warmth;
 
     DT_OMP_FOR()
     for(size_t i = 0; i < npixels; i++)
     {
-      const float m = band_mask[i];
-      if(m < 1e-6f) continue; // no effect for this pixel
+      const float m = mask[i];
+      if(m < 1e-6f) continue;
 
       const size_t px = i * 4;
-      const float ev_factor = exp2f(d->exposure * m);
-      const float w = d->warmth * m;
+      const float ev_factor = exp2f(exposure * m);
+      const float w = warmth * m;
 
-      // Exposure + warmth: warm shifts R up, B down; cool does opposite
       out[px + 0] = out[px + 0] * ev_factor * (1.0f + 0.5f * w);  // R
       out[px + 1] = out[px + 1] * ev_factor;                        // G
       out[px + 2] = out[px + 2] * ev_factor * (1.0f - 0.5f * w);  // B
