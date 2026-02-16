@@ -20,6 +20,7 @@
 #
 #   ONNXRUNTIME_VERSION          - version to download (default 1.23.2)
 #   ONNXRUNTIME_DIRECTML_VERSION - DirectML NuGet version for Windows (default 1.23.0)
+#   DIRECTML_VERSION             - DirectML redistributable version for Windows (default 1.15.4)
 #   ONNXRUNTIME_OFFLINE          - if TRUE, never attempt a download (default OFF)
 
 # Skip if already found (avoid re-entry issues with cached variables)
@@ -32,6 +33,7 @@ endif()
 # ---------------------------------------------------------------------------
 set(ONNXRUNTIME_VERSION "1.23.2" CACHE STRING "ONNX Runtime version to download")
 set(ONNXRUNTIME_DIRECTML_VERSION "1.23.0" CACHE STRING "DirectML NuGet package version for Windows")
+set(DIRECTML_VERSION "1.15.4" CACHE STRING "DirectML redistributable version for Windows")
 option(ONNXRUNTIME_OFFLINE "Disable automatic download of ONNX Runtime" OFF)
 
 set(_ORT_SRC_ROOT "${CMAKE_SOURCE_DIR}/src/external/onnxruntime")
@@ -292,6 +294,57 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
 
   # -- Cleanup extraction directory --
   file(REMOVE_RECURSE "${_ORT_EXTRACT_DIR}")
+
+  # -- Download DirectML redistributable on Windows --
+  # The ORT DirectML NuGet package includes ORT with DirectML EP support,
+  # but DirectML.dll itself ships in a separate package (Microsoft.AI.DirectML).
+  if(_ORT_NUGET AND NOT ONNXRUNTIME_OFFLINE)
+    set(_DML_VER "${DIRECTML_VERSION}")
+    set(_DML_PACKAGE "microsoft.ai.directml.${_DML_VER}.nupkg")
+    set(_DML_URL "https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/${_DML_VER}")
+    set(_DML_ARCHIVE "${_ORT_DOWNLOAD_DIR}/${_DML_PACKAGE}")
+
+    if(NOT EXISTS "${_DML_ARCHIVE}")
+      message(STATUS "Downloading DirectML ${_DML_VER}...")
+      file(DOWNLOAD "${_DML_URL}" "${_DML_ARCHIVE}"
+        STATUS _DML_DL_STATUS SHOW_PROGRESS)
+      list(GET _DML_DL_STATUS 0 _DML_DL_CODE)
+      if(NOT _DML_DL_CODE EQUAL 0)
+        file(REMOVE "${_DML_ARCHIVE}")
+        message(WARNING "Failed to download DirectML. GPU acceleration via DirectML will not be available.")
+      endif()
+    endif()
+
+    if(EXISTS "${_DML_ARCHIVE}")
+      set(_DML_EXTRACT_DIR "${_ORT_DOWNLOAD_DIR}/directml-extract")
+      if(EXISTS "${_DML_EXTRACT_DIR}")
+        file(REMOVE_RECURSE "${_DML_EXTRACT_DIR}")
+      endif()
+      message(STATUS "Extracting DirectML ${_DML_VER}...")
+      file(ARCHIVE_EXTRACT INPUT "${_DML_ARCHIVE}" DESTINATION "${_DML_EXTRACT_DIR}")
+
+      # DirectML NuGet layout: bin/<arch>-win/DirectML.dll
+      if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+        set(_DML_ARCH "x64-win")
+      elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+        set(_DML_ARCH "arm64-win")
+      endif()
+
+      find_file(_DML_DLL NAMES DirectML.dll
+        PATHS "${_DML_EXTRACT_DIR}/bin/${_DML_ARCH}"
+              "${_DML_EXTRACT_DIR}/runtimes/${_ORT_NUGET_RID}/native"
+        NO_DEFAULT_PATH
+      )
+      if(_DML_DLL)
+        file(COPY "${_DML_DLL}" DESTINATION "${_ORT_BUILD_ROOT}/lib")
+        message(STATUS "Installed DirectML.dll to ${_ORT_BUILD_ROOT}/lib")
+      else()
+        message(WARNING "DirectML.dll not found in package. GPU acceleration via DirectML will not be available.")
+      endif()
+
+      file(REMOVE_RECURSE "${_DML_EXTRACT_DIR}")
+    endif()
+  endif()
 
   # -- Set root and re-search --
   set(_ORT_ROOT "${_ORT_BUILD_ROOT}")
