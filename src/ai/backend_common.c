@@ -18,6 +18,7 @@
 
 #include "backend.h"
 #include "common/darktable.h"
+#include "common/file_location.h"
 #include "control/conf.h"
 #include <glib.h>
 #include <json-glib/json-glib.h>
@@ -148,20 +149,14 @@ static void _scan_all_paths(dt_ai_environment_t *env)
     g_strfreev(tokens);
   }
 
-  // Priority 1: ~/.config/darktable/models (or User Config Dir)
-  const char *config_dir = g_get_user_config_dir();
-  if(config_dir)
+  // Scan darktable's own config dir (respects --configdir).
+  // On Linux: ~/.config/darktable/models
+  // On Windows: %APPDATA%\darktable\models
+  char configdir[PATH_MAX] = {0};
+  dt_loc_get_user_config_dir(configdir, sizeof(configdir));
+  if(configdir[0])
   {
-    char *p = g_build_filename(config_dir, "darktable", "models", NULL);
-    _scan_directory(env, p);
-    g_free(p);
-  }
-
-  // Priority 2: ~/.local/share/darktable/models (or User Data Dir)
-  const char *data_dir = g_get_user_data_dir();
-  if(data_dir)
-  {
-    char *p = g_build_filename(data_dir, "darktable", "models", NULL);
+    char *p = g_build_filename(configdir, "models", NULL);
     _scan_directory(env, p);
     g_free(p);
   }
