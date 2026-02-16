@@ -37,10 +37,20 @@ option(ONNXRUNTIME_OFFLINE "Disable automatic download of ONNX Runtime" OFF)
 set(_ORT_SRC_ROOT "${CMAKE_SOURCE_DIR}/src/external/onnxruntime")
 set(_ORT_BUILD_ROOT "${CMAKE_BINARY_DIR}/_deps/onnxruntime")
 
+# Invalidate cached results if the files no longer exist on disk
+# (prevents stale paths from a previous build or deleted installation)
+if(_ORT_HEADER AND NOT EXISTS "${_ORT_HEADER}/onnxruntime_c_api.h")
+  unset(_ORT_HEADER CACHE)
+endif()
+if(_ORT_LIBRARY AND NOT EXISTS "${_ORT_LIBRARY}")
+  unset(_ORT_LIBRARY CACHE)
+endif()
+
 # ---------------------------------------------------------------------------
 # Search for existing installation (source tree first, then build tree)
 # ---------------------------------------------------------------------------
 macro(_ort_find_at ROOT)
+  # Standard layout (GitHub releases): include/ + lib/
   find_path(_ORT_HEADER
     NAMES onnxruntime_c_api.h
     PATHS "${ROOT}/include"
@@ -51,6 +61,21 @@ macro(_ort_find_at ROOT)
     PATHS "${ROOT}/lib"
     NO_DEFAULT_PATH
   )
+  # NuGet layout: build/native/include/ + runtimes/<RID>/native/
+  if(NOT _ORT_HEADER)
+    find_path(_ORT_HEADER
+      NAMES onnxruntime_c_api.h
+      PATHS "${ROOT}/build/native/include"
+      NO_DEFAULT_PATH
+    )
+  endif()
+  if(NOT _ORT_LIBRARY AND WIN32)
+    find_library(_ORT_LIBRARY
+      NAMES onnxruntime
+      PATHS "${ROOT}/runtimes/win-x64/native" "${ROOT}/runtimes/win-arm64/native"
+      NO_DEFAULT_PATH
+    )
+  endif()
   if(_ORT_HEADER AND _ORT_LIBRARY)
     set(_ORT_ROOT "${ROOT}")
   endif()
@@ -292,13 +317,10 @@ endif()
 # ---------------------------------------------------------------------------
 if(_ORT_HEADER AND _ORT_LIBRARY AND NOT TARGET onnxruntime::onnxruntime)
 
-  # For system packages, _ORT_HEADER is the directory containing the header
-  # (e.g. /usr/include/onnxruntime). For bundled packages, it's _ORT_ROOT/include.
-  if(_ORT_SYSTEM_PACKAGE)
-    set(_ORT_INCLUDE_DIR "${_ORT_HEADER}")
-  else()
-    set(_ORT_INCLUDE_DIR "${_ORT_ROOT}/include")
-  endif()
+  # _ORT_HEADER is the directory where find_path() located onnxruntime_c_api.h.
+  # Use it directly — it's correct for all layouts (GitHub releases: include/,
+  # NuGet: build/native/include/, system: /usr/include/onnxruntime).
+  set(_ORT_INCLUDE_DIR "${_ORT_HEADER}")
 
   # Try the shipped CMake config files first (they exist under lib/cmake/)
   set(_ORT_CMAKE_DIR "${_ORT_ROOT}/lib/cmake/onnxruntime")
@@ -348,8 +370,11 @@ if(_ORT_HEADER AND _ORT_LIBRARY AND NOT TARGET onnxruntime::onnxruntime)
       set_target_properties(onnxruntime::onnxruntime PROPERTIES
         IMPORTED_IMPLIB "${_ORT_LIBRARY}"
       )
+      # Search both standard (lib/) and NuGet (runtimes/<RID>/native/) layouts
       find_file(_ORT_DLL NAMES onnxruntime.dll
         PATHS "${_ORT_ROOT}/lib"
+              "${_ORT_ROOT}/runtimes/win-x64/native"
+              "${_ORT_ROOT}/runtimes/win-arm64/native"
         NO_DEFAULT_PATH
       )
       if(_ORT_DLL)
@@ -384,11 +409,9 @@ find_package_handle_standard_args(ONNXRuntime
 if(ONNXRuntime_FOUND)
   set(ONNXRuntime_INCLUDE_DIRS "${_ORT_INCLUDE_DIR}")
   set(ONNXRuntime_LIBRARIES "${_ORT_LIBRARY}")
-  if(_ORT_SYSTEM_PACKAGE)
-    get_filename_component(ONNXRuntime_LIB_DIR "${_ORT_LIBRARY}" DIRECTORY)
-  else()
-    set(ONNXRuntime_LIB_DIR "${_ORT_ROOT}/lib")
-  endif()
+  # Derive library directory from the actual found library path
+  # (works for all layouts: standard lib/, NuGet runtimes/<RID>/native/, system)
+  get_filename_component(ONNXRuntime_LIB_DIR "${_ORT_LIBRARY}" DIRECTORY)
   set(ONNXRuntime_LIB_DIR "${ONNXRuntime_LIB_DIR}" CACHE PATH "ONNX Runtime library directory")
   set(ONNXRuntime_SYSTEM_PACKAGE ${_ORT_SYSTEM_PACKAGE} CACHE BOOL "Using system ONNX Runtime package")
   mark_as_advanced(ONNXRuntime_LIB_DIR ONNXRuntime_SYSTEM_PACKAGE)

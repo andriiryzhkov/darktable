@@ -53,9 +53,10 @@ elseif(APPLE)
     )
   endif()
 elseif(WIN32)
-  file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime.dll")
+  # Install onnxruntime.dll and DirectML.dll (if present, from NuGet DirectML package)
+  file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime.dll"
+                      "${ONNXRuntime_LIB_DIR}/DirectML.dll")
   if(_ORT_DLL)
-    # On Windows, install to bin/ where darktable.exe can find it
     install(FILES ${_ORT_DLL}
       DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
