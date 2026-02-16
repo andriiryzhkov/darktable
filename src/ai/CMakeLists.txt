@@ -54,9 +54,8 @@ elseif(APPLE)
   endif()
 elseif(WIN32)
   # Install all ORT DLLs (onnxruntime.dll, onnxruntime_providers_shared.dll, etc.)
-  # and DirectML.dll (if present, from NuGet DirectML package)
-  file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime*.dll"
-                      "${ONNXRuntime_LIB_DIR}/DirectML.dll")
+  # DirectML.dll is a system component on Windows 10 1903+ and does not need bundling.
+  file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime*.dll")
   if(_ORT_DLL)
     install(FILES ${_ORT_DLL}
       DESTINATION ${CMAKE_INSTALL_BINDIR}
