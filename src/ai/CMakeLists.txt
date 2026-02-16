@@ -53,8 +53,9 @@ elseif(APPLE)
     )
   endif()
 elseif(WIN32)
-  # Install onnxruntime.dll and DirectML.dll (if present, from NuGet DirectML package)
-  file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime.dll"
+  # Install all ORT DLLs (onnxruntime.dll, onnxruntime_providers_shared.dll, etc.)
+  # and DirectML.dll (if present, from NuGet DirectML package)
+  file(GLOB _ORT_DLL "${ONNXRuntime_LIB_DIR}/onnxruntime*.dll"
                       "${ONNXRuntime_LIB_DIR}/DirectML.dll")
   if(_ORT_DLL)
     install(FILES ${_ORT_DLL}
