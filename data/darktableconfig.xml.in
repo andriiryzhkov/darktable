@@ -390,16 +390,7 @@
   </dtconfig>
   <dtconfig>
     <name>plugins/ai/provider</name>
-    <type>
-      <enum>
-        <option>auto</option>
-        <option>CPU</option>
-        <option>CoreML</option>
-        <option>CUDA</option>
-        <option>ROCm</option>
-        <option>DirectML</option>
-      </enum>
-    </type>
+    <type>string</type>
     <default>auto</default>
     <shortdescription>AI execution provider</shortdescription>
     <longdescription>select the hardware acceleration provider for AI inference. 'auto' will automatically detect the best available option for your system.</longdescription>

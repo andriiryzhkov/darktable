@@ -216,19 +216,3 @@ void dt_ai_models_set_enabled(dt_ai_registry_t *registry, const char *model_id,
  * @return Path string (caller must free), or NULL if not downloaded
  */
 char *dt_ai_models_get_path(dt_ai_registry_t *registry, const char *model_id);
-
-// --- Provider Helpers ---
-
-/**
- * @brief Get display name for a provider
- * @param provider The provider enum value
- * @return Static string with display name
- */
-const char *dt_ai_provider_to_string(dt_ai_provider_t provider);
-
-/**
- * @brief Parse provider from string
- * @param str The string to parse
- * @return Provider enum value (DT_AI_PROVIDER_AUTO if unknown)
- */
-dt_ai_provider_t dt_ai_provider_from_string(const char *str);

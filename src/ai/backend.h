@@ -28,9 +28,81 @@ typedef enum {
   DT_AI_PROVIDER_CPU,
   DT_AI_PROVIDER_COREML,
   DT_AI_PROVIDER_CUDA,
-  DT_AI_PROVIDER_ROCM,
+  DT_AI_PROVIDER_MIGRAPHX,
+  DT_AI_PROVIDER_OPENVINO,
   DT_AI_PROVIDER_DIRECTML,
+  DT_AI_PROVIDER_COUNT  // must be last
 } dt_ai_provider_t;
+
+/**
+ * @brief Provider descriptor: maps enum to config/display strings.
+ *
+ * config_string: persisted to darktablerc, matches ONNX Runtime provider names
+ * display_name:  shown in UI combo boxes and log messages
+ * available:     compile-time platform guard (FALSE = hidden from UI)
+ */
+typedef struct dt_ai_provider_desc_t {
+  dt_ai_provider_t value;
+  const char *config_string;
+  const char *display_name;
+  int available;
+} dt_ai_provider_desc_t;
+
+// clang-format off
+static const dt_ai_provider_desc_t dt_ai_providers[] = {
+  { DT_AI_PROVIDER_AUTO,     "auto",     "auto",
+    1 },
+  { DT_AI_PROVIDER_CPU,      "CPU",      "CPU",
+    1 },
+  { DT_AI_PROVIDER_COREML,   "CoreML",   "Apple CoreML",
+#if defined(__APPLE__)
+    1
+#else
+    0
+#endif
+  },
+  { DT_AI_PROVIDER_CUDA,     "CUDA",     "NVIDIA CUDA",
+#if defined(__linux__) || defined(_WIN32)
+    1
+#else
+    0
+#endif
+  },
+  { DT_AI_PROVIDER_MIGRAPHX, "MIGraphX", "AMD MIGraphX",
+#if defined(__linux__)
+    1
+#else
+    0
+#endif
+  },
+  { DT_AI_PROVIDER_OPENVINO, "OpenVINO", "Intel OpenVINO",
+#if defined(__linux__) || defined(_WIN32) || (defined(__APPLE__) && defined(__x86_64__))
+    1
+#else
+    0
+#endif
+  },
+  { DT_AI_PROVIDER_DIRECTML, "DirectML", "Windows DirectML",
+#if defined(_WIN32)
+    1
+#else
+    0
+#endif
+  },
+};
+// clang-format on
+
+_Static_assert(sizeof(dt_ai_providers) / sizeof(dt_ai_providers[0]) == DT_AI_PROVIDER_COUNT,
+               "dt_ai_providers table out of sync with dt_ai_provider_t enum");
+
+/** Config key for the AI execution provider preference */
+#define DT_AI_CONF_PROVIDER "plugins/ai/provider"
+
+/** Get display name for a provider enum value */
+const char *dt_ai_provider_to_string(dt_ai_provider_t provider);
+
+/** Parse provider from config string (with legacy alias support) */
+dt_ai_provider_t dt_ai_provider_from_string(const char *str);
 
 /**
  * @brief Graph Optimization Level

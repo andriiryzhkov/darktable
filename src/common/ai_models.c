@@ -41,7 +41,6 @@ static inline char *realpath(const char *path, char *resolved_path)
 
 // Config keys
 #define CONF_AI_ENABLED "plugins/ai/enabled"
-#define CONF_AI_PROVIDER "plugins/ai/provider"
 #define CONF_AI_REPOSITORY "plugins/ai/repository"
 #define CONF_MODEL_ENABLED_PREFIX "plugins/ai/models/"
 
@@ -93,44 +92,6 @@ static gboolean _ensure_directory(const char *path)
   if(g_file_test(path, G_FILE_TEST_IS_DIR))
     return TRUE;
   return g_mkdir_with_parents(path, 0755) == 0;
-}
-
-// --- Provider Helpers ---
-
-const char *dt_ai_provider_to_string(dt_ai_provider_t provider)
-{
-  switch(provider)
-  {
-  case DT_AI_PROVIDER_CPU:
-    return "CPU";
-  case DT_AI_PROVIDER_COREML:
-    return "CoreML";
-  case DT_AI_PROVIDER_CUDA:
-    return "CUDA";
-  case DT_AI_PROVIDER_ROCM:
-    return "ROCm";
-  case DT_AI_PROVIDER_DIRECTML:
-    return "DirectML";
-  default:
-    return "auto";
-  }
-}
-
-dt_ai_provider_t dt_ai_provider_from_string(const char *str)
-{
-  if(!str)
-    return DT_AI_PROVIDER_AUTO;
-  if(g_ascii_strcasecmp(str, "CPU") == 0)
-    return DT_AI_PROVIDER_CPU;
-  if(g_ascii_strcasecmp(str, "CoreML") == 0)
-    return DT_AI_PROVIDER_COREML;
-  if(g_ascii_strcasecmp(str, "CUDA") == 0)
-    return DT_AI_PROVIDER_CUDA;
-  if(g_ascii_strcasecmp(str, "ROCm") == 0)
-    return DT_AI_PROVIDER_ROCM;
-  if(g_ascii_strcasecmp(str, "DirectML") == 0)
-    return DT_AI_PROVIDER_DIRECTML;
-  return DT_AI_PROVIDER_AUTO;
 }
 
 // --- Version Helpers ---
@@ -451,7 +412,7 @@ dt_ai_registry_t *dt_ai_models_init(void)
   // Load settings from config
   registry->ai_enabled = dt_conf_get_bool(CONF_AI_ENABLED);
 
-  char *provider_str = dt_conf_get_string(CONF_AI_PROVIDER);
+  char *provider_str = dt_conf_get_string(DT_AI_CONF_PROVIDER);
   registry->provider = dt_ai_provider_from_string(provider_str);
   g_free(provider_str);
 

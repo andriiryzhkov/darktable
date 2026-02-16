@@ -345,18 +345,24 @@ _enable_acceleration(OrtSessionOptions *session_opts, dt_ai_provider_t provider)
     _try_provider(
       session_opts,
       "OrtSessionOptionsAppendExecutionProvider_CoreML",
-      "CoreML");
+      "Apple CoreML");
 #else
-    dt_print(DT_DEBUG_AI, "[darktable_ai] CoreML not available on this platform");
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Apple CoreML not available on this platform");
 #endif
     break;
 
   case DT_AI_PROVIDER_CUDA:
-    _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_CUDA", "CUDA");
+    _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_CUDA", "NVIDIA CUDA");
     break;
 
-  case DT_AI_PROVIDER_ROCM:
-    _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_ROCM", "ROCm");
+  case DT_AI_PROVIDER_MIGRAPHX:
+    // Try MIGraphX first; fall back to ROCm for older ORT builds
+    if(!_try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_MIGraphX", "AMD MIGraphX"))
+      _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_ROCM", "AMD ROCm (legacy)");
+    break;
+
+  case DT_AI_PROVIDER_OPENVINO:
+    _try_provider(session_opts, "OrtSessionOptionsAppendExecutionProvider_OpenVINO", "Intel OpenVINO");
     break;
 
   case DT_AI_PROVIDER_DIRECTML:
@@ -364,9 +370,9 @@ _enable_acceleration(OrtSessionOptions *session_opts, dt_ai_provider_t provider)
     _try_provider(
       session_opts,
       "OrtSessionOptionsAppendExecutionProvider_DML",
-      "DirectML");
+      "Windows DirectML");
 #else
-    dt_print(DT_DEBUG_AI, "[darktable_ai] DirectML not available on this platform");
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Windows DirectML not available on this platform");
 #endif
     break;
 
@@ -377,23 +383,27 @@ _enable_acceleration(OrtSessionOptions *session_opts, dt_ai_provider_t provider)
     _try_provider(
       session_opts,
       "OrtSessionOptionsAppendExecutionProvider_CoreML",
-      "CoreML");
+      "Apple CoreML");
 #elif defined(_WIN32)
     _try_provider(
       session_opts,
       "OrtSessionOptionsAppendExecutionProvider_DML",
-      "DirectML");
+      "Windows DirectML");
 #elif defined(__linux__)
-    // Try CUDA first, then ROCm
+    // Try CUDA first, then MIGraphX
     if(!_try_provider(
          session_opts,
          "OrtSessionOptionsAppendExecutionProvider_CUDA",
-         "CUDA"))
+         "NVIDIA CUDA"))
     {
-      _try_provider(
-        session_opts,
-        "OrtSessionOptionsAppendExecutionProvider_ROCM",
-        "ROCm");
+      if(!_try_provider(
+           session_opts,
+           "OrtSessionOptionsAppendExecutionProvider_MIGraphX",
+           "AMD MIGraphX"))
+        _try_provider(
+          session_opts,
+          "OrtSessionOptionsAppendExecutionProvider_ROCM",
+          "AMD ROCm (legacy)");
     }
 #endif
     break;

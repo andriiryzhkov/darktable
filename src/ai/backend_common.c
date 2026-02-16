@@ -23,19 +23,6 @@
 #include <json-glib/json-glib.h>
 #include <string.h>
 
-#define CONF_AI_PROVIDER_KEY "plugins/ai/provider"
-
-static dt_ai_provider_t _provider_from_string(const char *str)
-{
-  if(!str || g_ascii_strcasecmp(str, "auto") == 0) return DT_AI_PROVIDER_AUTO;
-  if(g_ascii_strcasecmp(str, "cpu") == 0) return DT_AI_PROVIDER_CPU;
-  if(g_ascii_strcasecmp(str, "coreml") == 0) return DT_AI_PROVIDER_COREML;
-  if(g_ascii_strcasecmp(str, "cuda") == 0) return DT_AI_PROVIDER_CUDA;
-  if(g_ascii_strcasecmp(str, "rocm") == 0) return DT_AI_PROVIDER_ROCM;
-  if(g_ascii_strcasecmp(str, "directml") == 0) return DT_AI_PROVIDER_DIRECTML;
-  return DT_AI_PROVIDER_AUTO;
-}
-
 // --- Internal Structures ---
 
 struct dt_ai_environment_t
@@ -192,8 +179,8 @@ dt_ai_environment_t *dt_ai_env_init(const char *search_paths)
   env->search_paths = g_strdup(search_paths);
 
   // Read user's preferred execution provider from config
-  char *prov_str = dt_conf_get_string(CONF_AI_PROVIDER_KEY);
-  env->provider = _provider_from_string(prov_str);
+  char *prov_str = dt_conf_get_string(DT_AI_CONF_PROVIDER);
+  env->provider = dt_ai_provider_from_string(prov_str);
   g_free(prov_str);
 
   _scan_all_paths(env);
@@ -376,6 +363,39 @@ dt_ai_context_t *dt_ai_load_model_ext(
   g_free(model_dir);
   g_free(backend_copy);
   return ctx;
+}
+
+// --- Provider String Conversion ---
+
+const char *dt_ai_provider_to_string(dt_ai_provider_t provider)
+{
+  for(int i = 0; i < DT_AI_PROVIDER_COUNT; i++)
+  {
+    if(dt_ai_providers[i].value == provider)
+      return dt_ai_providers[i].display_name;
+  }
+  return dt_ai_providers[0].display_name;  // fallback to "auto"
+}
+
+dt_ai_provider_t dt_ai_provider_from_string(const char *str)
+{
+  if(!str)
+    return DT_AI_PROVIDER_AUTO;
+
+  // Match against config_string (primary) and display_name
+  for(int i = 0; i < DT_AI_PROVIDER_COUNT; i++)
+  {
+    if(g_ascii_strcasecmp(str, dt_ai_providers[i].config_string) == 0)
+      return dt_ai_providers[i].value;
+    if(g_ascii_strcasecmp(str, dt_ai_providers[i].display_name) == 0)
+      return dt_ai_providers[i].value;
+  }
+
+  // Legacy alias: ROCm was renamed to MIGraphX
+  if(g_ascii_strcasecmp(str, "ROCm") == 0)
+    return DT_AI_PROVIDER_MIGRAPHX;
+
+  return DT_AI_PROVIDER_AUTO;
 }
 
 // clang-format off

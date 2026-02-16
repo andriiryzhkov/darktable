@@ -231,22 +231,46 @@ static void _on_enable_toggled(GtkWidget *widget, gpointer user_data)
   _update_bool_indicator(indicator, "plugins/ai/enabled");
 }
 
+// Map combo box index to provider table index (skipping unavailable providers)
+static int _combo_idx_to_provider(int combo_idx)
+{
+  int visible = -1;
+  for(int i = 0; i < DT_AI_PROVIDER_COUNT; i++)
+  {
+    if(!dt_ai_providers[i].available) continue;
+    if(++visible == combo_idx)
+      return i;
+  }
+  return 0;  // fallback to AUTO
+}
+
+// Map provider enum value to combo box index
+static int _provider_to_combo_idx(dt_ai_provider_t provider)
+{
+  int visible = -1;
+  for(int i = 0; i < DT_AI_PROVIDER_COUNT; i++)
+  {
+    if(!dt_ai_providers[i].available) continue;
+    visible++;
+    if(dt_ai_providers[i].value == provider)
+      return visible;
+  }
+  return 0;  // fallback to first visible (AUTO)
+}
+
 static void _on_provider_changed(GtkWidget *widget, gpointer user_data)
 {
   GtkWidget *indicator = GTK_WIDGET(user_data);
-  const int idx = dt_bauhaus_combobox_get(widget);
-  const char *providers[] = {"auto", "CPU", "CoreML", "CUDA", "ROCm", "DirectML"};
-  if(idx >= 0 && idx < 6)
+  const int combo_idx = dt_bauhaus_combobox_get(widget);
+  const int pi = _combo_idx_to_provider(combo_idx);
+  dt_conf_set_string(DT_AI_CONF_PROVIDER, dt_ai_providers[pi].config_string);
+  if(darktable.ai_registry)
   {
-    dt_conf_set_string("plugins/ai/provider", providers[idx]);
-    if(darktable.ai_registry)
-    {
-      g_mutex_lock(&darktable.ai_registry->lock);
-      darktable.ai_registry->provider = dt_ai_provider_from_string(providers[idx]);
-      g_mutex_unlock(&darktable.ai_registry->lock);
-    }
+    g_mutex_lock(&darktable.ai_registry->lock);
+    darktable.ai_registry->provider = dt_ai_providers[pi].value;
+    g_mutex_unlock(&darktable.ai_registry->lock);
   }
-  _update_string_indicator(indicator, "plugins/ai/provider");
+  _update_string_indicator(indicator, DT_AI_CONF_PROVIDER);
 }
 
 // Double-click on label resets the enable toggle to default
@@ -268,9 +292,9 @@ _reset_provider_click(GtkWidget *label, GdkEventButton *event, GtkWidget *widget
 {
   if(event->type == GDK_2BUTTON_PRESS)
   {
-    const char *def = dt_confgen_get("plugins/ai/provider", DT_DEFAULT);
+    const char *def = dt_confgen_get(DT_AI_CONF_PROVIDER, DT_DEFAULT);
     dt_ai_provider_t provider = dt_ai_provider_from_string(def);
-    dt_bauhaus_combobox_set(widget, (int)provider);
+    dt_bauhaus_combobox_set(widget, _provider_to_combo_idx(provider));
     return TRUE;
   }
   return FALSE;
@@ -739,19 +763,25 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   gtk_container_add(GTK_CONTAINER(provider_labelev), provider_label);
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(provider_labelev), FALSE);
 
-  GtkWidget *provider_indicator = _create_indicator("plugins/ai/provider");
+  GtkWidget *provider_indicator = _create_indicator(DT_AI_CONF_PROVIDER);
   data->provider_combo = dt_bauhaus_combobox_new(NULL);
-  dt_bauhaus_combobox_add(data->provider_combo, _("auto"));
-  dt_bauhaus_combobox_add(data->provider_combo, "CPU");
-  dt_bauhaus_combobox_add(data->provider_combo, "CoreML");
-  dt_bauhaus_combobox_add(data->provider_combo, "CUDA");
-  dt_bauhaus_combobox_add(data->provider_combo, "ROCm");
-  dt_bauhaus_combobox_add(data->provider_combo, "DirectML");
 
-  char *provider_str = dt_conf_get_string("plugins/ai/provider");
+  // Populate from central provider table, skipping unavailable providers
+  GString *tooltip = g_string_new(_("select hardware acceleration for AI inference:"));
+  for(int i = 0; i < DT_AI_PROVIDER_COUNT; i++)
+  {
+    if(!dt_ai_providers[i].available) continue;
+    if(dt_ai_providers[i].value == DT_AI_PROVIDER_AUTO)
+      dt_bauhaus_combobox_add(data->provider_combo, _("auto"));
+    else
+      dt_bauhaus_combobox_add(data->provider_combo, dt_ai_providers[i].display_name);
+    g_string_append_printf(tooltip, "\n- %s", dt_ai_providers[i].display_name);
+  }
+
+  char *provider_str = dt_conf_get_string(DT_AI_CONF_PROVIDER);
   dt_ai_provider_t provider = dt_ai_provider_from_string(provider_str);
   g_free(provider_str);
-  dt_bauhaus_combobox_set(data->provider_combo, (int)provider);
+  dt_bauhaus_combobox_set(data->provider_combo, _provider_to_combo_idx(provider));
 
   g_signal_connect(
     data->provider_combo,
@@ -763,15 +793,8 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
     "button-press-event",
     G_CALLBACK(_reset_provider_click),
     data->provider_combo);
-  gtk_widget_set_tooltip_text(
-    data->provider_combo,
-    _("select hardware acceleration for AI inference:\n"
-      "- auto: automatically detect best option\n"
-      "- CPU: use CPU only (slowest but always available)\n"
-      "- CoreML: Apple Neural Engine/GPU (macOS only)\n"
-      "- CUDA: NVIDIA GPU acceleration\n"
-      "- ROCm: AMD GPU acceleration (Linux)\n"
-      "- DirectML: Windows GPU acceleration"));
+  gtk_widget_set_tooltip_text(data->provider_combo, tooltip->str);
+  g_string_free(tooltip, TRUE);
   gtk_grid_attach(GTK_GRID(general_grid), provider_labelev, 0, row, 1, 1);
   gtk_grid_attach(GTK_GRID(general_grid), provider_indicator, 1, row, 1, 1);
   gtk_grid_attach(GTK_GRID(general_grid), data->provider_combo, 2, row++, 1, 1);
