@@ -953,7 +953,8 @@ static gboolean _extract_zip(const char *zippath, const char *destdir)
       g_free(parent);
       if(
         !real_parent || strncmp(real_parent, real_destdir, destdir_len) != 0
-        || (real_parent[destdir_len] != '/' && real_parent[destdir_len] != '\0'))
+        || (real_parent[destdir_len] != '/' && real_parent[destdir_len] != '\\'
+            && real_parent[destdir_len] != '\0'))
       {
         dt_print(DT_DEBUG_AI, "[ai_models] Path traversal blocked: %s", entry_name);
         free(real_parent);
@@ -966,7 +967,8 @@ static gboolean _extract_zip(const char *zippath, const char *destdir)
     {
       if(
         strncmp(real_full_path, real_destdir, destdir_len) != 0
-        || (real_full_path[destdir_len] != '/' && real_full_path[destdir_len] != '\0'))
+        || (real_full_path[destdir_len] != '/' && real_full_path[destdir_len] != '\\'
+            && real_full_path[destdir_len] != '\0'))
       {
         dt_print(DT_DEBUG_AI, "[ai_models] Path traversal blocked: %s", entry_name);
         free(real_full_path);
