@@ -18,8 +18,9 @@
 #
 # Cache variables that influence behaviour:
 #
-#   ONNXRUNTIME_VERSION   - version to download (default 1.23.2)
-#   ONNXRUNTIME_OFFLINE   - if TRUE, never attempt a download (default OFF)
+#   ONNXRUNTIME_VERSION          - version to download (default 1.23.2)
+#   ONNXRUNTIME_DIRECTML_VERSION - DirectML NuGet version for Windows (default 1.23.0)
+#   ONNXRUNTIME_OFFLINE          - if TRUE, never attempt a download (default OFF)
 
 # Skip if already found (avoid re-entry issues with cached variables)
 if(ONNXRuntime_FOUND)
@@ -30,6 +31,7 @@ endif()
 # Configuration
 # ---------------------------------------------------------------------------
 set(ONNXRUNTIME_VERSION "1.23.2" CACHE STRING "ONNX Runtime version to download")
+set(ONNXRUNTIME_DIRECTML_VERSION "1.23.0" CACHE STRING "DirectML NuGet package version for Windows")
 option(ONNXRUNTIME_OFFLINE "Disable automatic download of ONNX Runtime" OFF)
 
 set(_ORT_SRC_ROOT "${CMAKE_SOURCE_DIR}/src/external/onnxruntime")
@@ -108,10 +110,15 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
       message(FATAL_ERROR "Unsupported Linux architecture: ${CMAKE_SYSTEM_PROCESSOR}")
     endif()
   elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    # On Windows, download the DirectML NuGet package for GPU support
+    # (AMD/Intel/NVIDIA via DirectX 12). NuGet packages are just ZIP files.
+    set(_ORT_VER "${ONNXRUNTIME_DIRECTML_VERSION}")
+    set(_ORT_PACKAGE "microsoft.ml.onnxruntime.directml.${_ORT_VER}.nupkg")
+    set(_ORT_NUGET TRUE)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
-      set(_ORT_PACKAGE "onnxruntime-win-x64-${_ORT_VER}.zip")
+      set(_ORT_NUGET_RID "win-x64")
     elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
-      set(_ORT_PACKAGE "onnxruntime-win-arm64-${_ORT_VER}.zip")
+      set(_ORT_NUGET_RID "win-arm64")
     else()
       message(FATAL_ERROR "Unsupported Windows architecture: ${CMAKE_SYSTEM_PROCESSOR}")
     endif()
@@ -119,67 +126,74 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
     message(FATAL_ERROR "Unsupported OS for ONNX Runtime auto-download: ${CMAKE_SYSTEM_NAME}")
   endif()
 
-  set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${_ORT_VER}/${_ORT_PACKAGE}")
+  if(_ORT_NUGET)
+    set(_ORT_URL "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/${_ORT_VER}")
+  else()
+    set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${_ORT_VER}/${_ORT_PACKAGE}")
+  endif()
   set(_ORT_DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/_deps")
   set(_ORT_ARCHIVE "${_ORT_DOWNLOAD_DIR}/${_ORT_PACKAGE}")
 
-  # -- Fetch SHA256 digest from GitHub Releases API --
+  # -- Fetch SHA256 digest from GitHub Releases API (non-NuGet only) --
   # GitHub provides a "digest" field (sha256:...) for every release asset.
+  # NuGet packages don't have this; they are verified by HTTPS only.
   set(_ORT_HASH "")
-  set(_ORT_API_JSON "${_ORT_DOWNLOAD_DIR}/ort-release-${_ORT_VER}.json")
-  set(_ORT_API_URL "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v${_ORT_VER}")
+  if(NOT _ORT_NUGET)
+    set(_ORT_API_JSON "${_ORT_DOWNLOAD_DIR}/ort-release-${_ORT_VER}.json")
+    set(_ORT_API_URL "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v${_ORT_VER}")
 
-  if(NOT EXISTS "${_ORT_API_JSON}")
-    message(STATUS "Fetching ONNX Runtime v${_ORT_VER} release metadata from GitHub API...")
-    file(MAKE_DIRECTORY "${_ORT_DOWNLOAD_DIR}")
-    file(DOWNLOAD
-      "${_ORT_API_URL}"
-      "${_ORT_API_JSON}"
-      STATUS _ORT_API_STATUS
-      HTTPHEADER "Accept: application/vnd.github+json"
-    )
-    list(GET _ORT_API_STATUS 0 _ORT_API_CODE)
-    if(NOT _ORT_API_CODE EQUAL 0)
-      file(REMOVE "${_ORT_API_JSON}")
-    endif()
-  endif()
-
-  if(EXISTS "${_ORT_API_JSON}")
-    file(READ "${_ORT_API_JSON}" _ORT_API_CONTENT)
-    # Two-step extraction: locate the package name, then find the first
-    # "digest" field that follows it within the same asset JSON object.
-    string(FIND "${_ORT_API_CONTENT}" "\"name\":\"${_ORT_PACKAGE}\"" _ORT_NAME_POS)
-    if(_ORT_NAME_POS EQUAL -1)
-      # Try with spaces around colon (GitHub API may format either way)
-      string(FIND "${_ORT_API_CONTENT}" "\"name\": \"${_ORT_PACKAGE}\"" _ORT_NAME_POS)
-    endif()
-    if(NOT _ORT_NAME_POS EQUAL -1)
-      string(SUBSTRING "${_ORT_API_CONTENT}" ${_ORT_NAME_POS} 2000 _ORT_ASSET_TAIL)
-      string(REGEX MATCH "\"digest\" *: *\"sha256:([a-f0-9]+)\"" _ORT_DIGEST_MATCH "${_ORT_ASSET_TAIL}")
-      if(_ORT_DIGEST_MATCH)
-        set(_ORT_HASH "${CMAKE_MATCH_1}")
-        message(STATUS "ONNX Runtime ${_ORT_PACKAGE} SHA256: ${_ORT_HASH}")
+    if(NOT EXISTS "${_ORT_API_JSON}")
+      message(STATUS "Fetching ONNX Runtime v${_ORT_VER} release metadata from GitHub API...")
+      file(MAKE_DIRECTORY "${_ORT_DOWNLOAD_DIR}")
+      file(DOWNLOAD
+        "${_ORT_API_URL}"
+        "${_ORT_API_JSON}"
+        STATUS _ORT_API_STATUS
+        HTTPHEADER "Accept: application/vnd.github+json"
+      )
+      list(GET _ORT_API_STATUS 0 _ORT_API_CODE)
+      if(NOT _ORT_API_CODE EQUAL 0)
+        file(REMOVE "${_ORT_API_JSON}")
       endif()
     endif()
-    if(NOT _ORT_HASH)
+
+    if(EXISTS "${_ORT_API_JSON}")
+      file(READ "${_ORT_API_JSON}" _ORT_API_CONTENT)
+      # Two-step extraction: locate the package name, then find the first
+      # "digest" field that follows it within the same asset JSON object.
+      string(FIND "${_ORT_API_CONTENT}" "\"name\":\"${_ORT_PACKAGE}\"" _ORT_NAME_POS)
+      if(_ORT_NAME_POS EQUAL -1)
+        # Try with spaces around colon (GitHub API may format either way)
+        string(FIND "${_ORT_API_CONTENT}" "\"name\": \"${_ORT_PACKAGE}\"" _ORT_NAME_POS)
+      endif()
+      if(NOT _ORT_NAME_POS EQUAL -1)
+        string(SUBSTRING "${_ORT_API_CONTENT}" ${_ORT_NAME_POS} 2000 _ORT_ASSET_TAIL)
+        string(REGEX MATCH "\"digest\" *: *\"sha256:([a-f0-9]+)\"" _ORT_DIGEST_MATCH "${_ORT_ASSET_TAIL}")
+        if(_ORT_DIGEST_MATCH)
+          set(_ORT_HASH "${CMAKE_MATCH_1}")
+          message(STATUS "ONNX Runtime ${_ORT_PACKAGE} SHA256: ${_ORT_HASH}")
+        endif()
+      endif()
+      if(NOT _ORT_HASH)
+        message(WARNING
+          "Could not find SHA256 digest for ${_ORT_PACKAGE} in GitHub API response. "
+          "Download will proceed without integrity verification.")
+      endif()
+    else()
       message(WARNING
-        "Could not find SHA256 digest for ${_ORT_PACKAGE} in GitHub API response. "
+        "Could not fetch release metadata from GitHub API. "
         "Download will proceed without integrity verification.")
     endif()
-  else()
-    message(WARNING
-      "Could not fetch release metadata from GitHub API. "
-      "Download will proceed without integrity verification.")
-  endif()
 
-  # -- Verify cached archive if it exists --
-  if(EXISTS "${_ORT_ARCHIVE}" AND _ORT_HASH)
-    file(SHA256 "${_ORT_ARCHIVE}" _ORT_CACHED_HASH)
-    if(NOT _ORT_CACHED_HASH STREQUAL "${_ORT_HASH}")
-      message(STATUS "Cached ONNX Runtime archive has wrong checksum, re-downloading...")
-      file(REMOVE "${_ORT_ARCHIVE}")
+    # -- Verify cached archive if it exists --
+    if(EXISTS "${_ORT_ARCHIVE}" AND _ORT_HASH)
+      file(SHA256 "${_ORT_ARCHIVE}" _ORT_CACHED_HASH)
+      if(NOT _ORT_CACHED_HASH STREQUAL "${_ORT_HASH}")
+        message(STATUS "Cached ONNX Runtime archive has wrong checksum, re-downloading...")
+        file(REMOVE "${_ORT_ARCHIVE}")
+      endif()
     endif()
-  endif()
+  endif() # NOT _ORT_NUGET
 
   # -- Download --
   if(NOT EXISTS "${_ORT_ARCHIVE}")
@@ -223,22 +237,33 @@ if(NOT _ORT_HEADER OR NOT _ORT_LIBRARY)
     DESTINATION "${_ORT_EXTRACT_DIR}"
   )
 
-  # Find the single top-level directory inside the extracted archive
-  file(GLOB _ORT_INNER_DIRS "${_ORT_EXTRACT_DIR}/*")
-  list(LENGTH _ORT_INNER_DIRS _ORT_INNER_COUNT)
-  if(_ORT_INNER_COUNT EQUAL 1)
-    list(GET _ORT_INNER_DIRS 0 _ORT_INNER)
-  else()
-    set(_ORT_INNER "${_ORT_EXTRACT_DIR}")
-  endif()
-
   # -- Install into build tree --
   if(EXISTS "${_ORT_BUILD_ROOT}")
     file(REMOVE_RECURSE "${_ORT_BUILD_ROOT}")
   endif()
-  file(MAKE_DIRECTORY "${_ORT_BUILD_ROOT}")
-  file(COPY "${_ORT_INNER}/lib" DESTINATION "${_ORT_BUILD_ROOT}")
-  file(COPY "${_ORT_INNER}/include" DESTINATION "${_ORT_BUILD_ROOT}")
+  file(MAKE_DIRECTORY "${_ORT_BUILD_ROOT}/include")
+  file(MAKE_DIRECTORY "${_ORT_BUILD_ROOT}/lib")
+
+  if(_ORT_NUGET)
+    # NuGet package layout:
+    #   build/native/include/  -> headers
+    #   runtimes/<RID>/native/ -> DLLs and .lib files
+    file(GLOB _ORT_NUGET_HEADERS "${_ORT_EXTRACT_DIR}/build/native/include/*")
+    file(COPY ${_ORT_NUGET_HEADERS} DESTINATION "${_ORT_BUILD_ROOT}/include")
+    file(GLOB _ORT_NUGET_LIBS "${_ORT_EXTRACT_DIR}/runtimes/${_ORT_NUGET_RID}/native/*")
+    file(COPY ${_ORT_NUGET_LIBS} DESTINATION "${_ORT_BUILD_ROOT}/lib")
+  else()
+    # GitHub release layout: single top-level directory with lib/ and include/
+    file(GLOB _ORT_INNER_DIRS "${_ORT_EXTRACT_DIR}/*")
+    list(LENGTH _ORT_INNER_DIRS _ORT_INNER_COUNT)
+    if(_ORT_INNER_COUNT EQUAL 1)
+      list(GET _ORT_INNER_DIRS 0 _ORT_INNER)
+    else()
+      set(_ORT_INNER "${_ORT_EXTRACT_DIR}")
+    endif()
+    file(COPY "${_ORT_INNER}/lib" DESTINATION "${_ORT_BUILD_ROOT}")
+    file(COPY "${_ORT_INNER}/include" DESTINATION "${_ORT_BUILD_ROOT}")
+  endif()
 
   # -- Cleanup extraction directory --
   file(REMOVE_RECURSE "${_ORT_EXTRACT_DIR}")
