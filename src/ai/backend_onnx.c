@@ -410,6 +410,60 @@ _enable_acceleration(OrtSessionOptions *session_opts, dt_ai_provider_t provider)
   }
 }
 
+// --- Provider Probe ---
+
+int dt_ai_probe_provider(dt_ai_provider_t provider)
+{
+  // AUTO and CPU are always available
+  if(provider == DT_AI_PROVIDER_AUTO || provider == DT_AI_PROVIDER_CPU)
+    return 1;
+
+  // Ensure ORT API is initialized
+  g_once(&g_ort_once, _init_ort_api, NULL);
+  g_ort = (const OrtApi *)g_ort_once.retval;
+  if(!g_ort) return 0;
+
+  g_once(&g_env_once, _init_ort_env, NULL);
+  g_env = (OrtEnv *)g_env_once.retval;
+  if(!g_env) return 0;
+
+  // Create temporary session options for the probe
+  OrtSessionOptions *opts = NULL;
+  OrtStatus *status = g_ort->CreateSessionOptions(&opts);
+  if(status)
+  {
+    g_ort->ReleaseStatus(status);
+    return 0;
+  }
+
+  gboolean ok = FALSE;
+
+  switch(provider)
+  {
+  case DT_AI_PROVIDER_COREML:
+    ok = _try_provider(opts, "OrtSessionOptionsAppendExecutionProvider_CoreML", "Apple CoreML");
+    break;
+  case DT_AI_PROVIDER_CUDA:
+    ok = _try_provider(opts, "OrtSessionOptionsAppendExecutionProvider_CUDA", "NVIDIA CUDA");
+    break;
+  case DT_AI_PROVIDER_MIGRAPHX:
+    ok = _try_provider(opts, "OrtSessionOptionsAppendExecutionProvider_MIGraphX", "AMD MIGraphX")
+      || _try_provider(opts, "OrtSessionOptionsAppendExecutionProvider_ROCM", "AMD ROCm (legacy)");
+    break;
+  case DT_AI_PROVIDER_OPENVINO:
+    ok = _try_provider(opts, "OrtSessionOptionsAppendExecutionProvider_OpenVINO", "Intel OpenVINO");
+    break;
+  case DT_AI_PROVIDER_DIRECTML:
+    ok = _try_provider(opts, "OrtSessionOptionsAppendExecutionProvider_DML", "Windows DirectML");
+    break;
+  default:
+    break;
+  }
+
+  g_ort->ReleaseSessionOptions(opts);
+  return ok ? 1 : 0;
+}
+
 // --- ONNX Model Loading ---
 
 // Load ONNX model from model_dir/model_file with dimension overrides.

@@ -95,6 +95,8 @@ typedef struct dt_prefs_ai_data_t
 {
   GtkWidget *enable_toggle;
   GtkWidget *provider_combo;
+  GtkWidget *provider_indicator;
+  GtkWidget *provider_status;
   GtkWidget *model_list;
   GtkListStore *model_store;
   GtkWidget *download_selected_btn;
@@ -258,9 +260,24 @@ static int _provider_to_combo_idx(dt_ai_provider_t provider)
   return 0;  // fallback to first visible (AUTO)
 }
 
+static void _update_provider_status(dt_prefs_ai_data_t *data, dt_ai_provider_t provider)
+{
+  if(!data->provider_status) return;
+
+  if(provider == DT_AI_PROVIDER_AUTO || provider == DT_AI_PROVIDER_CPU
+     || dt_ai_probe_provider(provider))
+  {
+    gtk_label_set_text(GTK_LABEL(data->provider_status), "");
+    return;
+  }
+
+  gtk_label_set_markup(GTK_LABEL(data->provider_status),
+                       _("<i>not available, will fall back to CPU</i>"));
+}
+
 static void _on_provider_changed(GtkWidget *widget, gpointer user_data)
 {
-  GtkWidget *indicator = GTK_WIDGET(user_data);
+  dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
   const int combo_idx = dt_bauhaus_combobox_get(widget);
   const int pi = _combo_idx_to_provider(combo_idx);
   dt_conf_set_string(DT_AI_CONF_PROVIDER, dt_ai_providers[pi].config_string);
@@ -270,7 +287,8 @@ static void _on_provider_changed(GtkWidget *widget, gpointer user_data)
     darktable.ai_registry->provider = dt_ai_providers[pi].value;
     g_mutex_unlock(&darktable.ai_registry->lock);
   }
-  _update_string_indicator(indicator, DT_AI_CONF_PROVIDER);
+  _update_string_indicator(data->provider_indicator, DT_AI_CONF_PROVIDER);
+  _update_provider_status(data, dt_ai_providers[pi].value);
 }
 
 // Double-click on label resets the enable toggle to default
@@ -763,7 +781,7 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   gtk_container_add(GTK_CONTAINER(provider_labelev), provider_label);
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(provider_labelev), FALSE);
 
-  GtkWidget *provider_indicator = _create_indicator(DT_AI_CONF_PROVIDER);
+  data->provider_indicator = _create_indicator(DT_AI_CONF_PROVIDER);
   data->provider_combo = dt_bauhaus_combobox_new(NULL);
 
   // Populate from central provider table, skipping unavailable providers
@@ -787,7 +805,7 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
     data->provider_combo,
     "value-changed",
     G_CALLBACK(_on_provider_changed),
-    provider_indicator);
+    data);
   g_signal_connect(
     provider_labelev,
     "button-press-event",
@@ -795,9 +813,14 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
     data->provider_combo);
   gtk_widget_set_tooltip_text(data->provider_combo, tooltip->str);
   g_string_free(tooltip, TRUE);
+  data->provider_status = gtk_label_new(NULL);
+  gtk_label_set_use_markup(GTK_LABEL(data->provider_status), TRUE);
+  gtk_widget_set_halign(data->provider_status, GTK_ALIGN_START);
+
   gtk_grid_attach(GTK_GRID(general_grid), provider_labelev, 0, row, 1, 1);
-  gtk_grid_attach(GTK_GRID(general_grid), provider_indicator, 1, row, 1, 1);
-  gtk_grid_attach(GTK_GRID(general_grid), data->provider_combo, 2, row++, 1, 1);
+  gtk_grid_attach(GTK_GRID(general_grid), data->provider_indicator, 1, row, 1, 1);
+  gtk_grid_attach(GTK_GRID(general_grid), data->provider_combo, 2, row, 1, 1);
+  gtk_grid_attach(GTK_GRID(general_grid), data->provider_status, 3, row++, 1, 1);
 
   gtk_box_pack_start(GTK_BOX(main_box), general_grid, FALSE, FALSE, 0);
 

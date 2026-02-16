@@ -104,6 +104,10 @@ const char *dt_ai_provider_to_string(dt_ai_provider_t provider);
 /** Parse provider from config string (with legacy alias support) */
 dt_ai_provider_t dt_ai_provider_from_string(const char *str);
 
+/** Test if a provider is available at runtime (checks deps, not just compile-time).
+ *  @return 1 if available, 0 if not. */
+int dt_ai_probe_provider(dt_ai_provider_t provider);
+
 /**
  * @brief Graph Optimization Level
  *
