@@ -130,8 +130,10 @@ static char *_get_darktable_version_prefix(void)
  * @param repository  GitHub "owner/repo" string
  * @return Newly allocated tag string (e.g. "v5.5.0.2"), or NULL if none found.
  */
-static char *_find_latest_compatible_release(const char *repository)
+static char *_find_latest_compatible_release(const char *repository, char **error_msg)
 {
+  if(error_msg) *error_msg = NULL;
+
   char *dt_version = _get_darktable_version_prefix();
   if(!dt_version)
     return NULL;
@@ -173,6 +175,17 @@ static char *_find_latest_compatible_release(const char *repository)
       "[ai_models] GitHub API request failed: curl=%d, http=%ld",
       res,
       http_code);
+    if(error_msg)
+    {
+      if(res != CURLE_OK)
+        *error_msg = g_strdup_printf(_("network error: %s"), curl_easy_strerror(res));
+      else if(http_code == 404)
+        *error_msg = g_strdup_printf(_("model repository \"%s\" not found"), repository);
+      else if(http_code == 403)
+        *error_msg = g_strdup(_("GitHub API rate limit exceeded, try again later"));
+      else
+        *error_msg = g_strdup_printf(_("GitHub API error (HTTP %ld)"), http_code);
+    }
     g_string_free(response, TRUE);
     g_free(dt_version);
     return NULL;
@@ -1117,15 +1130,23 @@ char *dt_ai_models_download_sync(
   }
 
   // Find the latest compatible release for this darktable version
-  char *release_tag = _find_latest_compatible_release(repository);
+  char *release_error = NULL;
+  char *release_tag = _find_latest_compatible_release(repository, &release_error);
   if(!release_tag)
   {
-    char *dt_ver = _get_darktable_version_prefix();
-    char *err = g_strdup_printf(
-      _("no compatible AI model release found for darktable %s"),
-      dt_ver ? dt_ver : darktable_package_version);
-    g_free(dt_ver);
-    SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, err);
+    if(release_error)
+    {
+      SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, release_error);
+    }
+    else
+    {
+      char *dt_ver = _get_darktable_version_prefix();
+      char *err = g_strdup_printf(
+        _("no compatible AI model release found for darktable %s"),
+        dt_ver ? dt_ver : darktable_package_version);
+      g_free(dt_ver);
+      SET_STATUS_AND_RETURN(DT_AI_MODEL_ERROR, err);
+    }
   }
 
   // Fetch SHA256 digest from GitHub Releases API if not already known
