@@ -384,7 +384,7 @@
   <dtconfig>
     <name>plugins/ai/enabled</name>
     <type>bool</type>
-    <default>true</default>
+    <default>false</default>
     <shortdescription>enable AI features</shortdescription>
     <longdescription>enable AI-powered features such as denoising and upscaling using neural networks</longdescription>
   </dtconfig>
@@ -398,7 +398,7 @@
   <dtconfig>
     <name>plugins/ai/repository</name>
     <type>string</type>
-    <default>darktable-org/darktable-ai</default>
+    <default>andriiryzhkov/darktable-ai</default>
     <shortdescription>AI models GitHub repository</shortdescription>
     <longdescription>GitHub repository for downloading AI models (format: owner/repo)</longdescription>
   </dtconfig>
@@ -3506,9 +3506,9 @@
   <dtconfig>
     <name>plugins/darkroom/masks/object/refine_passes</name>
     <type min="1" max="5">int</type>
-    <default>3</default>
+    <default>1</default>
     <shortdescription>AI mask refinement passes</shortdescription>
-    <longdescription>number of iterative decoder passes. each pass feeds back the mask to tighten boundaries. 1 = single pass, 3 = recommended.</longdescription>
+    <longdescription>number of iterative decoder passes. each pass feeds back the mask to tighten boundaries. higher values give tighter edges at the cost of more processing time.</longdescription>
   </dtconfig>
   <dtconfig>
     <name>plugins/darkroom/masks/object/threshold</name>
