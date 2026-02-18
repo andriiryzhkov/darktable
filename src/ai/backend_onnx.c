@@ -27,6 +27,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
@@ -59,10 +60,60 @@ static GOnce g_ort_once = G_ONCE_INIT;
 static OrtEnv *g_env = NULL;
 static GOnce g_env_once = G_ONCE_INIT;
 
+#ifdef ORT_LAZY_LOAD
+// Redirect fd 2 to /dev/null.  Returns the saved fd on success, -1 on failure.
+static int _stderr_suppress_begin(void)
+{
+  int saved = dup(STDERR_FILENO);
+  if(saved == -1) return -1;
+  int devnull = open("/dev/null", O_WRONLY);
+  if(devnull == -1) { close(saved); return -1; }
+  dup2(devnull, STDERR_FILENO);
+  close(devnull);
+  return saved;
+}
+// Restore fd 2 from the saved fd returned by _stderr_suppress_begin.
+static void _stderr_suppress_end(int saved)
+{
+  if(saved != -1) { dup2(saved, STDERR_FILENO); close(saved); }
+}
+#endif
+
 static gpointer _init_ort_api(gpointer data)
 {
   (void)data;
-  const OrtApi *api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+  const OrtApi *api = NULL;
+
+#ifdef ORT_LAZY_LOAD
+  // Ubuntu/Debian's system ORT links against libonnx, causing harmless but noisy
+  // "already registered" ONNX schema warnings when the library is first loaded.
+  // Suppress them by loading ORT explicitly, with stderr temporarily redirected.
+  // G_MODULE_BIND_LAZY = RTLD_LAZY; default (no BIND_LOCAL) = RTLD_GLOBAL so
+  // provider symbols remain visible to the rest of the process via dlsym(NULL).
+  int saved = _stderr_suppress_begin();
+  // The handle is intentionally not stored: ORT must stay loaded for the process
+  // lifetime and g_module_close is never called, so the library stays resident.
+  GModule *ort_mod = g_module_open(ORT_LIBRARY_PATH, G_MODULE_BIND_LAZY);
+  _stderr_suppress_end(saved);
+
+  if(!ort_mod)
+  {
+    dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to load ORT library '%s': %s",
+             ORT_LIBRARY_PATH, g_module_error());
+    return NULL;
+  }
+  typedef const OrtApiBase *(*OrtGetApiBaseFn)(void);
+  OrtGetApiBaseFn get_api_base = NULL;
+  if(!g_module_symbol(ort_mod, "OrtGetApiBase", (gpointer *)&get_api_base) || !get_api_base)
+  {
+    dt_print(DT_DEBUG_AI, "[darktable_ai] OrtGetApiBase symbol not found");
+    return NULL;
+  }
+  api = get_api_base()->GetApi(ORT_API_VERSION);
+#else
+  api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+#endif
+
   if(!api)
     dt_print(DT_DEBUG_AI, "[darktable_ai] Failed to init ONNX Runtime API");
   return (gpointer)api;
@@ -72,7 +123,14 @@ static gpointer _init_ort_env(gpointer data)
 {
   (void)data;
   OrtEnv *env = NULL;
+#ifdef ORT_LAZY_LOAD
+  // ORT may emit additional schema-registration noise during env creation.
+  int saved = _stderr_suppress_begin();
+#endif
   OrtStatus *status = g_ort->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "DarktableAI", &env);
+#ifdef ORT_LAZY_LOAD
+  _stderr_suppress_end(saved);
+#endif
   if(status)
   {
     dt_print(
