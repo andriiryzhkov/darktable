@@ -1336,6 +1336,9 @@ static int _object_events_button_pressed(
     if(!d || d->encode_state != ENCODE_READY)
       return 1;
 
+    // Dismiss the "ready" hint now that the user is interacting
+    dt_control_log_ack_all();
+
     // Start drag tracking — actual point/box is added on button release
     float wd, ht, iwidth, iheight;
     dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
@@ -1622,9 +1625,7 @@ static void _object_events_post_expose(
   // Eager encoding: load model and encode image as soon as tool opens
   if(d->encode_state == ENCODE_IDLE)
   {
-    // Frame 1: show "working..." and return so it renders before we copy backbuf
-    dt_control_busy_enter();
-    d->busy = TRUE;
+    dt_control_log(_("object mask: analyzing image..."));
     d->encode_state = ENCODE_MSG_SHOWN;
     dt_control_queue_redraw_center();
     return;
@@ -1662,6 +1663,8 @@ static void _object_events_post_expose(
       dt_control_busy_leave();
       d->busy = FALSE;
     }
+    dt_control_log_ack_all();
+    dt_control_log(_("click or draw a box to create object mask"));
   }
 
   if(g_atomic_int_get(&d->encode_state) == ENCODE_ERROR)
@@ -1671,7 +1674,7 @@ static void _object_events_post_expose(
       g_thread_join(d->encode_thread);
       d->encode_thread = NULL;
       // Log only once when the thread is first joined
-      dt_control_log(_("AI mask encoding failed"));
+      dt_control_log(_("object mask preparation failed"));
     }
     if(d->busy)
     {
