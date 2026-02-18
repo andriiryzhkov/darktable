@@ -3532,25 +3532,6 @@
     <longdescription>strength of edge-aware threshold boost. near strong image edges the binarization threshold is raised, snapping the mask boundary to object edges. 0 = disabled, 0.1-0.3 = typical values.</longdescription>
   </dtconfig>
   <dtconfig>
-    <name>plugins/darkroom/masks/object/mode</name>
-    <type>
-      <enum>
-        <option>prompt</option>
-        <option>auto</option>
-      </enum>
-    </type>
-    <default>prompt</default>
-    <shortdescription>AI mask mode</shortdescription>
-    <longdescription>prompt: click foreground/background points to segment a specific object. auto: automatically segment all objects, then click to select.</longdescription>
-  </dtconfig>
-  <dtconfig>
-    <name>plugins/darkroom/masks/object/auto_grid</name>
-    <type min="8" max="64">int</type>
-    <default>32</default>
-    <shortdescription>AI auto-mask grid density</shortdescription>
-    <longdescription>grid points per axis for auto-segmentation. higher values find smaller objects but take longer.</longdescription>
-  </dtconfig>
-  <dtconfig>
     <name>plugins/darkroom/ashift/near_delta</name>
     <type>float</type>
     <default>20.0</default>
