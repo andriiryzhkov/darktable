@@ -1168,7 +1168,11 @@ static void _object_events_post_expose(
   }
 
   if(g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
-    return; // background thread in progress, poll timer will trigger redraw
+  {
+    // Keep the message visible while the thread is working
+    dt_control_log(_("object mask: analyzing image..."));
+    return;
+  }
 
   if(g_atomic_int_get(&d->encode_state) == ENCODE_READY && d->encode_thread)
   {
