@@ -33,7 +33,7 @@ static const float IMG_STD[3] = {58.395f, 57.12f, 57.375f};
 // Maximum number of dimensions for encoder output tensors
 #define MAX_TENSOR_DIMS 8
 
-// Maximum number of encoder output tensors (2 for SAM-HQ, 3 for SAM2.1)
+// Maximum number of encoder output tensors
 #define MAX_ENCODER_OUTPUTS 4
 
 // Maximum number of masks the decoder can produce per decode pass.
@@ -46,20 +46,17 @@ struct dt_seg_context_t
   dt_ai_context_t *decoder;
 
   // Encoder output shapes (queried from model at load time)
-  int n_enc_outputs;                                    // 2 for SAM-HQ, 3 for SAM2.1
+  int n_enc_outputs;
   int64_t enc_shapes[MAX_ENCODER_OUTPUTS][MAX_TENSOR_DIMS];
   int enc_ndims[MAX_ENCODER_OUTPUTS];
 
   // Decoder properties
   int num_masks;            // masks per decode (1 = single-mask, 3-4 = multi-mask)
-  gboolean has_hq;          // TRUE if decoder has high_res_masks output (SAM-HQ)
-  gboolean has_low_res;     // TRUE if decoder has low_res_masks output (enables iterative refinement)
-  gboolean has_orig_im_size; // TRUE if decoder expects orig_im_size input (SAM/SAM-HQ)
-  int dec_mask_h, dec_mask_w; // decoder mask output dims (-1 if dynamic)
-  int low_res_dim;          // spatial dim of low_res masks (256 for SAM, may differ for SAM2)
+  int dec_mask_h, dec_mask_w; // decoder mask output dims (must be concrete)
+  int low_res_dim;          // spatial dim of low_res masks (256)
 
   // Encoder-to-decoder reorder map: decoder input i uses encoder output enc_order[i].
-  // Needed because SAM2 encoder outputs may be in different order than decoder expects.
+  // Needed because encoder outputs may be in different order than decoder expects.
   int enc_order[MAX_ENCODER_OUTPUTS];
 
   // Cached encoder outputs
@@ -137,8 +134,7 @@ _preprocess_image(const uint8_t *rgb_data, int width, int height, float *out_sca
 // --- Bilinear crop+resize helper ---
 
 // Crop the valid (non-padded) region from a SAM-space mask and bilinear
-// resize to the encoded image dimensions.  Used for HQ masks and SAM2
-// decoder outputs that are at the padded SAM_INPUT_SIZE resolution.
+// resize to the encoded image dimensions.
 static void _crop_resize_mask(const float *src, int src_w, int src_h,
                                float *dst, int dst_w, int dst_h,
                                float scale, gboolean apply_sigmoid)
@@ -232,7 +228,7 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
   }
 
   // Build encoder-to-decoder reorder map by matching output/input names.
-  // SAM2 encoder outputs may be in different order than the decoder expects
+  // Encoder outputs may be in different order than the decoder expects
   // (e.g. encoder: high_res_feats_0, high_res_feats_1, image_embeddings
   //  vs decoder: image_embed, high_res_feats_0, high_res_feats_1).
   for(int i = 0; i < ctx->n_enc_outputs; i++)
@@ -275,10 +271,8 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
            ctx->enc_order[0], ctx->enc_order[1], ctx->enc_order[2], ctx->enc_order[3],
            ctx->n_enc_outputs);
 
-  // Query decoder masks output shape to detect multi-mask support.
-  // Output 0 (masks) shape: [1, N, H, W] where N = num_masks (1 or 3-4).
-  // SAM2 has fully dynamic masks shape [-1,-1,-1,-1], so fall back to
-  // iou_predictions output 1 shape [1, N] which has a static N.
+  // Query decoder masks output shape: [1, N, H, W] where N = num_masks.
+  // Spatial dims may be dynamic; resolved below via override or fallback.
   int64_t dec_out_shape[MAX_TENSOR_DIMS];
   const int dec_out_ndim = dt_ai_get_output_shape(decoder, 0, dec_out_shape, MAX_TENSOR_DIMS);
   ctx->num_masks = (dec_out_ndim >= 4 && dec_out_shape[1] > 1) ? (int)dec_out_shape[1] : 0;
@@ -298,17 +292,13 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
     ctx->num_masks = MAX_NUM_MASKS;
   }
 
-  // Detect decoder mask output dimensions (may be dynamic = -1)
+  // Decoder mask output dimensions must be concrete
   ctx->dec_mask_h = (dec_out_ndim >= 4 && dec_out_shape[2] > 0) ? (int)dec_out_shape[2] : -1;
   ctx->dec_mask_w = (dec_out_ndim >= 4 && dec_out_shape[3] > 0) ? (int)dec_out_shape[3] : -1;
 
-  // SAM2 decoders have fully dynamic output shapes because the
-  // symbolic dim "num_labels" prevents ONNX Runtime from resolving
-  // intermediate Resize→Clip tensor shapes.  Override num_labels=1
-  // (darktable always decodes one prompt at a time) so shape inference
-  // can fully resolve all spatial dims.  Use BASIC optimization to
-  // enable constant folding which propagates the concrete shapes.
-  if(ctx->dec_mask_h < 0 && ctx->dec_mask_w < 0)
+  // If decoder has dynamic output dims (e.g. symbolic "num_labels" dim),
+  // reload with num_labels=1 override so ORT can resolve concrete shapes.
+  if(ctx->dec_mask_h <= 0 || ctx->dec_mask_w <= 0)
   {
     dt_print(DT_DEBUG_AI,
              "[segmentation] Decoder has dynamic output dims — reloading with dim overrides");
@@ -325,17 +315,14 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
     }
     decoder = ctx->decoder;
 
-    // Re-query output shapes from the reloaded decoder — with num_labels=1
-    // overriding the symbolic dim, ORT can resolve concrete output shapes.
+    // Re-query output shapes with concrete dims
     const int new_ndim
       = dt_ai_get_output_shape(decoder, 0, dec_out_shape, MAX_TENSOR_DIMS);
-    if(new_ndim >= 4)
-    {
-      ctx->dec_mask_h = dec_out_shape[2] > 0 ? (int)dec_out_shape[2] : -1;
-      ctx->dec_mask_w = dec_out_shape[3] > 0 ? (int)dec_out_shape[3] : -1;
-      if(dec_out_shape[1] > 1)
-        ctx->num_masks = (int)dec_out_shape[1];
-    }
+    ctx->dec_mask_h = (new_ndim >= 4 && dec_out_shape[2] > 0) ? (int)dec_out_shape[2] : -1;
+    ctx->dec_mask_w = (new_ndim >= 4 && dec_out_shape[3] > 0) ? (int)dec_out_shape[3] : -1;
+    if(new_ndim >= 4 && dec_out_shape[1] > 1)
+      ctx->num_masks = MIN((int)dec_out_shape[1], MAX_NUM_MASKS);
+
     // Re-query num_masks from iou output if still unresolved
     if(ctx->num_masks <= 1)
     {
@@ -343,37 +330,40 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
       const int iou_ndim
         = dt_ai_get_output_shape(decoder, 1, iou_shape, MAX_TENSOR_DIMS);
       if(iou_ndim >= 2 && iou_shape[1] > 0)
-        ctx->num_masks = (int)iou_shape[1];
+        ctx->num_masks = MIN((int)iou_shape[1], MAX_NUM_MASKS);
     }
-
-    ctx->num_masks = MIN(ctx->num_masks, MAX_NUM_MASKS);
 
     dt_print(DT_DEBUG_AI,
              "[segmentation] After reload: dec_dims=%dx%d, num_masks=%d",
              ctx->dec_mask_h, ctx->dec_mask_w, ctx->num_masks);
   }
 
-  // Detect decoder output count for feature detection
+  // If dims are still dynamic after override, fall back to SAM_INPUT_SIZE.
+  // The backend uses ORT-allocated outputs for dynamic shapes and reports
+  // actual dims after inference via the shape array.
+  if(ctx->dec_mask_h <= 0 || ctx->dec_mask_w <= 0)
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] Using fallback mask dims %dx%d (runtime-resolved)",
+             SAM_INPUT_SIZE, SAM_INPUT_SIZE);
+    ctx->dec_mask_h = SAM_INPUT_SIZE;
+    ctx->dec_mask_w = SAM_INPUT_SIZE;
+  }
+
+  // Decoder must have 3 outputs: masks [1,N,H,W], iou [1,N], low_res [1,N,256,256]
   const int n_dec_outputs = dt_ai_get_output_count(decoder);
+  if(n_dec_outputs < 3)
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] Decoder has %d outputs, expected >= 3 for %s "
+             "(masks + iou + low_res_masks)",
+             n_dec_outputs, model_id);
+    dt_seg_free(ctx);
+    return NULL;
+  }
 
-  // SAM-HQ models have a 4th decoder output (high_res_masks) at 1024x1024
-  // with sharper edges from encoder skip connections.
-  ctx->has_hq = (n_dec_outputs >= 4);
-
-  // SAM/SAM-HQ have low_res_masks as 3rd output (enables iterative refinement).
-  // SAM2 decoders only have 2 outputs (masks + iou), no low_res.
-  ctx->has_low_res = (n_dec_outputs >= 3);
-
-  // SAM/SAM-HQ decoders have orig_im_size as an additional input.
-  // SAM2 decoders do not. Detect by comparing decoder input count
-  // with encoder output count: prompts are always 4 (coords, labels,
-  // mask_input, has_mask_input), so >4 remaining means orig_im_size.
-  const int n_dec_inputs = dt_ai_get_input_count(decoder);
-  ctx->has_orig_im_size = (n_dec_inputs - ctx->n_enc_outputs > 4);
-
-  // Query low_res mask output spatial dimensions (output 2 if it exists)
+  // Query low_res mask spatial dimensions from decoder output 2
   ctx->low_res_dim = 256; // default
-  if(ctx->has_low_res)
   {
     int64_t lr_shape[MAX_TENSOR_DIMS];
     const int lr_ndim = dt_ai_get_output_shape(decoder, 2, lr_shape, MAX_TENSOR_DIMS);
@@ -381,7 +371,7 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
       ctx->low_res_dim = (int)lr_shape[2];
   }
 
-  // Allocate low_res mask buffer (needed as decoder input even if no low_res output)
+  // Allocate low_res mask buffer (used as decoder input for iterative refinement)
   const size_t lr_size = (size_t)ctx->low_res_dim * ctx->low_res_dim;
   ctx->low_res_masks = g_try_malloc0(lr_size * sizeof(float));
   if(!ctx->low_res_masks)
@@ -391,10 +381,10 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
   }
 
   dt_print(DT_DEBUG_AI,
-           "[segmentation] Model loaded: %s (enc_outputs=%d, dec_outputs=%d, num_masks=%d, "
-           "hq=%d, low_res=%d, orig_size=%d, dec_dims=%dx%d)",
-           model_id, ctx->n_enc_outputs, n_dec_outputs, ctx->num_masks, ctx->has_hq,
-           ctx->has_low_res, ctx->has_orig_im_size, ctx->dec_mask_h, ctx->dec_mask_w);
+           "[segmentation] Model loaded: %s (enc_outputs=%d, num_masks=%d, "
+           "dec_dims=%dx%d, low_res_dim=%d)",
+           model_id, ctx->n_enc_outputs, ctx->num_masks,
+           ctx->dec_mask_h, ctx->dec_mask_w, ctx->low_res_dim);
   return ctx;
 }
 
@@ -498,34 +488,6 @@ dt_seg_encode_image(dt_seg_context_t *ctx, const uint8_t *rgb_data, int width, i
   return TRUE;
 }
 
-// Determine the decoder mask output dimensions for buffer allocation.
-// For SAM/SAM-HQ with orig_im_size, the decoder outputs at encoded dims.
-// For SAM2 without orig_im_size, the decoder outputs at a fixed resolution
-// (usually SAM_INPUT_SIZE or as specified in the model).
-static void _get_decoder_mask_dims(const dt_seg_context_t *ctx, int *out_h, int *out_w)
-{
-  if(ctx->dec_mask_h > 0 && ctx->dec_mask_w > 0)
-  {
-    // Static dims from model metadata
-    *out_h = ctx->dec_mask_h;
-    *out_w = ctx->dec_mask_w;
-  }
-  else if(ctx->has_orig_im_size && ctx->encoded_height > 0 && ctx->encoded_width > 0)
-  {
-    // SAM/SAM-HQ: decoder produces output at orig_im_size = encoded dims
-    *out_h = ctx->encoded_height;
-    *out_w = ctx->encoded_width;
-  }
-  else
-  {
-    // SAM2 with dynamic output dims: allocate at SAM_INPUT_SIZE (1024)
-    // which is the maximum any SAM decoder outputs.  The backend will
-    // report actual dims after inference via the shape array.
-    *out_h = SAM_INPUT_SIZE;
-    *out_w = SAM_INPUT_SIZE;
-  }
-}
-
 float *dt_seg_compute_mask(
   dt_seg_context_t *ctx,
   const dt_seg_point_t *points,
@@ -554,7 +516,6 @@ float *dt_seg_compute_mask(
   point_coords[n_points * 2 + 1] = 0.0f;
   point_labels[n_points] = -1.0f;
 
-  const float orig_im_size[2] = {(float)ctx->encoded_height, (float)ctx->encoded_width};
   const float has_mask = ctx->has_prev_mask ? 1.0f : 0.0f;
   const int lr_dim = ctx->low_res_dim;
 
@@ -583,9 +544,8 @@ float *dt_seg_compute_mask(
   int64_t labels_shape[2] = {1, total_points};
   int64_t mask_in_shape[4] = {1, 1, lr_dim, lr_dim};
   int64_t has_mask_shape[1] = {1};
-  int64_t orig_size_shape[1] = {2};
 
-  dt_ai_tensor_t inputs[MAX_ENCODER_OUTPUTS + 5];
+  dt_ai_tensor_t inputs[MAX_ENCODER_OUTPUTS + 4];
   int ni = 0;
 
   // Encoder outputs (reordered to match decoder input order)
@@ -607,26 +567,14 @@ float *dt_seg_compute_mask(
   inputs[ni++] = (dt_ai_tensor_t){
     .data = (void *)&has_mask, .type = DT_AI_FLOAT, .shape = has_mask_shape, .ndim = 1};
 
-  if(ctx->has_orig_im_size)
-  {
-    inputs[ni++] = (dt_ai_tensor_t){
-      .data = (void *)orig_im_size, .type = DT_AI_FLOAT,
-      .shape = orig_size_shape, .ndim = 1};
-  }
-
   // Decoder outputs: masks [1, N, H, W], iou [1, N], low_res [1, N, lr, lr]
-  // N = ctx->num_masks (1 for single-mask models, 3-4 for multi-mask)
   const int nm = ctx->num_masks;
-
-  // Determine decoder mask output resolution (may be updated after run
-  // for dynamic-output models when the backend reports actual dims).
-  int dec_h, dec_w;
-  _get_decoder_mask_dims(ctx, &dec_h, &dec_w);
-
+  int dec_h = ctx->dec_mask_h;
+  int dec_w = ctx->dec_mask_w;
   size_t per_mask = (size_t)dec_h * dec_w;
-  const size_t total_mask_size = (size_t)nm * per_mask;
+  const size_t low_res_per = (size_t)lr_dim * lr_dim;
 
-  float *masks = g_try_malloc(total_mask_size * sizeof(float));
+  float *masks = g_try_malloc((size_t)nm * per_mask * sizeof(float));
   if(!masks)
   {
     g_free(point_coords);
@@ -635,64 +583,30 @@ float *dt_seg_compute_mask(
   }
 
   float iou_pred[MAX_NUM_MASKS];
-  const size_t low_res_per = (size_t)lr_dim * lr_dim;
 
-  // low_res output only exists for SAM/SAM-HQ (not SAM2)
-  float *low_res = NULL;
-  if(ctx->has_low_res)
+  float *low_res = g_try_malloc((size_t)nm * low_res_per * sizeof(float));
+  if(!low_res)
   {
-    low_res = g_try_malloc((size_t)nm * low_res_per * sizeof(float));
-    if(!low_res)
-    {
-      g_free(point_coords);
-      g_free(point_labels);
-      g_free(masks);
-      return NULL;
-    }
+    g_free(point_coords);
+    g_free(point_labels);
+    g_free(masks);
+    return NULL;
   }
 
   int64_t masks_shape[4] = {1, nm, dec_h, dec_w};
   int64_t iou_shape[2] = {1, nm};
   int64_t low_res_shape[4] = {1, nm, lr_dim, lr_dim};
 
-  // Optional HQ output: SAM-HQ high_res_masks [1, N, 1024, 1024]
-  const size_t hq_per_mask = (size_t)SAM_INPUT_SIZE * SAM_INPUT_SIZE;
-  float *hq_masks = NULL;
-
-  // Build output tensor array: masks + iou always, low_res and hq conditionally
-  int num_outputs = 2; // masks + iou (minimum, SAM2)
-  dt_ai_tensor_t dec_outputs[4];
+  dt_ai_tensor_t dec_outputs[3];
   dec_outputs[0] = (dt_ai_tensor_t){
     .data = masks, .type = DT_AI_FLOAT, .shape = masks_shape, .ndim = 4};
   dec_outputs[1] = (dt_ai_tensor_t){
     .data = iou_pred, .type = DT_AI_FLOAT, .shape = iou_shape, .ndim = 2};
-
-  if(ctx->has_low_res)
-  {
-    dec_outputs[num_outputs++] = (dt_ai_tensor_t){
-      .data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4};
-  }
-
-  int64_t hq_shape[4] = {1, nm, SAM_INPUT_SIZE, SAM_INPUT_SIZE};
-  if(ctx->has_hq)
-  {
-    hq_masks = g_try_malloc((size_t)nm * hq_per_mask * sizeof(float));
-    if(!hq_masks)
-    {
-      dt_print(DT_DEBUG_AI, "[segmentation] HQ mask alloc failed (%zu bytes), "
-               "falling back to standard masks",
-               (size_t)nm * hq_per_mask * sizeof(float));
-      ctx->has_hq = FALSE;
-    }
-    else
-    {
-      dec_outputs[num_outputs++] = (dt_ai_tensor_t){
-        .data = hq_masks, .type = DT_AI_FLOAT, .shape = hq_shape, .ndim = 4};
-    }
-  }
+  dec_outputs[2] = (dt_ai_tensor_t){
+    .data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4};
 
   const double dec_start = dt_get_wtime();
-  const int ret = dt_ai_run(ctx->decoder, inputs, ni, dec_outputs, num_outputs);
+  const int ret = dt_ai_run(ctx->decoder, inputs, ni, dec_outputs, 3);
   const double dec_elapsed = dt_get_wtime() - dec_start;
 
   g_free(point_coords);
@@ -701,19 +615,18 @@ float *dt_seg_compute_mask(
   if(ret != 0)
   {
     dt_print(DT_DEBUG_AI, "[segmentation] Decoder failed: %d (%.3fs)", ret, dec_elapsed);
-    g_free(hq_masks);
     g_free(low_res);
     g_free(masks);
     return NULL;
   }
 
-  // Re-read actual mask dimensions from shape array — the backend updates
-  // these for dynamic-output models after ORT reports the real tensor shape.
+  // Re-read actual mask dimensions — the backend updates the shape array
+  // for dynamic-output models after ORT reports the real tensor shape.
   if(masks_shape[2] > 0 && masks_shape[3] > 0
      && ((int)masks_shape[2] != dec_h || (int)masks_shape[3] != dec_w))
   {
     dt_print(DT_DEBUG_AI,
-             "[segmentation] Actual decoder output: %"PRId64"x%"PRId64" (expected %dx%d)",
+             "[segmentation] Actual decoder output: %"PRId64"x%"PRId64" (allocated %dx%d)",
              masks_shape[2], masks_shape[3], dec_h, dec_w);
     dec_h = (int)masks_shape[2];
     dec_w = (int)masks_shape[3];
@@ -731,75 +644,30 @@ float *dt_seg_compute_mask(
   dt_print(DT_DEBUG_AI, "[segmentation] Mask computed (%.3fs), best=%d/%d IoU=%.3f",
            dec_elapsed, best, nm, iou_pred[best]);
 
-  // Cache the best low-res mask for iterative refinement (only if low_res output exists)
-  if(low_res)
-  {
-    memcpy(ctx->low_res_masks, low_res + (size_t)best * low_res_per,
-           low_res_per * sizeof(float));
-    ctx->has_prev_mask = TRUE;
-
-    // Debug: log cached mask stats
-    float cached_min = ctx->low_res_masks[0], cached_max = ctx->low_res_masks[0];
-    for(size_t k = 1; k < low_res_per; k++)
-    {
-      if(ctx->low_res_masks[k] < cached_min) cached_min = ctx->low_res_masks[k];
-      if(ctx->low_res_masks[k] > cached_max) cached_max = ctx->low_res_masks[k];
-    }
-    dt_print(DT_DEBUG_AI,
-             "[segmentation] Cached low_res mask: range=[%.3f, %.3f], has_low_res=%d",
-             cached_min, cached_max, ctx->has_low_res);
-  }
-  else
-  {
-    dt_print(DT_DEBUG_AI,
-             "[segmentation] No low_res output to cache (has_low_res=%d)",
-             ctx->has_low_res);
-  }
+  // Cache the best low-res mask for iterative refinement
+  memcpy(ctx->low_res_masks, low_res + (size_t)best * low_res_per,
+         low_res_per * sizeof(float));
+  ctx->has_prev_mask = TRUE;
   g_free(low_res);
 
-  // Extract the best mask — always output at encoded image resolution
+  // Extract the best mask — crop+resize from decoder resolution to encoded image dims
   const int final_w = ctx->encoded_width;
   const int final_h = ctx->encoded_height;
   const size_t result_size = (size_t)final_w * final_h;
   float *result = g_try_malloc(result_size * sizeof(float));
   if(!result)
   {
-    g_free(hq_masks);
     g_free(masks);
     return NULL;
   }
 
-  if(hq_masks)
-  {
-    // SAM-HQ path: bilinear crop+resize from 1024x1024 to encoded dims
-    _crop_resize_mask(hq_masks + (size_t)best * hq_per_mask,
-                      SAM_INPUT_SIZE, SAM_INPUT_SIZE,
-                      result, final_w, final_h,
-                      ctx->scale, TRUE);
-    dt_print(DT_DEBUG_AI, "[segmentation] Using HQ mask (%dx%d -> %dx%d)",
-             SAM_INPUT_SIZE, SAM_INPUT_SIZE, final_w, final_h);
-    g_free(hq_masks);
-  }
-  else if(dec_h != final_h || dec_w != final_w)
-  {
-    // SAM2 path: decoder output at different resolution, crop+resize.
-    // ctx->scale maps original pixels to SAM_INPUT_SIZE (1024) coords.
-    // Adjust for the decoder's actual output resolution (e.g. 256).
-    const float mask_scale = ctx->scale * (float)dec_h / (float)SAM_INPUT_SIZE;
-    _crop_resize_mask(masks + (size_t)best * per_mask,
-                      dec_w, dec_h,
-                      result, final_w, final_h,
-                      mask_scale, TRUE);
-    dt_print(DT_DEBUG_AI, "[segmentation] Resized mask (%dx%d -> %dx%d, scale=%.4f)",
-             dec_w, dec_h, final_w, final_h, mask_scale);
-  }
-  else
-  {
-    // Standard path: extract best mask at encoded dims (SAM-HQ non-HQ)
-    const float *best_mask = masks + (size_t)best * per_mask;
-    for(size_t i = 0; i < result_size; i++)
-      result[i] = 1.0f / (1.0f + expf(-best_mask[i]));
-  }
+  const float mask_scale = ctx->scale * (float)dec_h / (float)SAM_INPUT_SIZE;
+  _crop_resize_mask(masks + (size_t)best * per_mask,
+                    dec_w, dec_h,
+                    result, final_w, final_h,
+                    mask_scale, TRUE);
+  dt_print(DT_DEBUG_AI, "[segmentation] Resized mask (%dx%d -> %dx%d, scale=%.4f)",
+           dec_w, dec_h, final_w, final_h, mask_scale);
 
   g_free(masks);
 
@@ -809,168 +677,6 @@ float *dt_seg_compute_mask(
     *out_height = final_h;
 
   return result;
-}
-
-gboolean dt_seg_compute_mask_raw(dt_seg_context_t *ctx,
-                                  const dt_seg_point_t *point,
-                                  float **out_masks,
-                                  float **out_ious,
-                                  int *out_n_masks,
-                                  int *out_width, int *out_height)
-{
-  if(!ctx || !ctx->image_encoded || !point || !out_masks || !out_ious
-     || !out_n_masks || !out_width || !out_height)
-    return FALSE;
-
-  // Single foreground point + ONNX padding point
-  float point_coords[4] = {
-    point->x * ctx->scale, point->y * ctx->scale,
-    0.0f, 0.0f  // padding point
-  };
-  float point_labels[2] = {(float)point->label, -1.0f};
-
-  const float orig_im_size[2] = {(float)ctx->encoded_height, (float)ctx->encoded_width};
-  // has_mask=0 means decoder ignores mask_input content, safe to pass ctx buffer
-  const float has_mask = 0.0f;
-  const int lr_dim = ctx->low_res_dim;
-
-  int64_t coords_shape[3] = {1, 2, 2};
-  int64_t labels_shape[2] = {1, 2};
-  int64_t mask_in_shape[4] = {1, 1, lr_dim, lr_dim};
-  int64_t has_mask_shape[1] = {1};
-  int64_t orig_size_shape[1] = {2};
-
-  // Build decoder inputs: encoder outputs + prompt tensors
-  dt_ai_tensor_t inputs[MAX_ENCODER_OUTPUTS + 5];
-  int ni = 0;
-
-  for(int i = 0; i < ctx->n_enc_outputs; i++)
-  {
-    const int ei = ctx->enc_order[i];
-    inputs[ni++] = (dt_ai_tensor_t){
-      .data = ctx->enc_data[ei], .type = DT_AI_FLOAT,
-      .shape = ctx->enc_shapes[ei], .ndim = ctx->enc_ndims[ei]};
-  }
-
-  inputs[ni++] = (dt_ai_tensor_t){
-    .data = point_coords, .type = DT_AI_FLOAT, .shape = coords_shape, .ndim = 3};
-  inputs[ni++] = (dt_ai_tensor_t){
-    .data = point_labels, .type = DT_AI_FLOAT, .shape = labels_shape, .ndim = 2};
-  inputs[ni++] = (dt_ai_tensor_t){
-    .data = ctx->low_res_masks, .type = DT_AI_FLOAT, .shape = mask_in_shape, .ndim = 4};
-  inputs[ni++] = (dt_ai_tensor_t){
-    .data = (void *)&has_mask, .type = DT_AI_FLOAT, .shape = has_mask_shape, .ndim = 1};
-
-  if(ctx->has_orig_im_size)
-  {
-    inputs[ni++] = (dt_ai_tensor_t){
-      .data = (void *)orig_im_size, .type = DT_AI_FLOAT,
-      .shape = orig_size_shape, .ndim = 1};
-  }
-
-  const int nm = ctx->num_masks;
-
-  // Use decoder mask dims for buffer allocation (may be updated after
-  // run for dynamic-output models when the backend reports actual dims).
-  int dec_h, dec_w;
-  _get_decoder_mask_dims(ctx, &dec_h, &dec_w);
-  size_t per_mask = (size_t)dec_h * dec_w;
-
-  float *masks = g_try_malloc((size_t)nm * per_mask * sizeof(float));
-  if(!masks)
-    return FALSE;
-
-  float iou_pred[8];
-  const size_t low_res_per = (size_t)lr_dim * lr_dim;
-
-  // low_res output only exists for SAM/SAM-HQ (not SAM2)
-  float *low_res = NULL;
-  if(ctx->has_low_res)
-  {
-    low_res = g_try_malloc((size_t)nm * low_res_per * sizeof(float));
-    if(!low_res)
-    {
-      g_free(masks);
-      return FALSE;
-    }
-  }
-
-  int64_t masks_shape[4] = {1, nm, dec_h, dec_w};
-  int64_t iou_shape[2] = {1, nm};
-  int64_t low_res_shape[4] = {1, nm, lr_dim, lr_dim};
-
-  int num_outputs = 2; // masks + iou (minimum, SAM2)
-  dt_ai_tensor_t dec_outputs[3];
-  dec_outputs[0] = (dt_ai_tensor_t){
-    .data = masks, .type = DT_AI_FLOAT, .shape = masks_shape, .ndim = 4};
-  dec_outputs[1] = (dt_ai_tensor_t){
-    .data = iou_pred, .type = DT_AI_FLOAT, .shape = iou_shape, .ndim = 2};
-
-  if(ctx->has_low_res)
-  {
-    dec_outputs[num_outputs++] = (dt_ai_tensor_t){
-      .data = low_res, .type = DT_AI_FLOAT, .shape = low_res_shape, .ndim = 4};
-  }
-
-  const double dec_start = dt_get_wtime();
-  const int ret = dt_ai_run(ctx->decoder, inputs, ni, dec_outputs, num_outputs);
-  const double dec_elapsed = dt_get_wtime() - dec_start;
-  g_free(low_res);
-
-  if(ret != 0)
-  {
-    dt_print(DT_DEBUG_AI, "[segmentation] Raw decoder failed: %d (%.3fs)", ret, dec_elapsed);
-    g_free(masks);
-    return FALSE;
-  }
-
-  // Re-read actual mask dimensions from shape array — the backend updates
-  // these for dynamic-output models after ORT reports the real tensor shape.
-  if(masks_shape[2] > 0 && masks_shape[3] > 0
-     && ((int)masks_shape[2] != dec_h || (int)masks_shape[3] != dec_w))
-  {
-    dt_print(DT_DEBUG_AI,
-             "[segmentation] Actual raw decoder output: %"PRId64"x%"PRId64" (expected %dx%d)",
-             masks_shape[2], masks_shape[3], dec_h, dec_w);
-    dec_h = (int)masks_shape[2];
-    dec_w = (int)masks_shape[3];
-    per_mask = (size_t)dec_h * dec_w;
-  }
-
-  dt_print(DT_DEBUG_AI, "[segmentation] Raw decode (%.3fs), %d masks at %dx%d",
-           dec_elapsed, nm, dec_w, dec_h);
-
-  // Apply sigmoid to all masks in-place
-  for(size_t i = 0; i < (size_t)nm * per_mask; i++)
-    masks[i] = 1.0f / (1.0f + expf(-masks[i]));
-
-  // Copy IoU predictions
-  float *ious = g_new(float, nm);
-  memcpy(ious, iou_pred, nm * sizeof(float));
-
-  *out_masks = masks;
-  *out_ious = ious;
-  *out_n_masks = nm;
-  *out_width = dec_w;
-  *out_height = dec_h;
-  return TRUE;
-}
-
-int dt_seg_get_num_masks(dt_seg_context_t *ctx)
-{
-  return ctx ? ctx->num_masks : 0;
-}
-
-void dt_seg_get_encoded_dims(dt_seg_context_t *ctx, int *width, int *height)
-{
-  if(!ctx)
-  {
-    if(width) *width = 0;
-    if(height) *height = 0;
-    return;
-  }
-  if(width) *width = ctx->encoded_width;
-  if(height) *height = ctx->encoded_height;
 }
 
 gboolean dt_seg_is_encoded(dt_seg_context_t *ctx)

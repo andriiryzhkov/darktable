@@ -18,7 +18,7 @@ ONNX Runtime's C API behind a backend-agnostic interface. It provides:
 | `backend_common.c` | Environment, model registry, provider string conversion |
 | `backend_onnx.c` | ONNX Runtime C API wrapper, inference engine |
 | `segmentation.h` | Segmentation (SAM) public API |
-| `segmentation.c` | SAM/SAM-HQ/SAM2 encoder-decoder implementation |
+| `segmentation.c` | SAM encoder-decoder implementation |
 | `CMakeLists.txt` | Build config, ONNX Runtime linkage, install rules |
 
 Higher-level consumers live outside `src/ai/`:
@@ -285,14 +285,12 @@ The output is streamed to TIFF scanlines — no full-resolution buffer is needed
 **API**: `src/ai/segmentation.h`
 **Task type**: `"mask"`
 
-### Supported Model Families
+### Supported Models
 
-- **SAM** (Segment Anything Model)
-- **SAM-HQ** (SAM with High Quality output)
-- **SAM2 / SAM2.1** (Segment Anything Model 2)
-
-All use a two-stage encoder-decoder architecture. The model directory must
-contain both `encoder.onnx` and `decoder.onnx`.
+All SAM variants (SAM, SAM-HQ, SAM2/2.1) are exported to a common interface
+via conversion scripts in the
+[darktable-ai](https://github.com/andriiryzhkov/darktable-ai) repository.
+The model directory must contain both `encoder.onnx` and `decoder.onnx`.
 
 ### Encoder Requirements
 
@@ -356,7 +354,7 @@ must include `F.interpolate` upsampling from 256 to 1024 in the exported graph.
 
 ### Mask Post-Processing
 
-1. Select mask with highest IoU score (or return all in raw mode)
+1. Select mask with highest IoU score
 2. Crop out the zero-padded region
 3. Bilinear resize to original image dimensions
 4. Apply sigmoid: `mask = 1 / (1 + exp(-logits))`
@@ -420,7 +418,7 @@ Export encoder and decoder as separate ONNX files (`encoder.onnx`, `decoder.onnx
 Conversion scripts are maintained in the
 [darktable-ai](https://github.com/andriiryzhkov/darktable-ai) repository.
 
-All decoders must follow the unified interface described above:
+All decoders must follow the interface described above:
 
 - No `orig_im_size` input
 - `masks` output at fixed 1024x1024 (include `F.interpolate` in the graph)
