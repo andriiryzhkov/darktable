@@ -149,6 +149,7 @@ FILE(GLOB SOURCE_FILES
   "gui/presets.c"
   "gui/splash.c"
   "gui/styles_dialog.c"
+  "gui/welcome.c"
   "imageio/imageio.c"
   "imageio/imageio_jpeg.c"
   "imageio/imageio_module.c"

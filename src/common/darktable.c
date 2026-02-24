@@ -69,6 +69,7 @@
 #include "gui/presets.h"
 #include "gui/styles.h"
 #include "gui/splash.h"
+#include "gui/welcome.h"
 #include "imageio/imageio_module.h"
 #include "libs/lib.h"
 #include "lua/init.h"
@@ -1518,6 +1519,9 @@ int dt_init(int argc,
   snprintf(darktablerc_common, sizeof(darktablerc_common),
            "%s/darktablerc-common", datadir);
 
+  // detect fresh install before config creates default files
+  dt_gui_welcome_detect_first_launch(datadir);
+
   // initialize the config backend. this needs to be done first...
   darktable.conf = (dt_conf_t *)calloc(1, sizeof(dt_conf_t));
 
@@ -2038,6 +2042,10 @@ int dt_init(int argc,
            "[dt_init] startup took %f seconds", dt_get_wtime() - start_wtime);
 
   dt_print_mem_usage("after successful startup");
+
+  // schedule welcome wizard for first-time users (runs after gtk_main starts)
+  if(init_gui)
+    dt_gui_welcome_schedule();
 
   return 0;
 }
