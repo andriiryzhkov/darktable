@@ -116,11 +116,7 @@ int main(int argc, char *argv[])
     socket_path = auto_socket;
   }
 
-  // Print socket path to stdout so the Tauri client can discover it
-  fprintf(stdout, "SOCKET=%s\n", socket_path);
-  fflush(stdout);
-
-  // Create and run server
+  // Create server (binds + listens on socket)
   dt_server_t *server = dt_server_init(socket_path);
   if(!server)
   {
@@ -129,6 +125,10 @@ int main(int argc, char *argv[])
     free(dt_argv);
     exit(1);
   }
+
+  // Print socket path AFTER the socket is listening so the client can connect immediately
+  fprintf(stdout, "SOCKET=%s\n", socket_path);
+  fflush(stdout);
 
   fprintf(stderr, "[server] running (pid=%d)\n", getpid());
   dt_server_run(server); // blocks until shutdown

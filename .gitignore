@@ -31,3 +31,7 @@ AppDir/
 
 # personal, per-project agent instructions (see AGENTS.md)
 AGENTS.local.md
+
+ui/node_modules/
+ui/dist/
+ui/src-tauri/target/
