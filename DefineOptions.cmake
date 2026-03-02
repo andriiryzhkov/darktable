@@ -39,6 +39,7 @@ option(USE_ICU "Use ICU - International Components for Unicode." ON)
 option(USE_OPENCV "Use OpenCV for HDR exposure-bracket auto-alignment." ON)
 option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." OFF)
 option(USE_SDL2 "Enable SDL2 support" ON)
+option(BUILD_SERVER "Build the darktable-server for Tauri UI" OFF)
 
 if (USE_OPENCL)
     option(TESTBUILD_OPENCL_PROGRAMS "Test-compile OpenCL programs (needs LLVM and Clang 7+)" ON)
