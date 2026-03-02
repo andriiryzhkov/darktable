@@ -62,3 +62,9 @@ export interface ExposureParams {
   black: number;
   compensate_exposure_bias: boolean;
 }
+
+export interface PreviewFrameResult {
+  width: number;
+  height: number;
+  data: string; // base64-encoded BGRA8 pixels
+}

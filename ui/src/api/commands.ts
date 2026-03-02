@@ -1,35 +1,49 @@
-import { invoke } from "@tauri-apps/api/core";
 import type {
   CatalogQueryResult,
   ThumbnailResult,
   SessionInfo,
   PreviewResult,
+  PreviewFrameResult,
 } from "../types/protocol";
 
-export const startServer = () => invoke<string>("start_server");
+// webview_bind() creates these as global async functions on window.
+// Each returns a Promise that resolves when the C side calls webview_return().
 
-export const ping = () => invoke<Record<string, unknown>>("ping");
+declare global {
+  interface Window {
+    ping: () => Promise<unknown>;
+    catalogQuery: (offset: number, limit: number) => Promise<CatalogQueryResult>;
+    catalogGetThumbnail: (imgid: number) => Promise<ThumbnailResult>;
+    developOpen: (imgid: number, width: number, height: number) => Promise<SessionInfo>;
+    developClose: (sessionId: string) => Promise<unknown>;
+    developSetParams: (sessionId: string, op: string, params: Record<string, unknown>) => Promise<unknown>;
+    developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
+    getPreviewFrame: (sessionId: string, frontBuffer: number) => Promise<PreviewFrameResult>;
+  }
+}
+
+export const ping = () => window.ping();
 
 export const catalogQuery = (offset: number, limit: number) =>
-  invoke<CatalogQueryResult>("catalog_query", { offset, limit });
+  window.catalogQuery(offset, limit);
 
 export const catalogGetThumbnail = (imgid: number) =>
-  invoke<ThumbnailResult>("catalog_get_thumbnail", { imgid });
+  window.catalogGetThumbnail(imgid);
 
 export const developOpen = (imgid: number, width: number, height: number) =>
-  invoke<SessionInfo>("develop_open", { imgid, width, height });
+  window.developOpen(imgid, width, height);
 
 export const developClose = (sessionId: string) =>
-  invoke<unknown>("develop_close", { sessionId });
+  window.developClose(sessionId);
 
 export const developSetParams = (
   sessionId: string,
   op: string,
   params: Record<string, unknown>,
-) => invoke<unknown>("develop_set_params", { sessionId, op, params });
+) => window.developSetParams(sessionId, op, params);
 
 export const developRequestPreview = (sessionId: string) =>
-  invoke<PreviewResult>("develop_request_preview", { sessionId });
+  window.developRequestPreview(sessionId);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number) =>
-  invoke<number[]>("get_preview_frame", { sessionId, frontBuffer });
+  window.getPreviewFrame(sessionId, frontBuffer);

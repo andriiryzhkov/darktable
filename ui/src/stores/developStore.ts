@@ -99,9 +99,18 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     const { sessionId, frontBuffer } = get();
     if (!sessionId) return;
     try {
-      const pixels = await getPreviewFrame(sessionId, frontBuffer);
-      // Tauri returns Vec<u8> as number[] — convert to Uint8Array
-      set({ frameData: new Uint8Array(pixels) });
+      const result = await getPreviewFrame(sessionId, frontBuffer);
+      // C side returns base64-encoded BGRA8 pixels
+      const binaryStr = atob(result.data);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      set({
+        frameData: bytes,
+        previewWidth: result.width,
+        previewHeight: result.height,
+      });
     } catch (e) {
       console.error("get_preview_frame failed:", e);
     }

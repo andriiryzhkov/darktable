@@ -1229,10 +1229,15 @@ if(USE_MCP)
   add_subdirectory(mcp)
 endif()
 
-# have a headless server for Tauri UI
+# headless server backend for webview UI (and future web/remote clients)
 if(BUILD_SERVER)
   add_subdirectory(server)
 endif(BUILD_SERVER)
+
+# webview-based desktop UI host
+if(BUILD_WEBVIEW)
+  add_subdirectory(webview)
+endif(BUILD_WEBVIEW)
 
 # have a command line utility to generate all the thumbnails
 add_subdirectory(generate-cache)

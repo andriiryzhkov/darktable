@@ -12,6 +12,5 @@ export default defineConfig({
     target: "ES2020",
     outDir: "dist",
   },
-  // Prevent vite from obscuring Rust errors
   clearScreen: false,
 });
