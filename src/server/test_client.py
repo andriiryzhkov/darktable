@@ -150,6 +150,101 @@ def test_catalog_query_filtered(s):
         print(f"    [{img['id']}] {img['filename']} ({stars} stars)")
 
 
+def test_develop_open(s, imgid):
+    print(f"--- develop.open (imgid={imgid}) ---")
+    send_request(s, "develop.open", {"imgid": imgid, "width": 1280, "height": 720})
+    resp = recv_response(s)
+    if resp["error"]:
+        print(f"  FAIL: {resp['error']['message']}")
+        return None
+    r = resp["result"]
+    print(f"  OK: session={r['session_id']}, preview={r['preview_width']}x{r['preview_height']}")
+    print(f"      SHM: {r['shm_names']}")
+    return r["session_id"]
+
+
+def test_develop_get_modules(s, session_id):
+    print(f"--- develop.get_modules (session={session_id}) ---")
+    send_request(s, "develop.get_modules", {"session_id": session_id})
+    resp = recv_response(s)
+    assert resp["error"] is None, f"Unexpected error: {resp['error']}"
+    modules = resp["result"]["modules"]
+    enabled = [m for m in modules if m["enabled"]]
+    print(f"  OK: {len(modules)} modules total, {len(enabled)} enabled:")
+    for m in enabled[:8]:
+        print(f"    {m['op']} (instance={m['instance']}, order={m['iop_order']:.1f})")
+    if len(enabled) > 8:
+        print(f"    ... and {len(enabled) - 8} more")
+
+
+def test_develop_get_params(s, session_id):
+    print(f"--- develop.get_params (session={session_id}, op=exposure) ---")
+    send_request(s, "develop.get_params", {"session_id": session_id, "op": "exposure"})
+    resp = recv_response(s)
+    assert resp["error"] is None, f"Unexpected error: {resp['error']}"
+    r = resp["result"]
+    print(f"  OK: enabled={r['enabled']}, params={r['params']}")
+    return r["params"]
+
+
+def test_develop_set_params(s, session_id, exposure_val):
+    print(f"--- develop.set_params (session={session_id}, exposure={exposure_val}) ---")
+    send_request(s, "develop.set_params", {
+        "session_id": session_id,
+        "op": "exposure",
+        "params": {"exposure": exposure_val},
+        "enabled": True
+    })
+    resp = recv_response(s)
+    assert resp["error"] is None, f"Unexpected error: {resp['error']}"
+    print(f"  OK: {resp['result']}")
+
+
+def test_develop_request_preview(s, session_id):
+    print(f"--- develop.request_preview (session={session_id}) ---")
+    send_request(s, "develop.request_preview", {"session_id": session_id})
+    resp = recv_response(s)
+    if resp["error"]:
+        print(f"  FAIL: {resp['error']['message']}")
+        return
+    r = resp["result"]
+    print(f"  OK: {r['width']}x{r['height']}, seq={r['sequence']}, shm={r['shm_name']}")
+
+    # Check if there's an event queued (preview_ready)
+    # Events arrive as unsolicited messages; drain any pending
+    try:
+        s.settimeout(0.5)
+        header = b""
+        while len(header) < 4:
+            chunk = s.recv(4 - len(header))
+            if not chunk:
+                break
+            header += chunk
+        if len(header) == 4:
+            length = struct.unpack(">I", header)[0]
+            data = b""
+            while len(data) < length:
+                chunk = s.recv(length - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            event = json.loads(data.decode("utf-8"))
+            if event.get("event"):
+                print(f"  EVENT: {event['event']} -> {event['data']}")
+    except socket.timeout:
+        pass
+    finally:
+        s.settimeout(None)
+
+
+def test_develop_close(s, session_id):
+    print(f"--- develop.close (session={session_id}) ---")
+    send_request(s, "develop.close", {"session_id": session_id})
+    resp = recv_response(s)
+    assert resp["error"] is None, f"Unexpected error: {resp['error']}"
+    print(f"  OK: {resp['result']}")
+
+
 def test_shutdown(s):
     print("--- system.shutdown ---")
     send_request(s, "system.shutdown")
@@ -176,6 +271,7 @@ def main():
         # If there are images, test get_image and get_thumbnail on the first one
         send_request(s, "catalog.query", {"offset": 0, "limit": 1}, req_id="peek")
         resp = recv_response(s)
+        first_id = None
         if resp["result"]["images"]:
             first_id = resp["result"]["images"][0]["id"]
             test_catalog_get_image(s, first_id)
@@ -186,12 +282,35 @@ def main():
         test_catalog_get_filmrolls(s)
         test_catalog_query_filtered(s)
 
+        # Develop session tests
+        if first_id:
+            print()
+            session_id = test_develop_open(s, first_id)
+            if session_id:
+                test_develop_get_modules(s, session_id)
+                original_params = test_develop_get_params(s, session_id)
+
+                # Render initial preview
+                test_develop_request_preview(s, session_id)
+
+                # Modify exposure and re-render
+                test_develop_set_params(s, session_id, 1.5)
+                test_develop_request_preview(s, session_id)
+
+                # Verify params changed
+                test_develop_get_params(s, session_id)
+
+                # Close session
+                test_develop_close(s, session_id)
+
         print()
         if "--no-shutdown" not in sys.argv:
             test_shutdown(s)
         else:
             print("(skipping shutdown)")
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"ERROR: {e}")
         sys.exit(1)
     finally:

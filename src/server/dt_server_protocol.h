@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2025 darktable developers.
+    Copyright (C) 2026 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,8 +25,6 @@
 
 // Maximum message size: 16 MB (thumbnails can be large as base64)
 #define DT_SERVER_MAX_MESSAGE_SIZE (16 * 1024 * 1024)
-
-// ---------- Shared memory ----------
 
 #define DT_SHM_MAGIC 0x44545348   // "DTSH"
 #define DT_SHM_VERSION 1
@@ -67,9 +65,7 @@ void dt_shm_write_header(dt_shm_buffer_t *buf, uint32_t w, uint32_t h,
                           dt_shm_format_t fmt, uint64_t seq);
 uint8_t *dt_shm_pixel_data(dt_shm_buffer_t *buf);
 
-// ---------- JSON protocol ----------
-
-// Error codes (JSON-RPC style)
+// error codes (JSON-RPC style)
 #define DT_SERVER_ERR_PARSE       -32700
 #define DT_SERVER_ERR_METHOD      -32601
 #define DT_SERVER_ERR_PARAMS      -32602

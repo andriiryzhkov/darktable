@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2025 darktable developers.
+    Copyright (C) 2026 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -24,8 +24,6 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-// ---------- Shared memory ----------
 
 gboolean dt_shm_create(dt_shm_buffer_t *buf, const char *name, uint32_t width, uint32_t height)
 {
@@ -111,9 +109,7 @@ uint8_t *dt_shm_pixel_data(dt_shm_buffer_t *buf)
   return ((uint8_t *)buf->mapped) + DT_SHM_HEADER_SIZE;
 }
 
-// ---------- Frame I/O ----------
-
-// Read exactly n bytes from fd, handling partial reads.
+// read exactly n bytes from fd, handling partial reads from fd, handling partial reads.
 static gboolean _read_exact(int fd, void *buf, size_t n)
 {
   size_t total = 0;
@@ -130,7 +126,7 @@ static gboolean _read_exact(int fd, void *buf, size_t n)
   return TRUE;
 }
 
-// Write exactly n bytes to fd, handling partial writes.
+// write exactly n bytes to fd, handling partial writes
 static gboolean _write_exact(int fd, const void *buf, size_t n)
 {
   size_t total = 0;
@@ -192,8 +188,6 @@ gboolean dt_server_write_frame(int fd, const char *buf, size_t len)
     return FALSE;
   return TRUE;
 }
-
-// ---------- JSON helpers ----------
 
 dt_server_request_t *dt_server_parse_request(const char *json, size_t len)
 {
@@ -259,7 +253,7 @@ void dt_server_free_request(dt_server_request_t *req)
   g_free(req);
 }
 
-// Serialize a JsonNode to a compact JSON string.
+// serialize a JsonNode to a compact JSON string
 static char *_node_to_json(JsonNode *node)
 {
   JsonGenerator *gen = json_generator_new();

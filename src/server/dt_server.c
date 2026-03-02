@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2025 darktable developers.
+    Copyright (C) 2026 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -24,8 +24,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-
-// ---------- Built-in handlers ----------
 
 static char *_handle_ping(dt_server_t *server, const dt_server_request_t *req)
 {
@@ -77,8 +75,6 @@ static char *_handle_get_version(dt_server_t *server, const dt_server_request_t 
   return resp;
 }
 
-// ---------- Route table ----------
-
 static const dt_server_route_t _routes[] = {
   { "system.ping",                _handle_ping },
   { "system.shutdown",            _handle_shutdown },
@@ -108,8 +104,6 @@ static char *_dispatch(dt_server_t *server, const dt_server_request_t *req)
   return dt_server_make_error(req->id, DT_SERVER_ERR_METHOD,
                                "Unknown method");
 }
-
-// ---------- Client connection handling ----------
 
 static void _handle_client(dt_server_t *server)
 {
@@ -191,8 +185,6 @@ static void _handle_client(dt_server_t *server)
     }
   }
 }
-
-// ---------- Server lifecycle ----------
 
 dt_server_t *dt_server_init(const char *socket_path)
 {

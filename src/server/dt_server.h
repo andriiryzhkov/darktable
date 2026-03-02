@@ -1,6 +1,6 @@
 /*
     This file is part of darktable,
-    Copyright (C) 2025 darktable developers.
+    Copyright (C) 2026 darktable developers.
 
     darktable is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -91,9 +91,7 @@ void dt_server_queue_event(dt_server_t *server, const char *event_name, JsonNode
 // Find a develop session by ID
 dt_server_session_t *dt_server_find_session(dt_server_t *server, const char *session_id);
 
-// ---------- Handler declarations (implemented in separate files) ----------
-
-// Catalog handlers (dt_server_catalog.c)
+// catalog handlers (dt_server_catalog.c)
 char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_image(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_thumbnail(dt_server_t *server, const dt_server_request_t *req);
