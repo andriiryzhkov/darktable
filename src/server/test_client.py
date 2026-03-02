@@ -9,9 +9,11 @@ Tests: ping, version, catalog query, thumbnails, tags, filmrolls, shutdown.
 
 import base64
 import json
+import os
 import socket
 import struct
 import sys
+import tempfile
 
 
 def connect(path):
@@ -245,6 +247,30 @@ def test_develop_close(s, session_id):
     print(f"  OK: {resp['result']}")
 
 
+def test_export_image(s, imgid):
+    print(f"--- export.image (imgid={imgid}) ---")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_path = os.path.join(tmpdir, "test_export.jpg")
+        send_request(s, "export.image", {
+            "imgid": imgid,
+            "output_path": output_path,
+            "max_width": 800,
+            "max_height": 600,
+        })
+        resp = recv_response(s)
+        if resp["error"]:
+            print(f"  FAIL: {resp['error']['message']}")
+            return
+        r = resp["result"]
+        # check that the file was actually created
+        if os.path.exists(output_path):
+            size = os.path.getsize(output_path)
+            print(f"  OK: exported to {output_path} ({size} bytes)")
+        else:
+            print(f"  WARN: server reported OK but file not found at {output_path}")
+        print(f"  result: {r}")
+
+
 def test_shutdown(s):
     print("--- system.shutdown ---")
     send_request(s, "system.shutdown")
@@ -302,6 +328,11 @@ def main():
 
                 # Close session
                 test_develop_close(s, session_id)
+
+        # Export test
+        if first_id:
+            print()
+            test_export_image(s, first_id)
 
         print()
         if "--no-shutdown" not in sys.argv:

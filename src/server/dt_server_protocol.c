@@ -109,7 +109,7 @@ uint8_t *dt_shm_pixel_data(dt_shm_buffer_t *buf)
   return ((uint8_t *)buf->mapped) + DT_SHM_HEADER_SIZE;
 }
 
-// read exactly n bytes from fd, handling partial reads from fd, handling partial reads.
+// read exactly n bytes from fd, handling partial reads
 static gboolean _read_exact(int fd, void *buf, size_t n)
 {
   size_t total = 0;
