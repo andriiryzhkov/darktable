@@ -16,7 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "server/dt_server.h"
+#include "server/server.h"
 #include "common/database.h"
 #include "common/debug.h"
 #include "common/image.h"

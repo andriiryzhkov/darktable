@@ -21,7 +21,7 @@
 #include "common/darktable.h"
 #include "develop/develop.h"
 #include "develop/pixelpipe_hb.h"
-#include "server/dt_server_protocol.h"
+#include "server/server_protocol.h"
 
 #include <glib.h>
 

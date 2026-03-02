@@ -18,7 +18,7 @@
 
 #include "common/darktable.h"
 #include "common/file_location.h"
-#include "server/dt_server.h"
+#include "server/server.h"
 
 #include <limits.h>
 #include <stdio.h>

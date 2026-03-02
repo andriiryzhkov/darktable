@@ -16,7 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "server/dt_server.h"
+#include "server/server.h"
 
 // TODO: Connect to darktable signals and forward as JSON events.
 // Signals to bridge:

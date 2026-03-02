@@ -16,7 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "server/dt_server_protocol.h"
+#include "server/server_protocol.h"
 
 #include <errno.h>
 #include <fcntl.h>

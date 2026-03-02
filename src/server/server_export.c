@@ -16,7 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "server/dt_server.h"
+#include "server/server.h"
 #include "imageio/imageio_module.h"
 
 #include <string.h>

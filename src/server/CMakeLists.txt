@@ -2,12 +2,12 @@ include_directories(${DARKTABLE_BINDIR})
 
 set(SERVER_SOURCES
   main.c
-  dt_server.c
-  dt_server_protocol.c
-  dt_server_catalog.c
-  dt_server_develop.c
-  dt_server_export.c
-  dt_server_events.c
+  server.c
+  server_protocol.c
+  server_catalog.c
+  server_develop.c
+  server_export.c
+  server_events.c
 )
 
 add_executable(darktable-server ${SERVER_SOURCES})
