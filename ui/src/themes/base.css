@@ -51,7 +51,7 @@
 
   /* ── Bauhaus controls (sliders, comboboxes) ─── */
   --bauhaus-bg: var(--grey-25);
-  --bauhaus-fill: var(--grey-55);
+  --bauhaus-fill: var(--grey-70);
   --bauhaus-fg: var(--grey-80);
   --bauhaus-border: var(--grey-20);
   --bauhaus-indicator-border: var(--grey-35);

@@ -23,15 +23,15 @@ export default function ExportModule() {
         <ModuleRow label="file format">
           <ModuleSelect options={["JPEG (8 bit)", "PNG (8 bit)", "TIFF (16 bit)", "EXR (32 bit)"]} />
         </ModuleRow>
-        <ModuleRow label="quality">
-          <ModuleSlider
-            min={1}
-            max={100}
-            value={quality}
-            onChange={setQuality}
-            displayValue={String(quality)}
-          />
-        </ModuleRow>
+        <ModuleSlider
+          label="quality"
+          min={1}
+          max={100}
+          step={1}
+          value={quality}
+          onChange={setQuality}
+          format={(v) => String(Math.round(v))}
+        />
         <ModuleRow label="chroma subsampling">
           <ModuleSelect options={["auto"]} />
         </ModuleRow>
