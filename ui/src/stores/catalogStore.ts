@@ -33,6 +33,10 @@ interface CatalogState {
   fetchAll: () => Promise<void>;
   selectImage: (id: number, e?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
   clearSelection: () => void;
+  selectAll: () => void;
+  invertSelection: () => void;
+  selectFilmRoll: () => void;
+  selectUntouched: () => void;
 }
 
 export const useCatalogStore = create<CatalogState>((set, get) => ({
@@ -105,6 +109,48 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   },
 
   clearSelection: () => set({ selectedIds: new Set(), lastSelectedId: null }),
+
+  selectAll: () => {
+    const { images } = get();
+    set({ selectedIds: new Set(images.map((img) => img.id)), lastSelectedId: null });
+  },
+
+  invertSelection: () => {
+    const { images, selectedIds } = get();
+    const inverted = new Set<number>();
+    for (const img of images) {
+      if (!selectedIds.has(img.id)) inverted.add(img.id);
+    }
+    set({ selectedIds: inverted, lastSelectedId: null });
+  },
+
+  selectFilmRoll: () => {
+    const { images, selectedIds } = get();
+    // Find film_id(s) of currently selected images, then select all images from those film rolls
+    const selectedFilmIds = new Set<number>();
+    for (const img of images) {
+      if (selectedIds.has(img.id) && img.film_id != null) {
+        selectedFilmIds.add(img.film_id);
+      }
+    }
+    if (selectedFilmIds.size === 0) return;
+    const newSelection = new Set<number>();
+    for (const img of images) {
+      if (img.film_id != null && selectedFilmIds.has(img.film_id)) {
+        newSelection.add(img.id);
+      }
+    }
+    set({ selectedIds: newSelection, lastSelectedId: null });
+  },
+
+  selectUntouched: () => {
+    const { images } = get();
+    const untouched = new Set<number>();
+    for (const img of images) {
+      if (!img.altered) untouched.add(img.id);
+    }
+    set({ selectedIds: untouched, lastSelectedId: null });
+  },
 }));
 
 // React to events — reload collection when it changes

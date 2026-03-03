@@ -77,7 +77,6 @@ body {
 
 .thumb-main[data-selected="true"] .thumb-back {
   background-color: var(--thumbnail-selected-bg-color);
-  border-color: var(--selection-color);
 }
 
 .thumb-main:hover .thumb-back {
@@ -86,7 +85,6 @@ body {
 
 .thumb-main[data-selected="true"]:hover .thumb-back {
   background-color: var(--thumbnail-selected-bg-color);
-  border-color: var(--selection-color);
 }
 
 /* Overlays: hidden by default, shown on hover */
@@ -458,6 +456,16 @@ body {
 
 .bauhaus-button-row .bauhaus-button {
   flex: 1;
+}
+
+.module-button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.module-button-grid .bauhaus-button:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
 }
 
 /* Bauhaus checkbox */
