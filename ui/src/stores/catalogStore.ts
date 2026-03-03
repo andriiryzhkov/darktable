@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { catalogQuery } from "../api/commands";
 import type { ImageInfo } from "../types/protocol";
+import { on } from "../events/eventBus";
 
 // Seed-based pseudo-random for deterministic mock data per image ID
 function mockRng(seed: number): number {
@@ -102,3 +103,11 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
 
   clearSelection: () => set({ selectedIds: new Set(), lastSelectedId: null }),
 }));
+
+// React to events — reload collection when it changes
+on("collection.changed", () => {
+  useCatalogStore.getState().fetchAll();
+});
+on("import.finished", ({ imported }) => {
+  if (imported > 0) useCatalogStore.getState().fetchAll();
+});

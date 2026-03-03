@@ -28,8 +28,8 @@ export const useUIStore = create<UIState>((set) => ({
   activeView: "lighttable",
   leftSidebarOpen: true,
   rightSidebarOpen: true,
-  leftSidebarWidth: 220,
-  rightSidebarWidth: 220,
+  leftSidebarWidth: 300,
+  rightSidebarWidth: 300,
   thumbnailSize: 200,
   gridColumns: 0,
 

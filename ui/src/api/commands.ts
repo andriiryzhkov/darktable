@@ -5,6 +5,7 @@ import type {
   PreviewResult,
   PreviewFrameResult,
 } from "../types/protocol";
+import type { FolderEntry, FileEntry } from "../types/import";
 
 // webview_bind() creates these as global async functions on window.
 // Each returns a Promise that resolves when the C side calls webview_return().
@@ -19,8 +20,18 @@ declare global {
     developSetParams: (sessionId: string, op: string, params: Record<string, unknown>) => Promise<unknown>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
     getPreviewFrame: (sessionId: string, frontBuffer: number) => Promise<PreviewFrameResult>;
+    pickFolder: () => Promise<string | null>;
+    listFolders: (path: string) => Promise<FolderEntry[]>;
+    listFiles: (path: string, recursive: boolean, ignoreNonRaw: boolean) => Promise<FileEntry[]>;
+    getHomePath: () => Promise<string>;
+    importImages: (paths: string[]) => Promise<{ imported: number; skipped: number }>;
+    copyAndImportImages: (paths: string[]) => Promise<{ imported: number; skipped: number }>;
+    getFileThumbnail: (path: string) => Promise<{ path: string; mime: string; data: string }>;
+    getPlatformInfo: () => Promise<{ os: "macos" | "windows" | "linux" }>;
   }
 }
+
+export type PlatformOS = "macos" | "windows" | "linux";
 
 export const ping = () => window.ping();
 
@@ -47,3 +58,20 @@ export const developRequestPreview = (sessionId: string) =>
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number) =>
   window.getPreviewFrame(sessionId, frontBuffer);
+
+export const pickFolder = () => window.pickFolder();
+
+export const listFolders = (path: string) => window.listFolders(path);
+
+export const listFiles = (path: string, recursive: boolean, ignoreNonRaw: boolean) =>
+  window.listFiles(path, recursive, ignoreNonRaw);
+
+export const getHomePath = () => window.getHomePath();
+
+export const importImages = (paths: string[]) => window.importImages(paths);
+
+export const copyAndImportImages = (paths: string[]) => window.copyAndImportImages(paths);
+
+export const getFileThumbnail = (path: string) => window.getFileThumbnail(path);
+
+export const getPlatformInfo = () => window.getPlatformInfo();

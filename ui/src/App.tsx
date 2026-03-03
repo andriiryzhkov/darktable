@@ -9,6 +9,7 @@ import LeftSidebarModules from "./components/Sidebar/LeftSidebarModules";
 import RightSidebarModules from "./components/Sidebar/RightSidebarModules";
 import LighttableView from "./components/Lighttable/LighttableView";
 import DarkroomView from "./components/Darkroom/DarkroomView";
+import ImportDialog from "./components/Import/ImportDialog";
 
 function App() {
   const { status, error, connect } = useConnectionStore();
@@ -117,6 +118,7 @@ function App() {
           {activeView === "lighttable" && <RightSidebarModules />}
         </Sidebar>
       </div>
+      <ImportDialog />
     </div>
   );
 }

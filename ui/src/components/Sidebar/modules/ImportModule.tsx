@@ -3,14 +3,17 @@ import ModuleButton from "../controls/ModuleButton";
 import ModuleCheckbox from "../controls/ModuleCheckbox";
 import ModuleInput from "../controls/ModuleInput";
 import ModuleSection from "../controls/ModuleSection";
+import { useImportStore } from "../../../stores/importStore";
 
 export default function ImportModule() {
+  const openDialog = useImportStore((s) => s.openDialog);
+
   return (
     <CollapsibleModule title="import" defaultOpen>
       <div className="space-y-1">
         <div className="bauhaus-button-row">
-          <ModuleButton label="add to library..." />
-          <ModuleButton label="copy & import..." />
+          <ModuleButton label="add to library..." onClick={() => openDialog("inplace")} />
+          <ModuleButton label="copy & import..." onClick={() => openDialog("copy")} />
         </div>
         <ModuleSection title="parameters">
           <div className="bauhaus-input-group">

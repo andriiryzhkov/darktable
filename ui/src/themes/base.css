@@ -110,4 +110,7 @@
   --graph-border: var(--grey-20);
   --graph-fg: var(--grey-90);
   --graph-grid: var(--grey-20);
+
+  /* ── Import dialog ────────────────────────────── */
+  --import-overlay-bg: rgba(0, 0, 0, 0.5);
 }

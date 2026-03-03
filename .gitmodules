@@ -23,3 +23,6 @@
 [submodule "src/external/webview"]
 	path = src/external/webview
 	url = https://github.com/webview/webview.git
+[submodule "src/external/nativefiledialog-extended"]
+	path = src/external/nativefiledialog-extended
+	url = https://github.com/btzy/nativefiledialog-extended.git
