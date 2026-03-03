@@ -21,12 +21,17 @@ export default function BottomBar() {
   const total = useCatalogStore((s) => s.total);
 
   const fewer = () => {
+    // fewer per row = larger thumbs
     if (gridColumns <= 1) return;
-    setThumbnailSize(thumbnailSize + 30);
+    const approxWidth = gridColumns * thumbnailSize;
+    setThumbnailSize(Math.ceil(approxWidth / (gridColumns - 1)));
   };
 
   const more = () => {
-    setThumbnailSize(thumbnailSize - 30);
+    // more per row = smaller thumbs
+    if (gridColumns <= 1) return;
+    const approxWidth = gridColumns * thumbnailSize;
+    setThumbnailSize(Math.floor(approxWidth / (gridColumns + 1)));
   };
 
   return (
@@ -123,18 +128,6 @@ export default function BottomBar() {
           {gridColumns}
         </span>
         <button
-          onClick={more}
-          className="flex items-center justify-center"
-          style={{
-            width: 22,
-            height: 22,
-            color: "var(--plugin-label-color)",
-          }}
-          title="More thumbnails per row"
-        >
-          <ZoomOut size={14} />
-        </button>
-        <button
           onClick={fewer}
           className="flex items-center justify-center"
           style={{
@@ -143,6 +136,18 @@ export default function BottomBar() {
             color: "var(--plugin-label-color)",
           }}
           title="Fewer thumbnails per row"
+        >
+          <ZoomOut size={14} />
+        </button>
+        <button
+          onClick={more}
+          className="flex items-center justify-center"
+          style={{
+            width: 22,
+            height: 22,
+            color: "var(--plugin-label-color)",
+          }}
+          title="More thumbnails per row"
         >
           <ZoomIn size={14} />
         </button>

@@ -31,7 +31,7 @@ export default function LighttableView({ onOpenImage }: Props) {
     ro.observe(el);
     measure();
     return () => ro.disconnect();
-  }, [thumbnailSize, setGridColumns]);
+  }, [thumbnailSize, loading, setGridColumns]);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
