@@ -4,12 +4,14 @@ import { ChevronRight, RotateCcw, Menu } from "lucide-react";
 interface CollapsibleModuleProps {
   title: string;
   defaultOpen?: boolean;
+  onReset?: () => void;
   children: ReactNode;
 }
 
 export default function CollapsibleModule({
   title,
   defaultOpen = false,
+  onReset,
   children,
 }: CollapsibleModuleProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -28,7 +30,7 @@ export default function CollapsibleModule({
           style={{ visibility: open ? "visible" : "hidden" }}
           onClick={(e) => e.stopPropagation()}
         >
-          <span title="Reset" className="module-action-btn">
+          <span title="Reset" className="module-action-btn" onClick={onReset}>
             <RotateCcw size={10} />
           </span>
           <span title="Presets" className="module-action-btn">

@@ -74,3 +74,16 @@ export interface PreviewFrameResult {
   height: number;
   data: string; // base64-encoded BGRA8 pixels
 }
+
+export interface FilmRoll {
+  id: number;
+  folder: string;
+  access_timestamp: number;
+  image_count: number;
+}
+
+export interface Tag {
+  id: number;
+  name: string;
+  flags: number;
+}

@@ -88,6 +88,7 @@ static const dt_server_route_t _routes[] = {
   { "catalog.import",             dt_server_catalog_import },
   { "catalog.copy_import",        dt_server_catalog_copy_import },
   { "catalog.get_file_thumbnail", dt_server_catalog_get_file_thumbnail },
+  { "catalog.get_collection_values", dt_server_catalog_get_collection_values },
   { "develop.open",               dt_server_develop_open },
   { "develop.close",              dt_server_develop_close },
   { "develop.get_modules",        dt_server_develop_get_modules },

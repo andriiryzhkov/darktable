@@ -102,6 +102,7 @@ char *dt_server_catalog_check_imported(dt_server_t *server, const dt_server_requ
 char *dt_server_catalog_import(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_copy_import(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_file_thumbnail(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_get_collection_values(dt_server_t *server, const dt_server_request_t *req);
 
 // Develop handlers (dt_server_develop.c)
 char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req);

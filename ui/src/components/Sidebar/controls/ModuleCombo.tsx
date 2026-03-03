@@ -1,8 +1,14 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 
-interface ModuleComboProps {
+export interface ComboGroup {
   label: string;
   options: string[];
+}
+
+interface ModuleComboProps {
+  label: string;
+  options?: string[];
+  groups?: ComboGroup[];
   value?: string;
   onChange?: (value: string) => void;
   actionIcon?: ReactNode;
@@ -12,12 +18,18 @@ interface ModuleComboProps {
 export default function ModuleCombo({
   label,
   options,
+  groups,
   value,
   onChange,
   actionIcon,
   onAction,
 }: ModuleComboProps) {
-  const [internal, setInternal] = useState(options[0] ?? "");
+  // Flatten groups into a single options list if groups are provided
+  const allOptions = groups
+    ? groups.flatMap((g) => g.options)
+    : options ?? [];
+
+  const [internal, setInternal] = useState(allOptions[0] ?? "");
   const selected = value ?? internal;
   const [open, setOpen] = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
@@ -53,6 +65,29 @@ export default function ModuleCombo({
     [onChange],
   );
 
+  const renderOption = (opt: string, isFirst: boolean) =>
+    isFirst ? (
+      <div key={opt} className="bauhaus-combo-popup-row">
+        <span className="bauhaus-combo-popup-label">{label}</span>
+        <span
+          className="bauhaus-combo-option-inline"
+          data-selected={opt === selected}
+          onClick={() => handleSelect(opt)}
+        >
+          {opt}
+        </span>
+      </div>
+    ) : (
+      <div
+        key={opt}
+        className="bauhaus-combo-option"
+        data-selected={opt === selected}
+        onClick={() => handleSelect(opt)}
+      >
+        {opt}
+      </div>
+    );
+
   return (
     <div className="bauhaus-combo" ref={comboRef}>
       <div className="bauhaus-combo-body" onClick={handleToggle}>
@@ -73,29 +108,25 @@ export default function ModuleCombo({
       )}
       {open && (
         <div className="bauhaus-combo-popup">
-          {options.map((opt, i) =>
-            i === 0 ? (
-              <div key={opt} className="bauhaus-combo-popup-row">
-                <span className="bauhaus-combo-popup-label">{label}</span>
-                <span
-                  className="bauhaus-combo-option-inline"
-                  data-selected={opt === selected}
-                  onClick={() => handleSelect(opt)}
-                >
-                  {opt}
-                </span>
-              </div>
-            ) : (
-              <div
-                key={opt}
-                className="bauhaus-combo-option"
-                data-selected={opt === selected}
-                onClick={() => handleSelect(opt)}
-              >
-                {opt}
-              </div>
-            ),
-          )}
+          {groups
+            ? groups.map((group) => (
+                <div key={group.label}>
+                  <div className="bauhaus-combo-group-header">
+                    {group.label}
+                  </div>
+                  {group.options.map((opt) => (
+                    <div
+                      key={opt}
+                      className="bauhaus-combo-option bauhaus-combo-option-grouped"
+                      data-selected={opt === selected}
+                      onClick={() => handleSelect(opt)}
+                    >
+                      {opt}
+                    </div>
+                  ))}
+                </div>
+              ))
+            : allOptions.map((opt, i) => renderOption(opt, i === 0))}
         </div>
       )}
     </div>

@@ -66,6 +66,152 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
   if(limit < 1) limit = 1;
   if(limit > 1000) limit = 1000;
 
+  // Check for collection rules (new multi-rule filter system)
+  JsonArray *rules = NULL;
+  if(req->params && json_object_has_member(req->params, "rules"))
+  {
+    JsonNode *rules_node = json_object_get_member(req->params, "rules");
+    if(JSON_NODE_HOLDS_ARRAY(rules_node))
+      rules = json_node_get_array(rules_node);
+  }
+
+  // Build the WHERE clause for collection rules
+  GString *rules_where = NULL;
+  if(rules && json_array_get_length(rules) > 0)
+  {
+    rules_where = g_string_new("");
+    const guint n_rules = json_array_get_length(rules);
+    for(guint r = 0; r < n_rules; r++)
+    {
+      JsonObject *rule = json_array_get_object_element(rules, r);
+      if(!rule) continue;
+
+      const char *mode = json_object_get_string_member_with_default(rule, "mode", "and");
+      const char *prop = json_object_get_string_member_with_default(rule, "property", "");
+      const char *text = json_object_get_string_member_with_default(rule, "text", "");
+      if(!text[0]) continue;
+
+      gchar *escaped = sqlite3_mprintf("%q", text);
+      gchar *like_val = g_strdup_printf("%%%s%%", escaped);
+      gchar *clause = NULL;
+
+      if(!g_strcmp0(prop, "film_roll") || !g_strcmp0(prop, "folder"))
+        clause = g_strdup_printf(
+          "i.film_id IN (SELECT id FROM main.film_rolls WHERE folder LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "tag"))
+        clause = g_strdup_printf(
+          "i.id IN (SELECT imgid FROM main.tagged_images WHERE tagid IN"
+          " (SELECT id FROM data.tags WHERE name LIKE '%s'))", like_val);
+      else if(!g_strcmp0(prop, "camera"))
+        clause = g_strdup_printf(
+          "i.camera_id IN (SELECT id FROM main.cameras WHERE (maker || ' ' || model) LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "lens"))
+        clause = g_strdup_printf(
+          "i.lens_id IN (SELECT id FROM main.lens WHERE name LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "filename"))
+        clause = g_strdup_printf("i.filename LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "rating"))
+      {
+        // text is like "3 stars", "unrated", "rejected" — match the rating number
+        int rating = -1;
+        if(strstr(text, "unrated")) rating = 0;
+        else if(strstr(text, "rejected")) rating = 6;
+        else rating = atoi(text);
+        if(rating >= 0)
+          clause = g_strdup_printf("(i.flags & 7) = %d", rating);
+      }
+      else if(!g_strcmp0(prop, "color_label"))
+      {
+        int color = -1;
+        if(strstr(text, "red")) color = 0;
+        else if(strstr(text, "yellow")) color = 1;
+        else if(strstr(text, "green")) color = 2;
+        else if(strstr(text, "blue")) color = 3;
+        else if(strstr(text, "purple")) color = 4;
+        if(color >= 0)
+          clause = g_strdup_printf(
+            "i.id IN (SELECT imgid FROM main.color_labels WHERE color = %d)", color);
+      }
+      else if(!g_strcmp0(prop, "title") || !g_strcmp0(prop, "description") || !g_strcmp0(prop, "creator"))
+        clause = g_strdup_printf(
+          "i.id IN (SELECT md.id FROM main.meta_data AS md"
+          " JOIN data.meta_data AS dmd ON md.key = dmd.key"
+          " WHERE dmd.name = '%s' AND md.value LIKE '%s')", escaped, like_val);
+      else if(!g_strcmp0(prop, "capture_date"))
+        clause = g_strdup_printf(
+          "SUBSTR(datetime(i.datetime_taken, 'unixepoch'), 1, 10) LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "import_time"))
+        clause = g_strdup_printf(
+          "i.import_timestamp > 0 AND SUBSTR(datetime(i.import_timestamp, 'unixepoch'), 1, 10) LIKE '%s'",
+          like_val);
+      else if(!g_strcmp0(prop, "change_time"))
+        clause = g_strdup_printf(
+          "i.change_timestamp > 0 AND SUBSTR(datetime(i.change_timestamp, 'unixepoch'), 1, 10) LIKE '%s'",
+          like_val);
+      else if(!g_strcmp0(prop, "aperture"))
+        clause = g_strdup_printf(
+          "('f/' || ROUND(i.aperture, 1)) LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "exposure"))
+        clause = g_strdup_printf(
+          "CASE WHEN i.exposure >= 1.0 THEN CAST(CAST(i.exposure AS INTEGER) AS TEXT) || 's'"
+          " WHEN i.exposure > 0 THEN '1/' || CAST(ROUND(1.0/i.exposure) AS INTEGER) || 's'"
+          " ELSE '0s' END LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "exposure_bias"))
+        clause = g_strdup_printf(
+          "(ROUND(i.exposure_bias, 1) || ' EV') LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "focal_length"))
+        clause = g_strdup_printf(
+          "(CAST(ROUND(i.focal_length) AS INTEGER) || 'mm') LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "iso"))
+        clause = g_strdup_printf(
+          "('ISO ' || CAST(ROUND(i.iso) AS INTEGER)) LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "aspect_ratio"))
+        clause = g_strdup_printf(
+          "CAST(ROUND(i.aspect_ratio, 2) AS TEXT) LIKE '%s'", like_val);
+      else if(!g_strcmp0(prop, "white_balance"))
+        clause = g_strdup_printf(
+          "i.whitebalance_id IN (SELECT id FROM main.whitebalance WHERE name LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "flash"))
+        clause = g_strdup_printf(
+          "i.flash_id IN (SELECT id FROM main.flash WHERE name LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "exposure_program"))
+        clause = g_strdup_printf(
+          "i.exposure_program_id IN (SELECT id FROM main.exposure_program WHERE name LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "metering_mode"))
+        clause = g_strdup_printf(
+          "i.metering_mode_id IN (SELECT id FROM main.metering_mode WHERE name LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "group"))
+        clause = g_strdup_printf(
+          "i.group_id IN (SELECT id FROM main.images WHERE filename LIKE '%s')", like_val);
+      else if(!g_strcmp0(prop, "history"))
+      {
+        if(strstr(text, "altered") && !strstr(text, "not"))
+          clause = g_strdup("i.history_end > 0");
+        else if(strstr(text, "not"))
+          clause = g_strdup("(i.history_end IS NULL OR i.history_end = 0)");
+      }
+
+      sqlite3_free(escaped);
+      g_free(like_val);
+
+      if(!clause) continue;
+
+      if(rules_where->len == 0)
+      {
+        // First rule: no prefix
+        g_string_append_printf(rules_where, "(%s)", clause);
+      }
+      else
+      {
+        const char *sql_op = "AND";
+        if(!g_strcmp0(mode, "or")) sql_op = "OR";
+        else if(!g_strcmp0(mode, "and_not")) sql_op = "AND NOT";
+        g_string_append_printf(rules_where, " %s (%s)", sql_op, clause);
+      }
+      g_free(clause);
+    }
+  }
+
   // Build query dynamically based on filters
   GString *query = g_string_new(
     "SELECT i.id, i.film_id, i.filename, i.datetime_taken,"
@@ -75,23 +221,31 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
     " FROM main.images AS i"
     " LEFT JOIN main.film_rolls AS f ON i.film_id = f.id");
 
-  if(filter_tag_id >= 0)
+  if(!rules_where && filter_tag_id >= 0)
     g_string_append(query,
       " JOIN main.tagged_images AS ti ON i.id = ti.imgid");
 
   g_string_append(query, " WHERE 1=1");
 
-  if(filter_film_id >= 0)
-    g_string_append(query, " AND i.film_id = ?3");
+  if(rules_where && rules_where->len > 0)
+  {
+    g_string_append_printf(query, " AND (%s)", rules_where->str);
+  }
+  else
+  {
+    // Legacy individual filters (backward compatible)
+    if(filter_film_id >= 0)
+      g_string_append(query, " AND i.film_id = ?3");
 
-  if(filter_tag_id >= 0)
-    g_string_append(query, " AND ti.tagid = ?4");
+    if(filter_tag_id >= 0)
+      g_string_append(query, " AND ti.tagid = ?4");
 
-  if(filter_rating_min >= 0)
-    g_string_append_printf(query, " AND (i.flags & 7) >= ?5");
+    if(filter_rating_min >= 0)
+      g_string_append_printf(query, " AND (i.flags & 7) >= ?5");
 
-  if(filter_text && filter_text[0])
-    g_string_append(query, " AND i.filename LIKE ?6");
+    if(filter_text && filter_text[0])
+      g_string_append(query, " AND i.filename LIKE ?6");
+  }
 
   g_string_append(query, " ORDER BY i.datetime_taken DESC LIMIT ?1 OFFSET ?2");
 
@@ -100,23 +254,30 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
     "SELECT COUNT(*)"
     " FROM main.images AS i");
 
-  if(filter_tag_id >= 0)
+  if(!rules_where && filter_tag_id >= 0)
     g_string_append(count_query,
       " JOIN main.tagged_images AS ti ON i.id = ti.imgid");
 
   g_string_append(count_query, " WHERE 1=1");
 
-  if(filter_film_id >= 0)
-    g_string_append(count_query, " AND i.film_id = ?3");
+  if(rules_where && rules_where->len > 0)
+  {
+    g_string_append_printf(count_query, " AND (%s)", rules_where->str);
+  }
+  else
+  {
+    if(filter_film_id >= 0)
+      g_string_append(count_query, " AND i.film_id = ?3");
 
-  if(filter_tag_id >= 0)
-    g_string_append(count_query, " AND ti.tagid = ?4");
+    if(filter_tag_id >= 0)
+      g_string_append(count_query, " AND ti.tagid = ?4");
 
-  if(filter_rating_min >= 0)
-    g_string_append(count_query, " AND (i.flags & 7) >= ?5");
+    if(filter_rating_min >= 0)
+      g_string_append(count_query, " AND (i.flags & 7) >= ?5");
 
-  if(filter_text && filter_text[0])
-    g_string_append(count_query, " AND i.filename LIKE ?6");
+    if(filter_text && filter_text[0])
+      g_string_append(count_query, " AND i.filename LIKE ?6");
+  }
 
   // Prepare and bind the main query
   sqlite3_stmt *stmt = NULL;
@@ -206,14 +367,17 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
     count_query->str, -1, &count_stmt, NULL);
   g_string_free(count_query, TRUE);
 
-  if(filter_film_id >= 0)
-    DT_DEBUG_SQLITE3_BIND_INT(count_stmt, 3, filter_film_id);
-  if(filter_tag_id >= 0)
-    DT_DEBUG_SQLITE3_BIND_INT(count_stmt, 4, filter_tag_id);
-  if(filter_rating_min >= 0)
-    DT_DEBUG_SQLITE3_BIND_INT(count_stmt, 5, filter_rating_min);
-  if(text_pattern)
-    DT_DEBUG_SQLITE3_BIND_TEXT(count_stmt, 6, text_pattern, -1, SQLITE_TRANSIENT);
+  if(!rules_where)
+  {
+    if(filter_film_id >= 0)
+      DT_DEBUG_SQLITE3_BIND_INT(count_stmt, 3, filter_film_id);
+    if(filter_tag_id >= 0)
+      DT_DEBUG_SQLITE3_BIND_INT(count_stmt, 4, filter_tag_id);
+    if(filter_rating_min >= 0)
+      DT_DEBUG_SQLITE3_BIND_INT(count_stmt, 5, filter_rating_min);
+    if(text_pattern)
+      DT_DEBUG_SQLITE3_BIND_TEXT(count_stmt, 6, text_pattern, -1, SQLITE_TRANSIENT);
+  }
 
   int total = 0;
   if(sqlite3_step(count_stmt) == SQLITE_ROW)
@@ -221,6 +385,7 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
   sqlite3_finalize(count_stmt);
 
   g_free(text_pattern);
+  if(rules_where) g_string_free(rules_where, TRUE);
 
   json_builder_set_member_name(b, "total");
   json_builder_add_int_value(b, total);
@@ -852,4 +1017,443 @@ char *dt_server_catalog_get_file_thumbnail(dt_server_t *server, const dt_server_
   json_node_unref(result);
   g_object_unref(b);
   return resp;
+}
+
+/* ── Collection values endpoint ────────────────────────────────── */
+
+char *dt_server_catalog_get_collection_values(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+
+  if(!req->params || !json_object_has_member(req->params, "property"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing property parameter");
+
+  const char *property = json_object_get_string_member(req->params, "property");
+  const char *filter_raw = "";
+  if(json_object_has_member(req->params, "filter"))
+    filter_raw = json_object_get_string_member(req->params, "filter");
+
+  gchar *like_pattern = (filter_raw && filter_raw[0])
+    ? g_strdup_printf("%%%s%%", filter_raw)
+    : g_strdup("%%");
+
+  sqlite3_stmt *stmt = NULL;
+
+  if(!g_strcmp0(property, "film_roll") || !g_strcmp0(property, "folder"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT f.id, f.folder, COUNT(i.id)"
+      " FROM main.film_rolls AS f"
+      " LEFT JOIN main.images AS i ON i.film_id = f.id"
+      " WHERE f.folder LIKE ?1"
+      " GROUP BY f.id"
+      " ORDER BY f.folder",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "tag"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT t.id, t.name, COUNT(ti.imgid)"
+      " FROM data.tags AS t"
+      " LEFT JOIN main.tagged_images AS ti ON t.id = ti.tagid"
+      " WHERE t.name LIKE ?1"
+      "   AND t.name NOT LIKE 'darktable|%%'"
+      " GROUP BY t.id"
+      " ORDER BY t.name",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "camera"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT c.id, c.maker || ' ' || c.model, COUNT(i.id)"
+      " FROM main.cameras AS c"
+      " LEFT JOIN main.images AS i ON i.camera_id = c.id"
+      " WHERE (c.maker || ' ' || c.model) LIKE ?1"
+      " GROUP BY c.id"
+      " ORDER BY c.maker, c.model",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "lens"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT l.id, l.name, COUNT(i.id)"
+      " FROM main.lens AS l"
+      " LEFT JOIN main.images AS i ON i.lens_id = l.id"
+      " WHERE l.name LIKE ?1"
+      " GROUP BY l.id"
+      " ORDER BY l.name",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "filename"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i.filename, i.filename, 1"
+      " FROM main.images AS i"
+      " WHERE i.filename LIKE ?1"
+      " GROUP BY i.filename"
+      " ORDER BY i.filename"
+      " LIMIT 200",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "rating"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT (i.flags & 7) AS r,"
+      " CASE (i.flags & 7)"
+      "   WHEN 0 THEN 'unrated'"
+      "   WHEN 6 THEN 'rejected'"
+      "   ELSE (i.flags & 7) || ' star' || CASE WHEN (i.flags & 7) > 1 THEN 's' ELSE '' END"
+      " END,"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " GROUP BY r"
+      " ORDER BY r",
+      -1, &stmt, NULL);
+    // clang-format on
+    (void)like_pattern; // not filterable by text
+  }
+  else if(!g_strcmp0(property, "color_label"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT cl.color,"
+      " CASE cl.color"
+      "   WHEN 0 THEN 'red'"
+      "   WHEN 1 THEN 'yellow'"
+      "   WHEN 2 THEN 'green'"
+      "   WHEN 3 THEN 'blue'"
+      "   WHEN 4 THEN 'purple'"
+      " END,"
+      " COUNT(DISTINCT cl.imgid)"
+      " FROM main.color_labels AS cl"
+      " GROUP BY cl.color"
+      " ORDER BY cl.color",
+      -1, &stmt, NULL);
+    // clang-format on
+  }
+  else if(!g_strcmp0(property, "title")
+          || !g_strcmp0(property, "description")
+          || !g_strcmp0(property, "creator"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT md.value, md.value, COUNT(DISTINCT md.id)"
+      " FROM main.meta_data AS md"
+      " JOIN data.meta_data AS dmd ON md.key = dmd.key"
+      " WHERE dmd.name = ?2 AND md.value LIKE ?1"
+      " GROUP BY md.value"
+      " ORDER BY md.value"
+      " LIMIT 200",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 2, property, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "capture_date"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT SUBSTR(datetime(i.datetime_taken, 'unixepoch'), 1, 10) AS d,"
+      "        SUBSTR(datetime(i.datetime_taken, 'unixepoch'), 1, 10),"
+      "        COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE d LIKE ?1"
+      " GROUP BY d"
+      " ORDER BY d DESC"
+      " LIMIT 200",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "import_time"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT SUBSTR(datetime(i.import_timestamp, 'unixepoch'), 1, 10) AS d,"
+      "        SUBSTR(datetime(i.import_timestamp, 'unixepoch'), 1, 10),"
+      "        COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.import_timestamp > 0 AND d LIKE ?1"
+      " GROUP BY d"
+      " ORDER BY d DESC"
+      " LIMIT 200",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "change_time"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT SUBSTR(datetime(i.change_timestamp, 'unixepoch'), 1, 10) AS d,"
+      "        SUBSTR(datetime(i.change_timestamp, 'unixepoch'), 1, 10),"
+      "        COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.change_timestamp > 0 AND d LIKE ?1"
+      " GROUP BY d"
+      " ORDER BY d DESC"
+      " LIMIT 200",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "aperture"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i.aperture, 'f/' || ROUND(i.aperture, 1), COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.aperture > 0"
+      "   AND ('f/' || ROUND(i.aperture, 1)) LIKE ?1"
+      " GROUP BY ROUND(i.aperture, 1)"
+      " ORDER BY i.aperture",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "exposure"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i.exposure,"
+      " CASE"
+      "   WHEN i.exposure >= 1.0 THEN CAST(CAST(i.exposure AS INTEGER) AS TEXT) || 's'"
+      "   WHEN i.exposure > 0 THEN '1/' || CAST(ROUND(1.0/i.exposure) AS INTEGER) || 's'"
+      "   ELSE '0s'"
+      " END,"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.exposure > 0"
+      " GROUP BY ROUND(1.0/i.exposure)"
+      " ORDER BY i.exposure DESC",
+      -1, &stmt, NULL);
+    // clang-format on
+  }
+  else if(!g_strcmp0(property, "exposure_bias"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i.exposure_bias,"
+      " ROUND(i.exposure_bias, 1) || ' EV',"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " GROUP BY ROUND(i.exposure_bias, 1)"
+      " ORDER BY i.exposure_bias",
+      -1, &stmt, NULL);
+    // clang-format on
+  }
+  else if(!g_strcmp0(property, "focal_length"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i.focal_length,"
+      " CAST(ROUND(i.focal_length) AS INTEGER) || 'mm',"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.focal_length > 0"
+      "   AND (CAST(ROUND(i.focal_length) AS INTEGER) || 'mm') LIKE ?1"
+      " GROUP BY ROUND(i.focal_length)"
+      " ORDER BY i.focal_length",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "iso"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i.iso,"
+      " 'ISO ' || CAST(ROUND(i.iso) AS INTEGER),"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.iso > 0"
+      "   AND ('ISO ' || CAST(ROUND(i.iso) AS INTEGER)) LIKE ?1"
+      " GROUP BY ROUND(i.iso)"
+      " ORDER BY i.iso",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "aspect_ratio"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT ROUND(i.aspect_ratio, 2),"
+      " ROUND(i.aspect_ratio, 2),"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " WHERE i.aspect_ratio > 0"
+      " GROUP BY ROUND(i.aspect_ratio, 2)"
+      " ORDER BY i.aspect_ratio",
+      -1, &stmt, NULL);
+    // clang-format on
+  }
+  else if(!g_strcmp0(property, "white_balance"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT w.id, w.name, COUNT(i.id)"
+      " FROM main.whitebalance AS w"
+      " LEFT JOIN main.images AS i ON i.whitebalance_id = w.id"
+      " WHERE w.name LIKE ?1"
+      " GROUP BY w.id"
+      " ORDER BY w.name",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "flash"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT f.id, f.name, COUNT(i.id)"
+      " FROM main.flash AS f"
+      " LEFT JOIN main.images AS i ON i.flash_id = f.id"
+      " WHERE f.name LIKE ?1"
+      " GROUP BY f.id"
+      " ORDER BY f.name",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "exposure_program"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT ep.id, ep.name, COUNT(i.id)"
+      " FROM main.exposure_program AS ep"
+      " LEFT JOIN main.images AS i ON i.exposure_program_id = ep.id"
+      " WHERE ep.name LIKE ?1"
+      " GROUP BY ep.id"
+      " ORDER BY ep.name",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "metering_mode"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT mm.id, mm.name, COUNT(i.id)"
+      " FROM main.metering_mode AS mm"
+      " LEFT JOIN main.images AS i ON i.metering_mode_id = mm.id"
+      " WHERE mm.name LIKE ?1"
+      " GROUP BY mm.id"
+      " ORDER BY mm.name",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "group"))
+  {
+    // Show group leaders that have grouped images
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT i2.group_id, i2.filename, COUNT(*)"
+      " FROM main.images AS i2"
+      " WHERE i2.id != i2.group_id"
+      "   AND i2.filename LIKE ?1"
+      " GROUP BY i2.group_id"
+      " ORDER BY COUNT(*) DESC"
+      " LIMIT 200",
+      -1, &stmt, NULL);
+    // clang-format on
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, like_pattern, -1, SQLITE_TRANSIENT);
+  }
+  else if(!g_strcmp0(property, "history"))
+  {
+    // clang-format off
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "SELECT CASE WHEN i.history_end > 0 THEN 1 ELSE 0 END AS altered,"
+      " CASE WHEN i.history_end > 0 THEN 'altered' ELSE 'not altered' END,"
+      " COUNT(*)"
+      " FROM main.images AS i"
+      " GROUP BY altered"
+      " ORDER BY altered",
+      -1, &stmt, NULL);
+    // clang-format on
+  }
+  else
+  {
+    g_free(like_pattern);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Unknown property");
+  }
+
+  JsonBuilder *cv = json_builder_new();
+  json_builder_begin_object(cv);
+  json_builder_set_member_name(cv, "values");
+  json_builder_begin_array(cv);
+
+  while(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    json_builder_begin_object(cv);
+
+    json_builder_set_member_name(cv, "id");
+    if(sqlite3_column_type(stmt, 0) == SQLITE_INTEGER)
+      json_builder_add_int_value(cv, sqlite3_column_int(stmt, 0));
+    else
+    {
+      const char *id_str = (const char *)sqlite3_column_text(stmt, 0);
+      json_builder_add_string_value(cv, id_str ? id_str : "");
+    }
+
+    json_builder_set_member_name(cv, "label");
+    const char *label = (const char *)sqlite3_column_text(stmt, 1);
+    json_builder_add_string_value(cv, label ? label : "");
+
+    json_builder_set_member_name(cv, "count");
+    json_builder_add_int_value(cv, sqlite3_column_int(stmt, 2));
+
+    json_builder_end_object(cv);
+  }
+  sqlite3_finalize(stmt);
+  g_free(like_pattern);
+
+  json_builder_end_array(cv);
+  json_builder_end_object(cv);
+
+  JsonNode *cv_result = json_builder_get_root(cv);
+  char *cv_resp = dt_server_make_response(req->id, cv_result);
+  json_node_unref(cv_result);
+  g_object_unref(cv);
+  return cv_resp;
 }

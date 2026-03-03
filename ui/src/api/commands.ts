@@ -4,7 +4,10 @@ import type {
   SessionInfo,
   PreviewResult,
   PreviewFrameResult,
+  FilmRoll,
+  Tag,
 } from "../types/protocol";
+import type { CollectionRuleParam, PropertyValue } from "../types/collections";
 import type { FolderEntry, FileEntry } from "../types/import";
 
 // webview_bind() creates these as global async functions on window.
@@ -13,7 +16,7 @@ import type { FolderEntry, FileEntry } from "../types/import";
 declare global {
   interface Window {
     ping: () => Promise<unknown>;
-    catalogQuery: (offset: number, limit: number) => Promise<CatalogQueryResult>;
+    catalogQuery: (offset: number, limit: number, rules?: CollectionRuleParam[]) => Promise<CatalogQueryResult>;
     catalogGetThumbnail: (imgid: number) => Promise<ThumbnailResult>;
     developOpen: (imgid: number, width: number, height: number) => Promise<SessionInfo>;
     developClose: (sessionId: string) => Promise<unknown>;
@@ -28,6 +31,9 @@ declare global {
     copyAndImportImages: (paths: string[]) => Promise<{ imported: number; skipped: number }>;
     getFileThumbnail: (path: string) => Promise<{ path: string; mime: string; data: string }>;
     getPlatformInfo: () => Promise<{ os: "macos" | "windows" | "linux" }>;
+    catalogGetCollectionValues: (property: string, filter: string) => Promise<{ values: PropertyValue[] }>;
+    catalogGetFilmrolls: () => Promise<{ filmrolls: FilmRoll[] }>;
+    catalogGetTags: () => Promise<{ tags: Tag[] }>;
   }
 }
 
@@ -35,8 +41,8 @@ export type PlatformOS = "macos" | "windows" | "linux";
 
 export const ping = () => window.ping();
 
-export const catalogQuery = (offset: number, limit: number) =>
-  window.catalogQuery(offset, limit);
+export const catalogQuery = (offset: number, limit: number, rules?: CollectionRuleParam[]) =>
+  window.catalogQuery(offset, limit, rules);
 
 export const catalogGetThumbnail = (imgid: number) =>
   window.catalogGetThumbnail(imgid);
@@ -75,3 +81,10 @@ export const copyAndImportImages = (paths: string[]) => window.copyAndImportImag
 export const getFileThumbnail = (path: string) => window.getFileThumbnail(path);
 
 export const getPlatformInfo = () => window.getPlatformInfo();
+
+export const catalogGetCollectionValues = (property: string, filter: string) =>
+  window.catalogGetCollectionValues(property, filter);
+
+export const catalogGetFilmrolls = () => window.catalogGetFilmrolls();
+
+export const catalogGetTags = () => window.catalogGetTags();

@@ -806,6 +806,19 @@ body {
   color: var(--fg-color);
 }
 
+.bauhaus-combo-group-header {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-color);
+  cursor: default;
+  user-select: none;
+}
+
+.bauhaus-combo-option-grouped {
+  padding-left: 20px;
+}
+
 .dt-input {
   background-color: var(--field-bg);
   color: var(--field-fg);
@@ -1595,4 +1608,216 @@ button.module-action-btn {
 .bauhaus-button-primary:disabled:hover {
   background-color: var(--grey-45);
   color: var(--grey-90);
+}
+
+/* ── Collections module ──────────────────────────────────────── */
+
+.collection-rules {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Each rule row: optional mode combo + fields row */
+.collection-rule-row {
+  display: flex;
+  flex-direction: column;
+}
+.collection-rule-row + .collection-rule-row {
+  margin-top: 2px;
+}
+
+/* AND/OR/AND_NOT combo between rules */
+.collection-rule-mode {
+  padding: 2px 0;
+}
+.collection-rule-mode .bauhaus-combo {
+  height: 20px;
+  font-size: 10px;
+}
+
+/* Horizontal row: property combo + text input + action btn */
+.collection-rule-fields {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  cursor: pointer;
+  height: 22px;
+}
+
+/* Property combo takes 40% width */
+.collection-rule-property {
+  flex: 0 0 40%;
+  min-width: 0;
+  display: flex;
+}
+.collection-rule-property .bauhaus-combo {
+  flex: 1;
+}
+.collection-rule-property .bauhaus-combo-value {
+  text-align: left;
+}
+
+/* Input takes remaining space */
+.collection-rule-fields .bauhaus-input {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  padding: 0;
+}
+
+/* Action buttons (X remove / arrow-down select) */
+.collection-rule-action {
+  flex-shrink: 0;
+  width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 2px;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+  padding: 0;
+}
+.collection-rule-action:hover {
+  color: var(--fg-color);
+  background: var(--hovered-bg-color);
+}
+
+/* Transparent overlay behind popup to catch outside clicks */
+.collection-action-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+}
+
+/* Action popup menu — combo-style, fixed position to escape overflow */
+.collection-action-popup {
+  position: fixed;
+  background-color: var(--bauhaus-bg);
+  border-radius: 4px;
+  padding: 3px 0;
+  z-index: 1000;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.collection-action-popup-item {
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+}
+.collection-action-popup-item:hover {
+  color: var(--fg-color);
+}
+
+/* Values list for active rule */
+.collection-values-list {
+  height: 180px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: var(--bauhaus-bg);
+  margin-top: 2px;
+}
+
+.collection-value-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--plugin-label-color);
+}
+.collection-value-item:hover {
+  color: var(--fg-color);
+  background: var(--plugin-bg-color);
+}
+.collection-value-item[data-selected="true"] {
+  color: var(--fg-color);
+}
+.collection-value-item[data-selected="true"] .collection-value-count {
+  color: var(--fg-color);
+}
+
+.collection-value-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.collection-value-count {
+  flex-shrink: 0;
+  margin-left: 8px;
+  color: var(--disabled-fg-color);
+  font-size: 10px;
+}
+
+.collection-values-loading {
+  padding: 4px 6px;
+  font-size: 11px;
+  color: var(--disabled-fg-color);
+  font-style: italic;
+}
+
+/* Folder tree toggle */
+.folder-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+  color: var(--plugin-label-color);
+}
+.folder-tree-toggle:hover {
+  color: var(--fg-color);
+}
+.folder-tree-spacer {
+  cursor: default;
+}
+
+/* Bottom bar: history button aligned right */
+.collection-bottom-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 4px;
+  position: relative;
+}
+.collection-bottom-bar .bauhaus-button {
+  width: auto;
+}
+
+.collection-history-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--popover-bg-color, var(--bg-color));
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+  padding: 2px 0;
+  z-index: 100;
+  margin-bottom: 2px;
+}
+
+.collection-history-empty {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--disabled-fg-color);
+}
+.collection-history-item {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg-color);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.collection-history-item:hover {
+  background: var(--hovered-bg-color);
 }

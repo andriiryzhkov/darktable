@@ -173,16 +173,42 @@ static void on_catalog_query(const char *id, const char *req, void *arg)
   JsonArray *args = _parse_args(req, &parser);
   if(!args || json_array_get_length(args) < 2)
   {
-    _return_error(ctx, id, "catalogQuery requires (offset, limit)");
+    _return_error(ctx, id, "catalogQuery requires (offset, limit[, rules])");
     if(parser) g_object_unref(parser);
     return;
   }
 
   gint64 offset = json_array_get_int_element(args, 0);
   gint64 limit = json_array_get_int_element(args, 1);
+
+  // Optional 3rd arg: rules array
+  char *rules_json = NULL;
+  if(json_array_get_length(args) >= 3)
+  {
+    JsonNode *rules_node = json_array_get_element(args, 2);
+    if(rules_node && JSON_NODE_HOLDS_ARRAY(rules_node))
+    {
+      JsonGenerator *gen = json_generator_new();
+      json_generator_set_root(gen, rules_node);
+      rules_json = json_generator_to_data(gen, NULL);
+      g_object_unref(gen);
+    }
+  }
   g_object_unref(parser);
 
-  char *params = g_strdup_printf("{\"offset\":%" G_GINT64_FORMAT ",\"limit\":%" G_GINT64_FORMAT "}", offset, limit);
+  char *params;
+  if(rules_json)
+  {
+    params = g_strdup_printf("{\"offset\":%" G_GINT64_FORMAT
+                             ",\"limit\":%" G_GINT64_FORMAT
+                             ",\"rules\":%s}", offset, limit, rules_json);
+    g_free(rules_json);
+  }
+  else
+  {
+    params = g_strdup_printf("{\"offset\":%" G_GINT64_FORMAT
+                             ",\"limit\":%" G_GINT64_FORMAT "}", offset, limit);
+  }
   _ipc_passthrough(ctx, id, "catalog.query", params);
   g_free(params);
 }
@@ -916,6 +942,63 @@ static void on_get_home_path(const char *id, const char *req, void *arg)
   }
 }
 
+/* ── Collection values via IPC ─────────────────────────────────── */
+
+static void on_catalog_get_collection_values(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "catalogGetCollectionValues requires (property[, filter])");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  const char *property = json_array_get_string_element(args, 0);
+  const char *filter = "";
+  if(json_array_get_length(args) >= 2)
+    filter = json_array_get_string_element(args, 1);
+
+  /* Escape strings for JSON */
+  JsonNode *pnode = json_node_new(JSON_NODE_VALUE);
+  json_node_set_string(pnode, property);
+  JsonNode *fnode = json_node_new(JSON_NODE_VALUE);
+  json_node_set_string(fnode, filter);
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, pnode);
+  char *prop_esc = json_generator_to_data(gen, NULL);
+  json_generator_set_root(gen, fnode);
+  char *filt_esc = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  json_node_unref(pnode);
+  json_node_unref(fnode);
+
+  char *params = g_strdup_printf("{\"property\":%s,\"filter\":%s}", prop_esc, filt_esc);
+  g_free(prop_esc);
+  g_free(filt_esc);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, "catalog.get_collection_values", params);
+  g_free(params);
+}
+
+/* Existing filmrolls/tags endpoints are already served via server routes.
+   We add simple passthrough bindings for them. */
+
+static void on_catalog_get_filmrolls(const char *id, const char *req, void *arg)
+{
+  (void)req;
+  _ipc_passthrough(arg, id, "catalog.get_filmrolls", "{}");
+}
+
+static void on_catalog_get_tags(const char *id, const char *req, void *arg)
+{
+  (void)req;
+  _ipc_passthrough(arg, id, "catalog.get_tags", "{}");
+}
+
 /* ── Platform info ─────────────────────────────────────────────── */
 
 static void on_get_platform_info(const char *id, const char *req, void *arg)
@@ -1170,4 +1253,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "copyAndImportImages", on_copy_import_images, ctx);
   webview_bind(ctx->webview, "getFileThumbnail", on_get_file_thumbnail, ctx);
   webview_bind(ctx->webview, "getPlatformInfo", on_get_platform_info, ctx);
+  webview_bind(ctx->webview, "catalogGetCollectionValues", on_catalog_get_collection_values, ctx);
+  webview_bind(ctx->webview, "catalogGetFilmrolls", on_catalog_get_filmrolls, ctx);
+  webview_bind(ctx->webview, "catalogGetTags", on_catalog_get_tags, ctx);
 }
