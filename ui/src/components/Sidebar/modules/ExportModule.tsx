@@ -1,5 +1,6 @@
 import { useState } from "react";
 import CollapsibleModule from "../CollapsibleModule";
+import ModuleButton from "../controls/ModuleButton";
 import ModuleCombo from "../controls/ModuleCombo";
 import ModuleRow from "../controls/ModuleRow";
 import ModuleSlider from "../controls/ModuleSlider";
@@ -44,18 +45,7 @@ export default function ExportModule() {
           options={["perceptual", "relative colorimetric", "saturation"]}
         />
         <ModuleCombo label="style" options={["none"]} />
-        <div className="mt-2">
-          <button
-            className="w-full py-1.5 text-xs rounded"
-            style={{
-              backgroundColor: "var(--button-bg)",
-              color: "var(--button-fg)",
-              border: "1px solid var(--button-border)",
-            }}
-          >
-            Export
-          </button>
-        </div>
+        <ModuleButton label="export" />
       </div>
     </CollapsibleModule>
   );
