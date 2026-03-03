@@ -216,6 +216,42 @@ body {
   padding: 4px 8px 6px;
 }
 
+/* Info rows (read-only label: value display) */
+.info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 1px 0;
+  font-size: 0.75rem;
+}
+
+.info-row-label {
+  color: var(--plugin-label-color);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.info-row-value {
+  color: var(--fg-color);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.info-row:hover .info-row-label,
+.info-row:hover .info-row-value {
+  color: var(--fg-color);
+}
+
 /* Module collapsible section */
 .module-section {
   background-color: var(--collapsible-bg-color);
