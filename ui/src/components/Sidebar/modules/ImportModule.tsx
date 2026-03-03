@@ -1,9 +1,7 @@
 import CollapsibleModule from "../CollapsibleModule";
-import ModuleCombo from "../controls/ModuleCombo";
-import ModuleRow from "../controls/ModuleRow";
+import ModuleCheckbox from "../controls/ModuleCheckbox";
+import ModuleInput from "../controls/ModuleInput";
 import ModuleSection from "../controls/ModuleSection";
-import ModuleSlider from "../controls/ModuleSlider";
-import ModuleTextInput from "../controls/ModuleTextInput";
 
 export default function ImportModule() {
   return (
@@ -32,46 +30,32 @@ export default function ImportModule() {
           </button>
         </div>
         <ModuleSection title="parameters">
-          <ModuleCombo label="ignore EXIF rating" options={["no", "yes"]} />
-          <ModuleSlider
-            label="initial rating"
-            min={0}
-            max={5}
-            step={1}
-            defaultValue={1}
-            value={1}
-            format={(v) => String(Math.round(v))}
-          />
-          <ModuleCombo label="apply metadata" options={["yes", "no"]} />
-          <ModuleCombo
-            label="metadata preset"
-            options={["all rights reserved", "CC BY", "CC BY-SA", "public domain"]}
-          />
-          <ModuleRow label="title">
-            <ModuleTextInput value="" />
-          </ModuleRow>
-          <ModuleRow label="description">
-            <ModuleTextInput value="" />
-          </ModuleRow>
-          <ModuleRow label="creator">
-            <ModuleTextInput value="" />
-          </ModuleRow>
-          <ModuleRow label="publisher">
-            <ModuleTextInput value="" />
-          </ModuleRow>
-          <ModuleRow label="rights">
-            <ModuleTextInput value="all rights reserved" />
-          </ModuleRow>
-          <ModuleRow label="notes">
-            <ModuleTextInput value="" />
-          </ModuleRow>
-          <ModuleRow label="version name">
-            <ModuleTextInput value="" />
-          </ModuleRow>
-          <ModuleCombo label="tag presets" options={["none"]} />
-          <ModuleRow label="tags">
-            <ModuleTextInput value="" />
-          </ModuleRow>
+          <div className="bauhaus-input-group">
+            <ModuleCheckbox label="ignore EXIF rating" />
+            <ModuleInput
+              label="initial rating"
+              type="integer"
+              min={0}
+              max={5}
+              step={1}
+              value={1}
+            />
+            <ModuleCheckbox label="apply metadata" checked />
+            <ModuleInput
+              label="metadata preset"
+              type="select"
+              options={["all rights reserved", "CC BY", "CC BY-SA", "public domain"]}
+            />
+            <ModuleInput label="title" value="" />
+            <ModuleInput label="description" value="" />
+            <ModuleInput label="creator" value="" />
+            <ModuleInput label="publisher" value="" />
+            <ModuleInput label="rights" value="all rights reserved" />
+            <ModuleInput label="notes" value="" />
+            <ModuleInput label="version name" value="" />
+            <ModuleInput label="tag presets" type="select" options={["none"]} />
+            <ModuleInput label="tags" value="" />
+          </div>
         </ModuleSection>
       </div>
     </CollapsibleModule>

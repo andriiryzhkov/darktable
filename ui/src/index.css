@@ -305,6 +305,9 @@ body {
 .bauhaus-slider-label {
   font-size: 0.75rem;
   color: var(--plugin-label-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bauhaus-slider:hover .bauhaus-slider-label {
@@ -369,6 +372,204 @@ body {
   color: var(--plugin-label-color);
 }
 
+/* Bauhaus checkbox */
+.bauhaus-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 0;
+  margin-bottom: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.bauhaus-checkbox-label {
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bauhaus-checkbox:hover .bauhaus-checkbox-label {
+  color: var(--fg-color);
+}
+
+.bauhaus-checkbox-box {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background-color: var(--plugin-bg-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bauhaus-checkbox-box svg {
+  width: 10px;
+  height: 10px;
+  stroke: var(--fg-color);
+}
+
+.bauhaus-checkbox:hover .bauhaus-checkbox-box {
+  background-color: var(--grey-45);
+}
+
+/* Bauhaus text input */
+.bauhaus-input {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 1px;
+  padding: 1px 0;
+}
+
+.bauhaus-input-label {
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bauhaus-input:hover .bauhaus-input-label {
+  color: var(--fg-color);
+}
+
+.bauhaus-input-field {
+  flex: 1;
+  min-width: 0;
+  background-color: var(--plugin-bg-color);
+  color: var(--plugin-label-color);
+  border: none;
+  padding: 2px 4px;
+  font-size: 0.75rem;
+  border-radius: 2px;
+  font-family: inherit;
+}
+
+.bauhaus-input-field:focus {
+  color: var(--fg-color);
+  outline: none;
+}
+
+.bauhaus-input:hover .bauhaus-input-field {
+  color: var(--fg-color);
+}
+
+.bauhaus-input-field-number {
+  text-align: center;
+  flex: 0 1 auto;
+  width: 32px;
+}
+
+.bauhaus-input-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  background: var(--plugin-bg-color);
+  border: none;
+  border-radius: 2px;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+  padding: 0;
+}
+
+.bauhaus-input-step svg {
+  width: 8px;
+  height: 8px;
+}
+
+.bauhaus-input-step:hover {
+  color: var(--fg-color);
+}
+
+.bauhaus-input-step:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Bauhaus input select variant */
+.bauhaus-input-select {
+  position: relative;
+}
+
+.bauhaus-input-field-select {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.bauhaus-input-select-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bauhaus-input-select-arrow {
+  width: 8px;
+  height: 5px;
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: inherit;
+}
+
+.bauhaus-input-field-select {
+  position: relative;
+}
+
+.bauhaus-input-select-popup {
+  position: absolute;
+  top: -2px;
+  left: -4px;
+  right: -4px;
+  z-index: 100;
+  background-color: var(--bauhaus-bg);
+  border-radius: 4px;
+  padding: 3px 0;
+  max-height: 200px;
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.bauhaus-input-select-option {
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bauhaus-input-select-option:hover {
+  color: var(--fg-color);
+}
+
+.bauhaus-input-select-option[data-selected="true"] {
+  color: var(--fg-color);
+}
+
+/* Bauhaus input group — aligns labels to a fixed width */
+.bauhaus-input-group .bauhaus-input-label,
+.bauhaus-input-group .bauhaus-checkbox-label {
+  width: 35%;
+  max-width: 100px;
+  min-width: 30px;
+  flex-shrink: 1;
+}
+
+.bauhaus-input-group .bauhaus-checkbox {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
 /* Bauhaus combobox */
 .bauhaus-combo {
   display: flex;
@@ -397,6 +598,9 @@ body {
   font-size: 0.75rem;
   color: var(--plugin-label-color);
   flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bauhaus-combo:hover .bauhaus-combo-label {
