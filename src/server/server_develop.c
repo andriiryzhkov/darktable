@@ -49,7 +49,7 @@ static dt_server_session_t *_find_free_session_slot(dt_server_t *server)
 
   dt_server_session_t *session = g_new0(dt_server_session_t, 1);
   snprintf(session->session_id, sizeof(session->session_id),
-           "dev-%03d", server->session_count);
+           "dev-%03d", server->next_session_id++);
   server->sessions[server->session_count] = session;
   server->session_count++;
   return session;
@@ -98,6 +98,17 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
 
   // Load image: instantiates modules, loads history from DB
   dt_dev_load_image(&session->dev, imgid);
+
+  // Validate the image was loaded successfully
+  if(!dt_is_valid_imgid(session->dev.image_storage.id))
+  {
+    dt_dev_cleanup(&session->dev);
+    server->sessions[server->session_count - 1] = NULL;
+    server->session_count--;
+    g_free(session);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND,
+                                 "Failed to load image into develop");
+  }
 
   // Configure viewport for requested preview dimensions
   session->dev.full.zoom = DT_ZOOM_FIT;
@@ -169,6 +180,8 @@ char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *re
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
 
   const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
   dt_server_session_t *session = dt_server_find_session(server, session_id);
   if(!session)
     return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
@@ -217,6 +230,8 @@ char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
 
   const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
   dt_server_session_t *session = dt_server_find_session(server, session_id);
   if(!session)
     return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
@@ -273,6 +288,8 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
 
   const char *session_id = json_object_get_string_member(req->params, "session_id");
   const char *op = json_object_get_string_member(req->params, "op");
+  if(!session_id || !op)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id and op must be strings");
 
   dt_server_session_t *session = dt_server_find_session(server, session_id);
   if(!session)
@@ -350,7 +367,11 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
 
   const char *session_id = json_object_get_string_member(req->params, "session_id");
   const char *op = json_object_get_string_member(req->params, "op");
+  if(!session_id || !op)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id and op must be strings");
   JsonObject *new_params = json_object_get_object_member(req->params, "params");
+  if(!new_params)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "params must be an object");
 
   dt_server_session_t *session = dt_server_find_session(server, session_id);
   if(!session)
@@ -422,6 +443,8 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
 
   const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
   dt_server_session_t *session = dt_server_find_session(server, session_id);
   if(!session)
     return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
@@ -434,14 +457,21 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
 
   dt_dev_process_image_job(&session->dev, &session->dev.full, pipe, -1, DT_DEVICE_CPU);
 
+  // Lock backbuf_mutex to safely access pipeline output
+  dt_pthread_mutex_lock(&pipe->backbuf_mutex);
+
   if(!pipe->backbuf || pipe->backbuf_width <= 0 || pipe->backbuf_height <= 0)
   {
+    dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
     return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL,
                                  "Pipeline processing failed — no output");
   }
 
+  const int rendered_width = pipe->backbuf_width;
+  const int rendered_height = pipe->backbuf_height;
+
   fprintf(stderr, "[server] develop.request_preview: rendered %dx%d\n",
-          pipe->backbuf_width, pipe->backbuf_height);
+          rendered_width, rendered_height);
 
   // Write to back buffer (the one client is NOT reading)
   const int back = 1 - session->front_buffer;
@@ -450,15 +480,15 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   session->frame_sequence++;
 
   // Update SHM header
-  dt_shm_write_header(shm, pipe->backbuf_width, pipe->backbuf_height,
+  dt_shm_write_header(shm, rendered_width, rendered_height,
                        DT_SHM_FORMAT_BGRA8, session->frame_sequence);
 
-  // Copy pixel data: backbuf is uint8_t RGBA (4 bytes/pixel) = BGRA8 in our SHM format
-  // Note: darktable outputs sRGB after colorout. The exact channel order
-  // depends on the pipeline (typically BGRA on output). Copy as-is.
+  // Copy pixel data while holding the lock
   uint8_t *dst = dt_shm_pixel_data(shm);
-  const size_t copy_size = (size_t)pipe->backbuf_width * pipe->backbuf_height * 4;
+  const size_t copy_size = (size_t)rendered_width * rendered_height * 4;
   memcpy(dst, pipe->backbuf, copy_size);
+
+  dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
 
   // Mark buffer as ready and swap
   __atomic_store_n(&shm->mapped->ready, 1, __ATOMIC_RELEASE);
@@ -477,10 +507,10 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
     json_builder_add_string_value(eb, shm->name);
 
     json_builder_set_member_name(eb, "width");
-    json_builder_add_int_value(eb, pipe->backbuf_width);
+    json_builder_add_int_value(eb, rendered_width);
 
     json_builder_set_member_name(eb, "height");
-    json_builder_add_int_value(eb, pipe->backbuf_height);
+    json_builder_add_int_value(eb, rendered_height);
 
     json_builder_set_member_name(eb, "sequence");
     json_builder_add_int_value(eb, session->frame_sequence);
@@ -501,10 +531,10 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   json_builder_add_string_value(b, session->session_id);
 
   json_builder_set_member_name(b, "width");
-  json_builder_add_int_value(b, pipe->backbuf_width);
+  json_builder_add_int_value(b, rendered_width);
 
   json_builder_set_member_name(b, "height");
-  json_builder_add_int_value(b, pipe->backbuf_height);
+  json_builder_add_int_value(b, rendered_height);
 
   json_builder_set_member_name(b, "sequence");
   json_builder_add_int_value(b, session->frame_sequence);

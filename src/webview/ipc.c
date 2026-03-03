@@ -16,7 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "ipc_client.h"
+#include "ipc.h"
 #include "server/server_protocol.h"
 
 #include <errno.h>
@@ -87,7 +87,10 @@ char *dt_ipc_request(int fd, pthread_mutex_t *mutex,
   }
   g_free(request);
 
-  // Read response(s), skipping events (id=null)
+  // Read response(s), skipping events (id=null).
+  // Limit event skips to prevent infinite loop if server only sends events.
+  const int max_event_skips = 1000;
+  int events_skipped = 0;
   while(TRUE)
   {
     char *frame = NULL;
@@ -120,6 +123,12 @@ char *dt_ipc_request(int fd, pthread_mutex_t *mutex,
       fprintf(stderr, "[webview] skipping event: %s\n",
               json_object_get_string_member(obj, "event"));
       g_object_unref(parser);
+      if(++events_skipped >= max_event_skips)
+      {
+        if(out_error) *out_error = g_strdup("too many events without a response");
+        pthread_mutex_unlock(mutex);
+        return NULL;
+      }
       continue;
     }
 

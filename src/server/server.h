@@ -74,6 +74,7 @@ struct dt_server_t
   // Develop sessions
   dt_server_session_t *sessions[DT_SERVER_MAX_SESSIONS];
   int session_count;
+  int next_session_id;  // monotonic counter for unique session IDs
 
   // Event queue (signal callbacks push here, event loop drains to socket)
   GAsyncQueue *event_queue;

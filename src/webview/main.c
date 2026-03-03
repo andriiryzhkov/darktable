@@ -16,8 +16,8 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "webview_bindings.h"
-#include "ipc_client.h"
+#include "bindings.h"
+#include "ipc.h"
 
 #include <glib.h>
 #include <signal.h>
@@ -299,11 +299,23 @@ int main(int argc, char *argv[])
       waitpid(ctx.server_pid, NULL, 0);
       return 1;
     }
-    char *url = g_strdup_printf("file://%s", index_path);
+    // Resolve to absolute path for file:// URL
+    char resolved[PATH_MAX];
+    if(!realpath(index_path, resolved))
+    {
+      fprintf(stderr, "ERROR: cannot resolve path %s: %s\n", index_path, strerror(errno));
+      g_free(index_path);
+      webview_destroy(ctx.webview);
+      close(ctx.socket_fd);
+      kill(ctx.server_pid, SIGTERM);
+      waitpid(ctx.server_pid, NULL, 0);
+      return 1;
+    }
+    g_free(index_path);
+    char *url = g_strdup_printf("file://%s", resolved);
     fprintf(stderr, "[webview] navigating to %s\n", url);
     webview_navigate(ctx.webview, url);
     g_free(url);
-    g_free(index_path);
   }
 
   // Run event loop (blocks until window is closed)

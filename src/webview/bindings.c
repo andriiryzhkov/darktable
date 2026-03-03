@@ -16,8 +16,8 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "webview_bindings.h"
-#include "ipc_client.h"
+#include "bindings.h"
+#include "ipc.h"
 #include "server/server_protocol.h"
 
 #include <errno.h>
@@ -62,12 +62,16 @@ static void _return_ok(dt_webview_ctx_t *ctx, const char *id, const char *json_r
 
 static void _return_error(dt_webview_ctx_t *ctx, const char *id, const char *msg)
 {
-  // Escape the message for JSON string
-  char *escaped = g_strescape(msg, NULL);
-  char *json = g_strdup_printf("\"%s\"", escaped);
+  // Use json-glib to properly escape the message for JSON
+  JsonNode *node = json_node_new(JSON_NODE_VALUE);
+  json_node_set_string(node, msg);
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, node);
+  char *json = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  json_node_unref(node);
   webview_return(ctx->webview, id, 1, json);
   g_free(json);
-  g_free(escaped);
 }
 
 // Helper: parse JSON array string into a JsonArray.
@@ -139,7 +143,16 @@ static void _ipc_passthrough(dt_webview_ctx_t *ctx, const char *id,
   pt->params_json = g_strdup(params_json ? params_json : "{}");
 
   pthread_t thread;
-  pthread_create(&thread, NULL, _ipc_passthrough_worker, pt);
+  if(pthread_create(&thread, NULL, _ipc_passthrough_worker, pt) != 0)
+  {
+    fprintf(stderr, "[webview] pthread_create failed for %s: %s\n", method, strerror(errno));
+    _return_error(ctx, id, "internal error: failed to create worker thread");
+    g_free(pt->id);
+    g_free(pt->method);
+    g_free(pt->params_json);
+    g_free(pt);
+    return;
+  }
   pthread_detach(thread);
 }
 
@@ -304,7 +317,12 @@ static void on_develop_open(const char *id, const char *req, void *arg)
 {
   async_req_t *ar = _async_req_new(arg, id, req);
   pthread_t thread;
-  pthread_create(&thread, NULL, _develop_open_worker, ar);
+  if(pthread_create(&thread, NULL, _develop_open_worker, ar) != 0)
+  {
+    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
+    _async_req_free(ar);
+    return;
+  }
   pthread_detach(thread);
 }
 
@@ -369,7 +387,12 @@ static void on_develop_close(const char *id, const char *req, void *arg)
 {
   async_req_t *ar = _async_req_new(arg, id, req);
   pthread_t thread;
-  pthread_create(&thread, NULL, _develop_close_worker, ar);
+  if(pthread_create(&thread, NULL, _develop_close_worker, ar) != 0)
+  {
+    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
+    _async_req_free(ar);
+    return;
+  }
   pthread_detach(thread);
 }
 
@@ -497,7 +520,8 @@ static void *_get_preview_frame_worker(void *arg)
 
   uint32_t w = header->width;
   uint32_t h = header->height;
-  size_t pixel_size = (size_t)w * (size_t)h * 4;
+  uint32_t stride = header->stride;
+  size_t pixel_size = (size_t)stride * (size_t)h;
   uint8_t *pixels = (uint8_t *)ptr + DT_SHM_HEADER_SIZE;
 
   // Base64 encode pixels
@@ -518,7 +542,12 @@ static void on_get_preview_frame(const char *id, const char *req, void *arg)
 {
   async_req_t *ar = _async_req_new(arg, id, req);
   pthread_t thread;
-  pthread_create(&thread, NULL, _get_preview_frame_worker, ar);
+  if(pthread_create(&thread, NULL, _get_preview_frame_worker, ar) != 0)
+  {
+    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
+    _async_req_free(ar);
+    return;
+  }
   pthread_detach(thread);
 }
 

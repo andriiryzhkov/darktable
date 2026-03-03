@@ -41,6 +41,8 @@ char *dt_server_export_image(dt_server_t *server, const dt_server_request_t *req
 
   const dt_imgid_t imgid = (dt_imgid_t)json_object_get_int_member(req->params, "imgid");
   const char *output_path = json_object_get_string_member(req->params, "output_path");
+  if(!output_path)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "output_path must be a string");
 
   // determine format from file extension
   const char *dot = strrchr(output_path, '.');

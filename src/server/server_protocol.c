@@ -271,7 +271,7 @@ char *dt_server_make_response(const char *id, JsonNode *result)
   json_builder_add_string_value(b, id ? id : "");
   json_builder_set_member_name(b, "result");
   if(result)
-    json_builder_add_value(b, result);
+    json_builder_add_value(b, json_node_copy(result));
   else
     json_builder_add_null_value(b);
   json_builder_set_member_name(b, "error");
@@ -319,7 +319,7 @@ char *dt_server_make_event(const char *event_name, JsonNode *data)
   json_builder_add_string_value(b, event_name);
   json_builder_set_member_name(b, "data");
   if(data)
-    json_builder_add_value(b, data);
+    json_builder_add_value(b, json_node_copy(data));
   else
     json_builder_add_null_value(b);
   json_builder_end_object(b);

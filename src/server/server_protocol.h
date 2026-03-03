@@ -46,7 +46,7 @@ typedef struct dt_shm_header_t
   uint32_t format;       // dt_shm_format_t
   uint64_t sequence;     // monotonic frame counter
   uint32_t ready;        // atomic: 0 = writing, 1 = readable
-  uint32_t reserved[5];  // pad to 64 bytes
+  uint32_t reserved[7];  // pad to 64 bytes
   // pixel data follows at offset DT_SHM_HEADER_SIZE
 } dt_shm_header_t;
 

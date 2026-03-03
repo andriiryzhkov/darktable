@@ -21,8 +21,8 @@ pkg_check_modules(JSON_GLIB REQUIRED json-glib-1.0)
 
 set(WEBVIEW_HOST_SOURCES
   main.c
-  ipc_client.c
-  webview_bindings.c
+  ipc.c
+  bindings.c
   ../server/server_protocol.c
 )
 
