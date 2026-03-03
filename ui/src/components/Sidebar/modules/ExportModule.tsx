@@ -1,7 +1,7 @@
 import { useState } from "react";
 import CollapsibleModule from "../CollapsibleModule";
+import ModuleCombo from "../controls/ModuleCombo";
 import ModuleRow from "../controls/ModuleRow";
-import ModuleSelect from "../controls/ModuleSelect";
 import ModuleSlider from "../controls/ModuleSlider";
 import ModuleTextInput from "../controls/ModuleTextInput";
 
@@ -11,18 +11,15 @@ export default function ExportModule() {
   return (
     <CollapsibleModule title="export" defaultOpen>
       <div className="space-y-1">
-        <ModuleRow label="target storage">
-          <ModuleSelect options={["file on disk"]} />
-        </ModuleRow>
+        <ModuleCombo label="target storage" options={["file on disk"]} />
         <ModuleRow label="">
           <ModuleTextInput value="Export/$(FILE_NAME)$(VERSION)" />
         </ModuleRow>
-        <ModuleRow label="on conflict">
-          <ModuleSelect options={["create unique filename"]} />
-        </ModuleRow>
-        <ModuleRow label="file format">
-          <ModuleSelect options={["JPEG (8 bit)", "PNG (8 bit)", "TIFF (16 bit)", "EXR (32 bit)"]} />
-        </ModuleRow>
+        <ModuleCombo label="on conflict" options={["create unique filename"]} />
+        <ModuleCombo
+          label="file format"
+          options={["JPEG (8 bit)", "PNG (8 bit)", "TIFF (16 bit)", "EXR (32 bit)"]}
+        />
         <ModuleSlider
           label="quality"
           min={1}
@@ -32,33 +29,20 @@ export default function ExportModule() {
           onChange={setQuality}
           format={(v) => String(Math.round(v))}
         />
-        <ModuleRow label="chroma subsampling">
-          <ModuleSelect options={["auto"]} />
-        </ModuleRow>
-        <ModuleRow label="set size">
-          <ModuleSelect options={["by scale (for file)"]} />
-        </ModuleRow>
+        <ModuleCombo label="chroma subsampling" options={["auto"]} />
+        <ModuleCombo label="set size" options={["by scale (for file)"]} />
         <ModuleRow label="">
           <ModuleTextInput value="0.85" />
         </ModuleRow>
-        <ModuleRow label="allow upscaling">
-          <ModuleSelect options={["no", "yes"]} />
-        </ModuleRow>
-        <ModuleRow label="high quality resampling">
-          <ModuleSelect options={["yes", "no"]} />
-        </ModuleRow>
-        <ModuleRow label="store masks">
-          <ModuleSelect options={["no", "yes"]} />
-        </ModuleRow>
-        <ModuleRow label="profile">
-          <ModuleSelect options={["sRGB", "AdobeRGB", "ProPhoto RGB"]} />
-        </ModuleRow>
-        <ModuleRow label="intent">
-          <ModuleSelect options={["perceptual", "relative colorimetric", "saturation"]} />
-        </ModuleRow>
-        <ModuleRow label="style">
-          <ModuleSelect options={["none"]} />
-        </ModuleRow>
+        <ModuleCombo label="allow upscaling" options={["no", "yes"]} />
+        <ModuleCombo label="high quality resampling" options={["yes", "no"]} />
+        <ModuleCombo label="store masks" options={["no", "yes"]} />
+        <ModuleCombo label="profile" options={["sRGB", "AdobeRGB", "ProPhoto RGB"]} />
+        <ModuleCombo
+          label="intent"
+          options={["perceptual", "relative colorimetric", "saturation"]}
+        />
+        <ModuleCombo label="style" options={["none"]} />
         <div className="mt-2">
           <button
             className="w-full py-1.5 text-xs rounded"
