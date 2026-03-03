@@ -6,7 +6,7 @@ import ModuleSlider from "../controls/ModuleSlider";
 import ModuleTextInput from "../controls/ModuleTextInput";
 
 export default function ExportModule() {
-  const [quality, setQuality] = useState(97);
+  const [quality, setQuality] = useState(95);
 
   return (
     <CollapsibleModule title="export" defaultOpen>
@@ -25,6 +25,7 @@ export default function ExportModule() {
           min={1}
           max={100}
           step={1}
+          defaultValue={95}
           value={quality}
           onChange={setQuality}
           format={(v) => String(Math.round(v))}

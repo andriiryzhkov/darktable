@@ -6,6 +6,7 @@ interface ModuleSliderProps {
   min: number;
   max: number;
   step?: number;
+  defaultValue?: number;
   origin?: number;
   gradient?: string;
   format?: (v: number) => string;
@@ -25,6 +26,7 @@ export default function ModuleSlider({
   min,
   max,
   step = 0.01,
+  defaultValue,
   origin,
   gradient,
   format = defaultFormat,
@@ -45,6 +47,12 @@ export default function ModuleSlider({
     },
     [min, max, step, value],
   );
+
+  const onDoubleClick = useCallback(() => {
+    if (defaultValue !== undefined) {
+      onChange?.(defaultValue);
+    }
+  }, [defaultValue, onChange]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -82,6 +90,7 @@ export default function ModuleSlider({
     <div className="bauhaus-slider">
       <div
         className="bauhaus-slider-body"
+        onDoubleClick={onDoubleClick}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
