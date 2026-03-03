@@ -1,30 +1,34 @@
 import { useUIStore } from "../../stores/uiStore";
+import logoSrc from "../../assets/darktable-logo.png";
 
 export default function HeaderBar() {
   const { activeView, setActiveView } = useUIStore();
 
   return (
     <div
-      className="flex items-center justify-between px-3 shrink-0"
+      className="flex items-center justify-between px-4 shrink-0"
       style={{
-        height: 32,
+        height: 40,
         backgroundColor: "var(--plugin-bg-color)",
         borderBottom: "1px solid var(--border-color)",
       }}
     >
-      {/* Left: logo */}
+      {/* Left: logo + title + version */}
       <div className="flex items-center gap-2">
+        <img src={logoSrc} alt="darktable" width={22} height={22} />
         <span
-          className="text-sm tracking-wide"
-          style={{ color: "var(--fg-color)", fontWeight: 300 }}
+          className="text-sm"
+          style={{ color: "var(--fg-color)", fontWeight: 700 }}
         >
           darktable
         </span>
         <span
-          className="text-xs"
-          style={{ color: "var(--plugin-label-color)" }}
+          style={{
+            color: "var(--plugin-label-color)",
+            fontSize: "0.7em",
+          }}
         >
-          6.0
+          5.5.0
         </span>
       </div>
 
