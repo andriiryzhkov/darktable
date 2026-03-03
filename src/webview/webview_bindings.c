@@ -1,3 +1,21 @@
+/*
+    This file is part of darktable,
+    Copyright (C) 2026 darktable developers.
+
+    darktable is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    darktable is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with darktable.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include "webview_bindings.h"
 #include "ipc_client.h"
 #include "server/server_protocol.h"
@@ -12,7 +30,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-// ── async callback infrastructure ───────────────────────────────────────────
+/* async callback infrastructure */
 
 typedef struct async_req_t
 {
@@ -73,9 +91,7 @@ static JsonArray *_parse_args(const char *req, JsonParser **out_parser)
   return json_node_get_array(root);
 }
 
-// ── IPC passthrough helper ──────────────────────────────────────────────────
-
-// Generic worker: send method+params via IPC, return result to JS
+/* IPC passthrough: send method+params via IPC, return result to JS */
 typedef struct ipc_passthrough_t
 {
   dt_webview_ctx_t *ctx;
@@ -127,15 +143,11 @@ static void _ipc_passthrough(dt_webview_ctx_t *ctx, const char *id,
   pthread_detach(thread);
 }
 
-// ── ping ────────────────────────────────────────────────────────────────────
-
 static void on_ping(const char *id, const char *req, void *arg)
 {
   (void)req;
   _ipc_passthrough(arg, id, "system.ping", "{}");
 }
-
-// ── catalog.query ───────────────────────────────────────────────────────────
 
 static void on_catalog_query(const char *id, const char *req, void *arg)
 {
@@ -158,8 +170,6 @@ static void on_catalog_query(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
-// ── catalog.get_thumbnail ───────────────────────────────────────────────────
-
 static void on_catalog_get_thumbnail(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -179,8 +189,6 @@ static void on_catalog_get_thumbnail(const char *id, const char *req, void *arg)
   _ipc_passthrough(ctx, id, "catalog.get_thumbnail", params);
   g_free(params);
 }
-
-// ── develop.open ────────────────────────────────────────────────────────────
 
 static void *_develop_open_worker(void *arg)
 {
@@ -300,8 +308,6 @@ static void on_develop_open(const char *id, const char *req, void *arg)
   pthread_detach(thread);
 }
 
-// ── develop.close ───────────────────────────────────────────────────────────
-
 static void *_develop_close_worker(void *arg)
 {
   async_req_t *ar = arg;
@@ -367,8 +373,6 @@ static void on_develop_close(const char *id, const char *req, void *arg)
   pthread_detach(thread);
 }
 
-// ── develop.set_params ──────────────────────────────────────────────────────
-
 static void on_develop_set_params(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -400,8 +404,6 @@ static void on_develop_set_params(const char *id, const char *req, void *arg)
   g_free(ipc_params);
 }
 
-// ── develop.request_preview ─────────────────────────────────────────────────
-
 static void on_develop_request_preview(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -422,7 +424,7 @@ static void on_develop_request_preview(const char *id, const char *req, void *ar
   g_free(params);
 }
 
-// ── getPreviewFrame (SHM direct read, no IPC) ──────────────────────────────
+/* getPreviewFrame: reads pixels directly from SHM, no IPC */
 
 static void *_get_preview_frame_worker(void *arg)
 {
@@ -519,8 +521,6 @@ static void on_get_preview_frame(const char *id, const char *req, void *arg)
   pthread_create(&thread, NULL, _get_preview_frame_worker, ar);
   pthread_detach(thread);
 }
-
-// ── Registration ────────────────────────────────────────────────────────────
 
 void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
 {
