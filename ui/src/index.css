@@ -216,6 +216,47 @@ body {
   padding: 4px 8px 6px;
 }
 
+/* Module collapsible section */
+.module-section {
+  background-color: var(--collapsible-bg-color);
+  border-radius: 4px;
+  margin-bottom: 4px;
+}
+
+.module-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  gap: 4px;
+}
+
+.module-section-title {
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+}
+
+.module-section-header:hover .module-section-title {
+  color: var(--fg-color);
+}
+
+.module-section-chevron {
+  color: var(--plugin-label-color);
+  transition: transform 150ms ease;
+}
+
+.module-section-header:hover .module-section-chevron {
+  color: var(--fg-color);
+}
+
+.module-section-content {
+  padding: 2px 6px 6px;
+}
+
 /* Bauhaus-style controls */
 .dt-select {
   appearance: none;
