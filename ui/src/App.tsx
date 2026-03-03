@@ -18,8 +18,12 @@ function App() {
     setActiveView,
     leftSidebarOpen,
     rightSidebarOpen,
+    leftSidebarWidth,
+    rightSidebarWidth,
     toggleLeftSidebar,
     toggleRightSidebar,
+    setLeftSidebarWidth,
+    setRightSidebarWidth,
   } = useUIStore();
   const activeImgId = useCatalogStore((s) => {
     const ids = s.selectedIds;
@@ -84,7 +88,9 @@ function App() {
         <Sidebar
           side="left"
           open={leftSidebarOpen}
+          width={leftSidebarWidth}
           onToggle={toggleLeftSidebar}
+          onResize={setLeftSidebarWidth}
         >
           {activeView === "lighttable" && <LeftSidebarModules />}
         </Sidebar>
@@ -104,7 +110,9 @@ function App() {
         <Sidebar
           side="right"
           open={rightSidebarOpen}
+          width={rightSidebarWidth}
           onToggle={toggleRightSidebar}
+          onResize={setRightSidebarWidth}
         >
           {activeView === "lighttable" && <RightSidebarModules />}
         </Sidebar>

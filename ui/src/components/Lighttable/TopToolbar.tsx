@@ -5,64 +5,31 @@ export default function TopToolbar() {
   const { total, selectedIds } = useCatalogStore();
 
   return (
-    <div
-      className="flex items-center justify-between px-3 shrink-0"
-      style={{
-        height: 30,
-        backgroundColor: "var(--plugin-bg-color)",
-      }}
-    >
-      {/* Left: collection filter + rating/color filters */}
+    <div className="top-toolbar">
+      {/* Left: collection filter */}
       <div className="flex items-center gap-2">
-        <select
-          className="dt-select"
-          style={{ width: 120 }}
-          defaultValue="all"
-        >
+        <select className="dt-select top-toolbar-select" defaultValue="all">
           <option value="all">All images</option>
         </select>
-        <button
-          className="flex items-center justify-center"
-          style={{
-            width: 22,
-            height: 22,
-            color: "var(--plugin-label-color)",
-          }}
-          title="Filter"
-        >
-          <Filter size={12} />
+        <button className="toolbar-icon-btn" title="Filter">
+          <Filter size={11} />
         </button>
       </div>
 
       {/* Center: sort */}
       <div className="flex items-center gap-2">
-        <select
-          className="dt-select"
-          style={{ width: 120 }}
-          defaultValue="capture_time"
-        >
+        <select className="dt-select top-toolbar-select" defaultValue="capture_time">
           <option value="capture_time">capture time</option>
           <option value="filename">filename</option>
           <option value="import_time">import time</option>
         </select>
-        <button
-          className="flex items-center justify-center"
-          style={{
-            width: 22,
-            height: 22,
-            color: "var(--plugin-label-color)",
-          }}
-          title="Sort direction"
-        >
-          <ArrowUpDown size={12} />
+        <button className="toolbar-icon-btn" title="Sort direction">
+          <ArrowUpDown size={11} />
         </button>
       </div>
 
       {/* Right: selection info */}
-      <span
-        className="text-xs"
-        style={{ color: "var(--plugin-label-color)" }}
-      >
+      <span className="top-toolbar-info">
         {selectedIds.size} of {total} selected
       </span>
     </div>

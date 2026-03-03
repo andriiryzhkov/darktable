@@ -18,7 +18,7 @@ export default function CollapsibleModule({
     <div className="module-wrapper" data-open={open}>
       <button className="module-header" onClick={() => setOpen(!open)}>
         <ChevronRight
-          size={14}
+          size={12}
           className="module-chevron"
           style={{ transform: open ? "rotate(90deg)" : "none" }}
         />
@@ -29,10 +29,10 @@ export default function CollapsibleModule({
           onClick={(e) => e.stopPropagation()}
         >
           <span title="Reset" className="module-action-btn">
-            <RotateCcw size={12} />
+            <RotateCcw size={10} />
           </span>
           <span title="Presets" className="module-action-btn">
-            <Menu size={12} />
+            <Menu size={10} />
           </span>
         </span>
       </button>

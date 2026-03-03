@@ -8,8 +8,9 @@ function RejectIcon({ rejected }: { rejected: boolean }) {
   return (
     <Ban
       size={14}
+      className="thumb-status-icon"
       style={{
-        color: rejected ? "var(--colorlabel-red)" : "var(--thumbnail-font-color)",
+        color: rejected ? "var(--colorlabel-red)" : undefined,
         opacity: rejected ? 1 : 0.6,
         cursor: "pointer",
         flexShrink: 0,
@@ -47,7 +48,6 @@ export default function ThumbnailCard({
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Observe visibility — load thumbnail only when card enters viewport
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -59,13 +59,12 @@ export default function ThumbnailCard({
           observer.disconnect();
         }
       },
-      { rootMargin: "200px" }, // preload slightly before visible
+      { rootMargin: "200px" },
     );
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  // Fetch thumbnail JPEG only once visible
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -81,7 +80,6 @@ export default function ThumbnailCard({
     };
   }, [visible, imgid]);
 
-  // Extract file extension
   const dotIdx = filename.lastIndexOf(".");
   const ext = dotIdx > 0 ? filename.substring(dotIdx + 1) : "";
 
@@ -94,48 +92,32 @@ export default function ThumbnailCard({
       onDoubleClick={onDoubleClick}
     >
       <div className="thumb-back">
-        {/* File extension badge — visible on hover */}
         {ext && <span className="thumb-ext">{ext}</span>}
 
-        {/* Top-right status icons — visible on hover */}
         <div className="thumb-top-right">
           {altered && (
-            <span style={{ color: "var(--thumbnail-font-color)", fontSize: 10 }}>
+            <span className="thumb-status-icon">
               <Layers size={10} />
             </span>
           )}
           {localCopy && (
-            <span style={{ color: "var(--thumbnail-font-color)", fontSize: 10 }}>
+            <span className="thumb-status-icon">
               <Copy size={10} />
             </span>
           )}
           {groupId > 0 && (
-            <span style={{ color: "var(--thumbnail-font-color)", fontSize: 10 }}>
-              G
-            </span>
+            <span className="thumb-status-icon">G</span>
           )}
         </div>
 
-        {/* Image — fits square via CSS */}
         {src ? (
           <img src={src} alt={filename} draggable={false} />
         ) : (
-          <div
-            className="absolute inset-0 flex items-center justify-center"
-          >
-            {visible && (
-              <div
-                className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin"
-                style={{
-                  borderColor: "var(--plugin-label-color)",
-                  borderTopColor: "transparent",
-                }}
-              />
-            )}
+          <div className="absolute inset-0 flex items-center justify-center">
+            {visible && <div className="thumb-spinner" />}
           </div>
         )}
 
-        {/* Bottom overlay: reject left, stars center, color labels right */}
         <div className="thumb-bottom">
           <RejectIcon rejected={rating === 6} />
           <StarRating rating={rating} />
