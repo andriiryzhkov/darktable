@@ -12,6 +12,12 @@ export interface ImageInfo {
   iso: number;
   focal_length: number;
   folder: string;
+  // Extended fields (may be absent from older server responses)
+  rating?: number;        // 0-5, 6 = rejected
+  color_labels?: number;  // bitmask: bit0=red, bit1=yellow, bit2=green, bit3=blue, bit4=purple
+  group_id?: number;
+  altered?: boolean;
+  local_copy?: boolean;
 }
 
 export interface CatalogQueryResult {

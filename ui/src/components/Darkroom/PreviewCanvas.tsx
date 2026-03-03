@@ -31,7 +31,7 @@ export default function PreviewCanvas() {
 
   if (!frameData) {
     return (
-      <div className="text-[var(--text-secondary)]">
+      <div className="text-[var(--plugin-label-color)]">
         Rendering preview...
       </div>
     );

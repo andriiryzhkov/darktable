@@ -1,35 +1,51 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useCatalogStore } from "./stores/catalogStore";
+import { useUIStore } from "./stores/uiStore";
+import HeaderBar from "./components/Layout/HeaderBar";
+import Sidebar from "./components/Layout/Sidebar";
+import BottomBar from "./components/Layout/BottomBar";
+import LeftSidebarModules from "./components/Sidebar/LeftSidebarModules";
+import RightSidebarModules from "./components/Sidebar/RightSidebarModules";
 import LighttableView from "./components/Lighttable/LighttableView";
 import DarkroomView from "./components/Darkroom/DarkroomView";
 
-type View = "lighttable" | "darkroom";
-
 function App() {
-  const [view, setView] = useState<View>("lighttable");
-  const [activeImgId, setActiveImgId] = useState<number | null>(null);
   const { status, error, connect } = useConnectionStore();
-  const fetchPage = useCatalogStore((s) => s.fetchPage);
+  const fetchAll = useCatalogStore((s) => s.fetchAll);
+  const {
+    activeView,
+    setActiveView,
+    leftSidebarOpen,
+    rightSidebarOpen,
+    toggleLeftSidebar,
+    toggleRightSidebar,
+  } = useUIStore();
+  const activeImgId = useCatalogStore((s) => {
+    const ids = s.selectedIds;
+    return ids.size > 0 ? [...ids][0] : null;
+  });
 
   useEffect(() => {
-    connect().then(() => fetchPage(0));
-  }, [connect, fetchPage]);
+    connect().then(() => fetchAll());
+  }, [connect, fetchAll]);
 
-  const openDarkroom = useCallback((imgid: number) => {
-    setActiveImgId(imgid);
-    setView("darkroom");
-  }, []);
+  const openDarkroom = useCallback(
+    (imgid: number) => {
+      useCatalogStore.getState().selectImage(imgid);
+      setActiveView("darkroom");
+    },
+    [setActiveView],
+  );
 
   const backToLighttable = useCallback(() => {
-    setView("lighttable");
-    setActiveImgId(null);
-  }, []);
+    setActiveView("lighttable");
+  }, [setActiveView]);
 
   if (status === "connecting") {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-[var(--text-secondary)]">
+        <p style={{ color: "var(--plugin-label-color)" }}>
           Connecting to darktable server...
         </p>
       </div>
@@ -41,10 +57,16 @@ function App() {
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <p className="text-red-400 mb-2">Connection failed</p>
-          <p className="text-[var(--text-secondary)] text-sm">{error}</p>
+          <p className="text-sm mb-4" style={{ color: "var(--plugin-label-color)" }}>
+            {error}
+          </p>
           <button
             onClick={() => connect()}
-            className="mt-4 px-4 py-2 bg-[var(--accent)] rounded text-sm hover:bg-[var(--accent-hover)]"
+            className="px-4 py-2 rounded text-sm"
+            style={{
+              backgroundColor: "var(--button-bg)",
+              color: "var(--button-fg)",
+            }}
           >
             Retry
           </button>
@@ -54,12 +76,41 @@ function App() {
   }
 
   return (
-    <>
-      {view === "lighttable" && <LighttableView onOpenImage={openDarkroom} />}
-      {view === "darkroom" && activeImgId !== null && (
-        <DarkroomView imgid={activeImgId} onBack={backToLighttable} />
-      )}
-    </>
+    <div className="flex flex-col h-screen">
+      <HeaderBar />
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left sidebar */}
+        <Sidebar
+          side="left"
+          open={leftSidebarOpen}
+          onToggle={toggleLeftSidebar}
+        >
+          {activeView === "lighttable" && <LeftSidebarModules />}
+        </Sidebar>
+
+        {/* Center content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {activeView === "lighttable" && (
+            <LighttableView onOpenImage={openDarkroom} />
+          )}
+          {activeView === "darkroom" && activeImgId !== null && (
+            <DarkroomView imgid={activeImgId} onBack={backToLighttable} />
+          )}
+        </div>
+
+        {/* Right sidebar */}
+        <Sidebar
+          side="right"
+          open={rightSidebarOpen}
+          onToggle={toggleRightSidebar}
+        >
+          {activeView === "lighttable" && <RightSidebarModules />}
+        </Sidebar>
+      </div>
+
+      <BottomBar />
+    </div>
   );
 }
 

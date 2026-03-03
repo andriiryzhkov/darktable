@@ -1,0 +1,113 @@
+/*
+    darktable webview theme — elegant-dark
+
+    Based on the perceptually uniform grey gradient from
+    data/themes/darktable.css and the elegant-dark variant.
+
+    To create a new theme, copy this file and override the
+    semantic variables (leave the grey scale unchanged).
+*/
+
+:root {
+  /* Perceptually uniform grey gradient (LCH color space) */
+  --grey-00: #000000;
+  --grey-05: #111111;
+  --grey-10: #1b1b1b;
+  --grey-15: #262626;
+  --grey-20: #303030;
+  --grey-25: #3b3b3b;
+  --grey-30: #474747;
+  --grey-35: #525252;
+  --grey-40: #5e5e5e;
+  --grey-45: #6a6a6a;
+  --grey-50: #777777;
+  --grey-55: #848484;
+  --grey-60: #919191;
+  --grey-65: #9e9e9e;
+  --grey-70: #ababab;
+  --grey-75: #b9b9b9;
+  --grey-80: #c6c6c6;
+  --grey-85: #d4d4d4;
+  --grey-90: #e2e2e2;
+  --grey-95: #f1f1f1;
+  --grey-100: #ffffff;
+
+  /* ── General ────────────────────────────────── */
+  --bg-color: var(--grey-30);
+  --fg-color: var(--grey-80);
+  --border-color: var(--grey-25);
+  --disabled-fg-color: var(--grey-55);
+  --placeholder-text-color: var(--grey-60);
+
+  /* ── Scrollbars ─────────────────────────────── */
+  --scroll-bar-inactive: var(--grey-50);
+  --scroll-bar-active: var(--grey-70);
+  --scroll-bar-bg: var(--grey-25);
+
+  /* ── Sidebar / module panels ────────────────── */
+  --plugin-bg-color: var(--grey-35);
+  --plugin-label-color: var(--grey-70);
+  --collapsible-bg-color: var(--grey-40);
+
+  /* ── Bauhaus controls (sliders, comboboxes) ─── */
+  --bauhaus-bg: var(--grey-25);
+  --bauhaus-fill: var(--grey-55);
+  --bauhaus-fg: var(--grey-80);
+  --bauhaus-border: var(--grey-20);
+  --bauhaus-indicator-border: var(--grey-35);
+  --bauhaus-bg-hover: var(--grey-70);
+  --bauhaus-fg-hover: var(--grey-95);
+
+  /* ── Buttons ────────────────────────────────── */
+  --button-bg: var(--grey-40);
+  --button-fg: var(--grey-80);
+  --button-border: var(--grey-35);
+  --button-hover-bg: var(--grey-65);
+  --button-hover-fg: var(--grey-25);
+
+  /* ── Text fields ────────────────────────────── */
+  --field-bg: var(--grey-30);
+  --field-fg: var(--grey-80);
+  --field-active-bg: var(--grey-40);
+  --field-active-fg: var(--grey-90);
+  --field-selected-bg: var(--grey-50);
+  --field-selected-fg: var(--grey-95);
+
+  /* ── Tooltips ───────────────────────────────── */
+  --tooltip-bg: var(--grey-25);
+  --tooltip-fg: var(--grey-75);
+
+  /* ── Views ──────────────────────────────────── */
+  --darkroom-bg-color: var(--grey-50);
+  --lighttable-bg-color: var(--grey-45);
+  --lighttable-bg-font-color: var(--grey-85);
+
+  /* ── Thumbnails ─────────────────────────────── */
+  --thumbnail-bg-color: var(--grey-55);
+  --thumbnail-font-color: var(--grey-30);
+  --thumbnail-fg-color: var(--grey-60);
+  --thumbnail-selected-bg-color: var(--grey-75);
+  --thumbnail-hover-bg-color: var(--grey-90);
+  --thumbnail-hover-fg-color: var(--grey-95);
+  --thumbnail-star-bg-color: var(--grey-40);
+  --thumbnail-star-hover-color: var(--grey-85);
+
+  /* ── Selection ──────────────────────────────── */
+  --selection-color: rgb(255, 187, 0);
+
+  /* ── Color labels ───────────────────────────── */
+  --colorlabel-red: rgb(230, 0, 0);
+  --colorlabel-green: rgb(0, 230, 0);
+  --colorlabel-blue: rgb(40, 140, 255);
+  --colorlabel-yellow: rgb(255, 180, 0);
+  --colorlabel-purple: rgb(230, 0, 230);
+
+  /* ── Filmstrip / timeline ───────────────────── */
+  --filmstrip-bg-color: var(--lighttable-bg-color);
+
+  /* ── Graphs / histogram ─────────────────────── */
+  --graph-bg: var(--grey-25);
+  --graph-border: var(--grey-20);
+  --graph-fg: var(--grey-90);
+  --graph-grid: var(--grey-20);
+}

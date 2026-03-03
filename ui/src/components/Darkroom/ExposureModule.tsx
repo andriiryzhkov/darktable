@@ -34,12 +34,12 @@ export default function ExposureModule() {
   );
 
   return (
-    <div className="p-4 border-b border-[var(--border)]">
+    <div className="p-4 border-b border-[var(--border-color)]">
       <h3 className="text-sm font-medium mb-3">Exposure</h3>
 
       <div className="space-y-3">
         <div>
-          <div className="flex justify-between text-xs text-[var(--text-secondary)] mb-1">
+          <div className="flex justify-between text-xs text-[var(--plugin-label-color)] mb-1">
             <span>Exposure</span>
             <span>{exposureValue.toFixed(2)} EV</span>
           </div>
@@ -50,12 +50,12 @@ export default function ExposureModule() {
             step="0.01"
             value={exposureValue}
             onChange={handleExposureChange}
-            className="w-full accent-[var(--accent)]"
+            className="w-full accent-[var(--bauhaus-fill)]"
           />
         </div>
 
         <div>
-          <div className="flex justify-between text-xs text-[var(--text-secondary)] mb-1">
+          <div className="flex justify-between text-xs text-[var(--plugin-label-color)] mb-1">
             <span>Black</span>
             <span>{blackValue.toFixed(4)}</span>
           </div>
@@ -66,7 +66,7 @@ export default function ExposureModule() {
             step="0.001"
             value={blackValue}
             onChange={handleBlackChange}
-            className="w-full accent-[var(--accent)]"
+            className="w-full accent-[var(--bauhaus-fill)]"
           />
         </div>
       </div>

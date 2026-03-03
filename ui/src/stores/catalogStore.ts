@@ -2,39 +2,59 @@ import { create } from "zustand";
 import { catalogQuery } from "../api/commands";
 import type { ImageInfo } from "../types/protocol";
 
+// Seed-based pseudo-random for deterministic mock data per image ID
+function mockRng(seed: number): number {
+  const x = Math.sin(seed * 9301 + 49297) * 233280;
+  return x - Math.floor(x);
+}
+
+function enrichImage(img: ImageInfo): ImageInfo {
+  return {
+    ...img,
+    rating: img.rating ?? Math.floor(mockRng(img.id) * 6),
+    color_labels: img.color_labels ?? (mockRng(img.id + 1000) > 0.6
+      ? Math.floor(mockRng(img.id + 2000) * 31)
+      : 0),
+    group_id: img.group_id ?? 0,
+    altered: img.altered ?? mockRng(img.id + 3000) > 0.7,
+    local_copy: img.local_copy ?? false,
+  };
+}
+
 interface CatalogState {
   images: ImageInfo[];
   total: number;
-  offset: number;
-  limit: number;
   loading: boolean;
-  selectedId: number | null;
-  fetchPage: (offset?: number) => Promise<void>;
-  selectImage: (id: number | null) => void;
-  nextPage: () => Promise<void>;
-  prevPage: () => Promise<void>;
-}
+  selectedIds: Set<number>;
+  lastSelectedId: number | null;
 
-const PAGE_SIZE = 50;
+  fetchAll: () => Promise<void>;
+  selectImage: (id: number, e?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
+  clearSelection: () => void;
+}
 
 export const useCatalogStore = create<CatalogState>((set, get) => ({
   images: [],
   total: 0,
-  offset: 0,
-  limit: PAGE_SIZE,
   loading: false,
-  selectedId: null,
+  selectedIds: new Set<number>(),
+  lastSelectedId: null,
 
-  fetchPage: async (offset?: number) => {
-    const currentOffset = offset ?? get().offset;
+  fetchAll: async () => {
     set({ loading: true });
     try {
-      const result = await catalogQuery(currentOffset, PAGE_SIZE);
+      // First query to discover total count
+      const first = await catalogQuery(0, 1);
+      const total = first.total;
+      if (total === 0) {
+        set({ images: [], total: 0, loading: false });
+        return;
+      }
+      // Fetch all image metadata in one request
+      const result = await catalogQuery(0, total);
       set({
-        images: result.images,
+        images: result.images.map(enrichImage),
         total: result.total,
-        offset: result.offset,
-        limit: result.limit,
         loading: false,
       });
     } catch (e) {
@@ -43,19 +63,42 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
     }
   },
 
-  selectImage: (id) => set({ selectedId: id }),
+  selectImage: (id, e) => {
+    const state = get();
+    const multi = e?.ctrlKey || e?.metaKey;
+    const range = e?.shiftKey;
 
-  nextPage: async () => {
-    const { offset, total } = get();
-    if (offset + PAGE_SIZE < total) {
-      await get().fetchPage(offset + PAGE_SIZE);
+    if (range && state.lastSelectedId !== null) {
+      // Shift+click: select range
+      const ids = state.images.map((img) => img.id);
+      const fromIdx = ids.indexOf(state.lastSelectedId);
+      const toIdx = ids.indexOf(id);
+      if (fromIdx >= 0 && toIdx >= 0) {
+        const start = Math.min(fromIdx, toIdx);
+        const end = Math.max(fromIdx, toIdx);
+        const newSelection = new Set(state.selectedIds);
+        for (let i = start; i <= end; i++) {
+          newSelection.add(ids[i]);
+        }
+        set({ selectedIds: newSelection });
+        return;
+      }
+    }
+
+    if (multi) {
+      // Ctrl/Cmd+click: toggle
+      const newSelection = new Set(state.selectedIds);
+      if (newSelection.has(id)) {
+        newSelection.delete(id);
+      } else {
+        newSelection.add(id);
+      }
+      set({ selectedIds: newSelection, lastSelectedId: id });
+    } else {
+      // Single click
+      set({ selectedIds: new Set([id]), lastSelectedId: id });
     }
   },
 
-  prevPage: async () => {
-    const { offset } = get();
-    if (offset > 0) {
-      await get().fetchPage(Math.max(0, offset - PAGE_SIZE));
-    }
-  },
+  clearSelection: () => set({ selectedIds: new Set(), lastSelectedId: null }),
 }));
