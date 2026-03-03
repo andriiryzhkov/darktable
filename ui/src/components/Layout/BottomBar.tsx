@@ -1,11 +1,9 @@
 import {
   Star,
-  Grid3x3,
-  List,
-  Columns3,
   ZoomIn,
   ZoomOut,
-  Minus,
+  Ban,
+  CircleOff,
 } from "lucide-react";
 import { useUIStore } from "../../stores/uiStore";
 import { useCatalogStore } from "../../stores/catalogStore";
@@ -19,8 +17,17 @@ const COLORS = [
 ];
 
 export default function BottomBar() {
-  const { thumbnailSize, setThumbnailSize } = useUIStore();
+  const { thumbnailSize, setThumbnailSize, gridColumns } = useUIStore();
   const total = useCatalogStore((s) => s.total);
+
+  const fewer = () => {
+    if (gridColumns <= 1) return;
+    setThumbnailSize(thumbnailSize + 30);
+  };
+
+  const more = () => {
+    setThumbnailSize(thumbnailSize - 30);
+  };
 
   return (
     <div
@@ -28,22 +35,21 @@ export default function BottomBar() {
       style={{
         height: 32,
         backgroundColor: "var(--plugin-bg-color)",
-        borderTop: "1px solid var(--border-color)",
       }}
     >
       {/* Left: rating + color labels */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center">
         {/* Reject */}
         <button
           className="flex items-center justify-center"
           style={{
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             color: "var(--plugin-label-color)",
           }}
           title="Reject"
         >
-          <Minus size={12} />
+          <Ban size={13} />
         </button>
 
         {/* Stars */}
@@ -52,39 +58,31 @@ export default function BottomBar() {
             key={n}
             className="flex items-center justify-center"
             style={{
-              width: 20,
-              height: 20,
+              width: 26,
+              height: 26,
               color: "var(--plugin-label-color)",
             }}
             title={`Rate ${n} stars`}
           >
-            <Star size={12} />
+            <Star size={15} />
           </button>
         ))}
 
-        {/* Separator */}
-        <div
-          className="mx-2"
-          style={{
-            width: 1,
-            height: 16,
-            backgroundColor: "var(--border-color)",
-          }}
-        />
+        <div style={{ width: 8 }} />
 
         {/* Color labels */}
         {COLORS.map((c) => (
           <button
             key={c.key}
             className="flex items-center justify-center"
-            style={{ width: 20, height: 20 }}
+            style={{ width: 26, height: 26 }}
             title={`Color label: ${c.key}`}
           >
             <div
               className="rounded-full"
               style={{
-                width: 10,
-                height: 10,
+                width: 12,
+                height: 12,
                 backgroundColor: `var(${c.var})`,
               }}
             />
@@ -95,96 +93,58 @@ export default function BottomBar() {
         <button
           className="flex items-center justify-center"
           style={{
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             color: "var(--plugin-label-color)",
           }}
           title="Remove color label"
         >
-          <Minus size={10} />
+          <CircleOff size={13} />
         </button>
       </div>
 
-      {/* Center: view mode */}
-      <div className="flex items-center gap-1">
-        <button
-          className="flex items-center justify-center"
-          style={{
-            width: 24,
-            height: 24,
-            color: "var(--fg-color)",
-          }}
-          title="Grid view"
-        >
-          <Grid3x3 size={14} />
-        </button>
-        <button
-          className="flex items-center justify-center"
-          style={{
-            width: 24,
-            height: 24,
-            color: "var(--plugin-label-color)",
-          }}
-          title="List view"
-        >
-          <List size={14} />
-        </button>
-        <button
-          className="flex items-center justify-center"
-          style={{
-            width: 24,
-            height: 24,
-            color: "var(--plugin-label-color)",
-          }}
-          title="Filmstrip view"
-        >
-          <Columns3 size={14} />
-        </button>
-      </div>
-
-      {/* Right: count + zoom */}
-      <div className="flex items-center gap-2">
+      {/* Center: thumbs per row */}
+      <div
+        className="flex items-center gap-1"
+        style={{
+          backgroundColor: "var(--bg-color)",
+          borderRadius: 10,
+          padding: "2px 8px",
+        }}
+      >
         <span
           className="text-xs"
-          style={{ color: "var(--plugin-label-color)" }}
+          style={{
+            color: "var(--fg-color)",
+            minWidth: 18,
+            textAlign: "center",
+          }}
         >
-          {total}
+          {gridColumns}
         </span>
-
         <button
-          onClick={() => setThumbnailSize(thumbnailSize - 20)}
+          onClick={more}
           className="flex items-center justify-center"
           style={{
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             color: "var(--plugin-label-color)",
           }}
-          title="Zoom out"
+          title="More thumbnails per row"
         >
-          <ZoomOut size={12} />
+          <ZoomOut size={14} />
         </button>
-
-        <input
-          type="range"
-          min={100}
-          max={400}
-          value={thumbnailSize}
-          onChange={(e) => setThumbnailSize(Number(e.target.value))}
-          className="dt-slider"
-          style={{ width: 80 }}
-        />
-
         <button
-          onClick={() => setThumbnailSize(thumbnailSize + 20)}
+          onClick={fewer}
           className="flex items-center justify-center"
           style={{
-            width: 20,
-            height: 20,
+            width: 22,
+            height: 22,
             color: "var(--plugin-label-color)",
           }}
-          title="Zoom in"
+          title="Fewer thumbnails per row"
         >
-          <ZoomIn size={12} />
+          <ZoomIn size={14} />
         </button>
       </div>
     </div>

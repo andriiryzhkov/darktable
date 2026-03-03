@@ -49,7 +49,7 @@ body {
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: var(--scroll-bar-bg); }
+::-webkit-scrollbar-track { background: var(--scroll-bar-bg); border-radius: 4px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-bar-inactive); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-bar-active); }
 
@@ -151,7 +151,12 @@ body {
 
 /* Module panels */
 .module-wrapper {
-  margin: 1px 0;
+  margin: 2px 4px;
+}
+
+.module-wrapper[data-open="true"] {
+  background-color: var(--bg-color);
+  border-radius: 10px;
 }
 
 .module-header {
@@ -159,20 +164,24 @@ body {
   align-items: center;
   gap: 4px;
   width: 100%;
-  padding: 5px 8px;
-  background-color: var(--collapsible-bg-color);
+  padding: 7px 10px;
+  background-color: transparent;
   color: var(--plugin-label-color);
-  font-size: 0.85em;
-  font-weight: normal;
+  font-size: 0.95em;
+  font-weight: 500;
   border: none;
   cursor: pointer;
   text-align: left;
   transition: background-color 100ms;
+  border-radius: 10px;
 }
 
 .module-header:hover {
-  background-color: var(--button-hover-bg);
-  color: var(--button-hover-fg);
+  background-color: var(--bg-color);
+}
+
+.module-wrapper[data-open="true"] .module-header {
+  color: var(--fg-color);
 }
 
 .module-chevron {
@@ -180,9 +189,31 @@ body {
   flex-shrink: 0;
 }
 
+.module-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.module-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+}
+
+.module-action-btn:hover {
+  color: var(--fg-color);
+  background-color: var(--button-hover-bg);
+}
+
 .module-content {
-  background-color: var(--plugin-bg-color);
-  padding: 8px;
+  padding: 6px 10px 10px;
 }
 
 /* Bauhaus-style controls */

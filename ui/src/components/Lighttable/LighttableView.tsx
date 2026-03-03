@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { useCatalogStore } from "../../stores/catalogStore";
 import { useUIStore } from "../../stores/uiStore";
 import ThumbnailCard from "./ThumbnailCard";
@@ -11,14 +11,30 @@ interface Props {
 export default function LighttableView({ onOpenImage }: Props) {
   const { images, loading, selectedIds, selectImage } = useCatalogStore();
   const thumbnailSize = useUIStore((s) => s.thumbnailSize);
+  const setGridColumns = useUIStore((s) => s.setGridColumns);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const handleSelect = useCallback(
     (id: number, e: React.MouseEvent) => selectImage(id, e),
     [selectImage],
   );
 
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+    const measure = () => {
+      const style = window.getComputedStyle(el);
+      const cols = style.gridTemplateColumns.split(" ").length;
+      setGridColumns(cols);
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    return () => ro.disconnect();
+  }, [thumbnailSize, setGridColumns]);
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       <TopToolbar />
 
       {/* Thumbnail grid */}
@@ -32,6 +48,7 @@ export default function LighttableView({ onOpenImage }: Props) {
           </div>
         ) : (
           <div
+            ref={gridRef}
             className="grid gap-0.5"
             style={{
               gridTemplateColumns: `repeat(auto-fill, minmax(${thumbnailSize}px, 1fr))`,

@@ -97,6 +97,7 @@ function App() {
           {activeView === "darkroom" && activeImgId !== null && (
             <DarkroomView imgid={activeImgId} onBack={backToLighttable} />
           )}
+          <BottomBar />
         </div>
 
         {/* Right sidebar */}
@@ -108,8 +109,6 @@ function App() {
           {activeView === "lighttable" && <RightSidebarModules />}
         </Sidebar>
       </div>
-
-      <BottomBar />
     </div>
   );
 }

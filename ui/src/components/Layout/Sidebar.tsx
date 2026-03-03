@@ -20,21 +20,26 @@ export default function Sidebar({
         width: open ? 220 : 0,
         transition: "width 200ms ease",
         backgroundColor: "var(--plugin-bg-color)",
-        borderLeft: side === "right" ? "1px solid var(--border-color)" : "none",
-        borderRight: side === "left" ? "1px solid var(--border-color)" : "none",
       }}
     >
       {open && (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          {children}
+        <div
+          className="flex-1 overflow-x-hidden"
+          style={{
+            overflowY: "scroll",
+            direction: side === "left" ? "rtl" : "ltr",
+          }}
+        >
+          <div style={{ direction: "ltr" }}>
+            {children}
+          </div>
         </div>
       )}
-      {/* Toggle button rendered outside the sidebar to remain visible when closed */}
       <button
         onClick={onToggle}
         className="absolute z-10"
         style={{
-          display: "none", // Hidden for now; sidebar toggle via keyboard or menu
+          display: "none",
         }}
       >
         toggle

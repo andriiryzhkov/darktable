@@ -10,7 +10,6 @@ export default function HeaderBar() {
       style={{
         height: 40,
         backgroundColor: "var(--plugin-bg-color)",
-        borderBottom: "1px solid var(--border-color)",
       }}
     >
       {/* Left: logo + title + version */}

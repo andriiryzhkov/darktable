@@ -10,7 +10,6 @@ export default function TopToolbar() {
       style={{
         height: 30,
         backgroundColor: "var(--plugin-bg-color)",
-        borderBottom: "1px solid var(--border-color)",
       }}
     >
       {/* Left: collection filter + rating/color filters */}

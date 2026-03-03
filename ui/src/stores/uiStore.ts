@@ -7,11 +7,13 @@ interface UIState {
   leftSidebarOpen: boolean;
   rightSidebarOpen: boolean;
   thumbnailSize: number;
+  gridColumns: number;
 
   setActiveView: (view: View) => void;
   toggleLeftSidebar: () => void;
   toggleRightSidebar: () => void;
   setThumbnailSize: (size: number) => void;
+  setGridColumns: (cols: number) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -19,6 +21,7 @@ export const useUIStore = create<UIState>((set) => ({
   leftSidebarOpen: true,
   rightSidebarOpen: true,
   thumbnailSize: 200,
+  gridColumns: 0,
 
   setActiveView: (view) => set({ activeView: view }),
   toggleLeftSidebar: () =>
@@ -27,4 +30,5 @@ export const useUIStore = create<UIState>((set) => ({
     set((s) => ({ rightSidebarOpen: !s.rightSidebarOpen })),
   setThumbnailSize: (size) =>
     set({ thumbnailSize: Math.max(100, Math.min(400, size)) }),
+  setGridColumns: (cols) => set({ gridColumns: cols }),
 }));

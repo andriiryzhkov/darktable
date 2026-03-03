@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, RotateCcw, Menu } from "lucide-react";
 
 interface CollapsibleModuleProps {
   title: string;
@@ -15,14 +15,26 @@ export default function CollapsibleModule({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="module-wrapper">
+    <div className="module-wrapper" data-open={open}>
       <button className="module-header" onClick={() => setOpen(!open)}>
         <ChevronRight
-          size={12}
+          size={14}
           className="module-chevron"
           style={{ transform: open ? "rotate(90deg)" : "none" }}
         />
-        <span>{title}</span>
+        <span className="flex-1">{title}</span>
+        <span
+          className="module-actions"
+          style={{ visibility: open ? "visible" : "hidden" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span title="Reset" className="module-action-btn">
+            <RotateCcw size={12} />
+          </span>
+          <span title="Presets" className="module-action-btn">
+            <Menu size={12} />
+          </span>
+        </span>
       </button>
       {open && <div className="module-content">{children}</div>}
     </div>
