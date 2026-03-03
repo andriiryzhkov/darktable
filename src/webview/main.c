@@ -1,3 +1,21 @@
+/*
+    This file is part of darktable,
+    Copyright (C) 2026 darktable developers.
+
+    darktable is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    darktable is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with darktable.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #include "webview_bindings.h"
 #include "ipc_client.h"
 
@@ -19,19 +37,26 @@ static void usage(const char *progname)
   fprintf(stderr,
     "darktable-webview — webview UI for darktable\n\n"
     "Usage:\n"
-    "  %s [OPTIONS]\n\n"
+    "  %s [OPTIONS] [--core DARKTABLE_OPTIONS]\n\n"
     "Options:\n"
     "  --dev              Connect to Vite dev server at http://localhost:5173\n"
     "  --frontend-dir DIR Load production build from DIR (default: ui/dist)\n"
     "  --server-bin PATH  Path to darktable-server binary\n"
-    "  --configdir DIR    Config directory for darktable-server\n"
-    "  -h, --help         Show this help\n",
+    "  -h, --help         Show this help\n\n"
+    "darktable options (after --core):\n"
+    "  --configdir DIR    Config directory (default: ~/.config/darktable/)\n"
+    "  --library FILE     Use specific library.db file\n"
+    "  --cachedir DIR     Cache directory for thumbnails\n"
+    "  --tmpdir DIR       Temporary files directory\n"
+    "  --disable-opencl   Disable OpenCL GPU acceleration\n",
     progname);
 }
 
 // Spawn darktable-server and read SOCKET= from its stdout.
+// core_args is a NULL-terminated array of darktable options (passed after --core).
 // Returns PID on success, -1 on error. socket_path is filled in.
-static pid_t spawn_server(const char *server_bin, const char *configdir, char *socket_path, size_t path_size)
+static pid_t spawn_server(const char *server_bin, char **core_args, int core_argc,
+                          char *socket_path, size_t path_size)
 {
   int pipefd[2];
   if(pipe(pipefd) < 0)
@@ -56,7 +81,25 @@ static pid_t spawn_server(const char *server_bin, const char *configdir, char *s
     dup2(pipefd[1], STDOUT_FILENO);
     close(pipefd[1]);
 
-    execlp(server_bin, server_bin, "--core", "--configdir", configdir, NULL);
+    // Build argv: server_bin [--core core_args...] NULL
+    // Max args: 1 (server_bin) + 1 (--core) + core_argc + 1 (NULL)
+    char **exec_argv = g_new0(char *, 1 + 1 + core_argc + 1);
+    int n = 0;
+    exec_argv[n++] = (char *)server_bin;
+    if(core_argc > 0)
+    {
+      exec_argv[n++] = "--core";
+      for(int i = 0; i < core_argc; i++)
+        exec_argv[n++] = core_args[i];
+    }
+    exec_argv[n] = NULL;
+
+    fprintf(stderr, "[webview] exec:");
+    for(int i = 0; i < n; i++)
+      fprintf(stderr, " %s", exec_argv[i]);
+    fprintf(stderr, "\n");
+
+    execvp(server_bin, exec_argv);
     perror("[webview] exec darktable-server");
     _exit(1);
   }
@@ -110,18 +153,26 @@ int main(int argc, char *argv[])
   int dev_mode = 0;
   const char *frontend_dir = NULL;
   const char *server_bin = NULL;
-  const char *configdir = NULL;
+
+  // Everything after --core is passed through to darktable-server
+  char **core_args = NULL;
+  int core_argc = 0;
 
   for(int i = 1; i < argc; i++)
   {
-    if(!strcmp(argv[i], "--dev"))
+    if(!strcmp(argv[i], "--core"))
+    {
+      // All remaining args go to darktable-server
+      core_args = &argv[i + 1];
+      core_argc = argc - (i + 1);
+      break;
+    }
+    else if(!strcmp(argv[i], "--dev"))
       dev_mode = 1;
     else if(!strcmp(argv[i], "--frontend-dir") && i + 1 < argc)
       frontend_dir = argv[++i];
     else if(!strcmp(argv[i], "--server-bin") && i + 1 < argc)
       server_bin = argv[++i];
-    else if(!strcmp(argv[i], "--configdir") && i + 1 < argc)
-      configdir = argv[++i];
     else if(!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h"))
     {
       usage(argv[0]);
@@ -176,14 +227,6 @@ int main(int argc, char *argv[])
     }
   }
 
-  if(!configdir)
-    configdir = g_getenv("DT_CONFIGDIR");
-  if(!configdir)
-  {
-    const char *home = g_get_home_dir();
-    configdir = g_build_filename(home, ".config", "darktable-webview-test", NULL);
-  }
-
   if(!frontend_dir && !dev_mode)
   {
     // Default: look for ui/dist relative to binary
@@ -200,9 +243,9 @@ int main(int argc, char *argv[])
   ctx.socket_fd = -1;
 
   fprintf(stderr, "[webview] starting server: %s\n", server_bin);
-  fprintf(stderr, "[webview] configdir: %s\n", configdir);
 
-  ctx.server_pid = spawn_server(server_bin, configdir, ctx.socket_path, sizeof(ctx.socket_path));
+  ctx.server_pid = spawn_server(server_bin, core_args, core_argc,
+                                ctx.socket_path, sizeof(ctx.socket_path));
   if(ctx.server_pid < 0)
   {
     fprintf(stderr, "ERROR: failed to start darktable-server\n");
