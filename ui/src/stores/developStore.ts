@@ -93,7 +93,11 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
 
     try {
       const result = await developOpen(imgid, PREVIEW_WIDTH, PREVIEW_HEIGHT);
-      if (gen !== sessionGeneration) return; // stale — a newer open superseded us
+      if (gen !== sessionGeneration) {
+        // Orphaned session — close it so server frees SHM buffers
+        developClose(result.session_id).catch(() => {});
+        return;
+      }
 
       set({
         sessionId: result.session_id,

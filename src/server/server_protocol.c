@@ -33,7 +33,11 @@ gboolean dt_shm_create(dt_shm_buffer_t *buf, const char *name, uint32_t width, u
   const size_t stride = (size_t)width * 4;
   buf->size = DT_SHM_HEADER_SIZE + stride * height;
 
-  buf->fd = shm_open(name, O_CREAT | O_RDWR, 0600);
+  // Remove any stale segment from a previous run that crashed without cleanup
+  // (session IDs restart from 0 each run, so names can collide)
+  shm_unlink(name);
+
+  buf->fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
   if(buf->fd < 0)
   {
     fprintf(stderr, "[server] shm_open(%s) failed: %s\n", name, strerror(errno));

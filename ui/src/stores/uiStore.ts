@@ -4,6 +4,7 @@ type View = "lighttable" | "darkroom";
 
 interface UIState {
   activeView: View;
+  darkroomImgId: number | null;
   leftSidebarOpen: boolean;
   rightSidebarOpen: boolean;
   leftSidebarWidth: number;
@@ -14,6 +15,7 @@ interface UIState {
   filmstripHeight: number;
 
   setActiveView: (view: View) => void;
+  setDarkroomImgId: (imgid: number) => void;
   toggleLeftSidebar: () => void;
   toggleRightSidebar: () => void;
   setLeftSidebarWidth: (w: number) => void;
@@ -30,6 +32,7 @@ const clampSidebar = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, 
 
 export const useUIStore = create<UIState>((set) => ({
   activeView: "lighttable",
+  darkroomImgId: null,
   leftSidebarOpen: true,
   rightSidebarOpen: true,
   leftSidebarWidth: 280,
@@ -40,6 +43,7 @@ export const useUIStore = create<UIState>((set) => ({
   filmstripHeight: 100,
 
   setActiveView: (view) => set({ activeView: view }),
+  setDarkroomImgId: (imgid) => set({ darkroomImgId: imgid }),
   toggleLeftSidebar: () =>
     set((s) => ({ leftSidebarOpen: !s.leftSidebarOpen })),
   toggleRightSidebar: () =>

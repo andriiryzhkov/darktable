@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useCatalogStore } from "../../stores/catalogStore";
+import { useUIStore } from "../../stores/uiStore";
 import { catalogGetThumbnail } from "../../api/commands";
 import type { ImageInfo } from "../../types/protocol";
 
@@ -14,6 +15,7 @@ export default function Filmstrip({ onSelectImage }: Props) {
   const images = useCatalogStore((s) => s.images);
   const selectedIds = useCatalogStore((s) => s.selectedIds);
   const selectImage = useCatalogStore((s) => s.selectImage);
+  const darkroomImgId = useUIStore((s) => s.darkroomImgId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Scroll to selected image on mount
@@ -33,9 +35,15 @@ export default function Filmstrip({ onSelectImage }: Props) {
   const handleClick = useCallback(
     (imgid: number) => {
       selectImage(imgid);
+    },
+    [selectImage],
+  );
+
+  const handleDoubleClick = useCallback(
+    (imgid: number) => {
       onSelectImage(imgid);
     },
-    [selectImage, onSelectImage],
+    [onSelectImage],
   );
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -56,8 +64,10 @@ export default function Filmstrip({ onSelectImage }: Props) {
           <FilmstripThumb
             key={img.id}
             image={img}
-            active={selectedIds.has(img.id)}
+            selected={selectedIds.has(img.id)}
+            processing={img.id === darkroomImgId}
             onClick={() => handleClick(img.id)}
+            onDoubleClick={() => handleDoubleClick(img.id)}
           />
         ))}
       </div>
@@ -74,12 +84,16 @@ export default function Filmstrip({ onSelectImage }: Props) {
 
 function FilmstripThumb({
   image,
-  active,
+  selected,
+  processing,
   onClick,
+  onDoubleClick,
 }: {
   image: ImageInfo;
-  active: boolean;
+  selected: boolean;
+  processing: boolean;
   onClick: () => void;
+  onDoubleClick: () => void;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -108,8 +122,10 @@ function FilmstripThumb({
     <div
       ref={ref}
       className="filmstrip-thumb"
-      data-active={active}
+      data-selected={selected}
+      data-processing={processing}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       style={{ width: THUMB_WIDTH }}
     >
       {src && <img src={src} alt={image.filename} draggable={false} />}

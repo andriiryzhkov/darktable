@@ -29,10 +29,8 @@ function App() {
     setLeftSidebarWidth,
     setRightSidebarWidth,
   } = useUIStore();
-  const activeImgId = useCatalogStore((s) => {
-    const ids = s.selectedIds;
-    return ids.size > 0 ? [...ids][0] : null;
-  });
+  const darkroomImgId = useUIStore((s) => s.darkroomImgId);
+  const setDarkroomImgId = useUIStore((s) => s.setDarkroomImgId);
 
   useEffect(() => {
     connect().then(() => fetchAll());
@@ -41,9 +39,10 @@ function App() {
   const openDarkroom = useCallback(
     (imgid: number) => {
       useCatalogStore.getState().selectImage(imgid);
+      setDarkroomImgId(imgid);
       setActiveView("darkroom");
     },
-    [setActiveView],
+    [setActiveView, setDarkroomImgId],
   );
 
   if (status === "connecting") {
@@ -101,8 +100,8 @@ function App() {
           {activeView === "lighttable" && (
             <LighttableView onOpenImage={openDarkroom} />
           )}
-          {activeView === "darkroom" && activeImgId !== null && (
-            <DarkroomView imgid={activeImgId} />
+          {activeView === "darkroom" && darkroomImgId !== null && (
+            <DarkroomView imgid={darkroomImgId} />
           )}
           {activeView === "lighttable" && <BottomBar />}
         </div>

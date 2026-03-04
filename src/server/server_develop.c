@@ -76,6 +76,24 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
   if(preview_height < 240) preview_height = 240;
   if(preview_height > 4096) preview_height = 4096;
 
+  // Single-client model: close all existing sessions before opening a new one.
+  // This prevents orphaned sessions from accumulating when the client rapidly
+  // switches images (the previous close may not have arrived yet).
+  for(int i = server->session_count - 1; i >= 0; i--)
+  {
+    if(server->sessions[i])
+    {
+      dt_server_session_t *old = server->sessions[i];
+      fprintf(stderr, "[server] develop.open: auto-closing session %s\n", old->session_id);
+      dt_shm_destroy(&old->shm_buffers[0]);
+      dt_shm_destroy(&old->shm_buffers[1]);
+      dt_dev_cleanup(&old->dev);
+      g_free(old);
+      server->sessions[i] = NULL;
+    }
+  }
+  server->session_count = 0;
+
   // Allocate session slot
   dt_server_session_t *session = _find_free_session_slot(server);
   if(!session)

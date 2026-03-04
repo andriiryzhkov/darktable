@@ -2124,11 +2124,19 @@ button.module-action-btn {
   object-fit: cover;
 }
 
-.filmstrip-thumb[data-active="true"] {
-  border-color: var(--selection-color);
+.filmstrip-thumb[data-processing="true"] {
+  border-color: #d4aa40;
 }
 
-.filmstrip-thumb:hover:not([data-active="true"]) {
+.filmstrip-thumb[data-selected="true"] {
+  border-color: #ffffff;
+}
+
+.filmstrip-thumb[data-processing="true"][data-selected="true"] {
+  border-color: #d4aa40;
+}
+
+.filmstrip-thumb:hover:not([data-processing="true"]):not([data-selected="true"]) {
   border-color: var(--thumbnail-hover-bg-color);
 }
 
