@@ -17,6 +17,9 @@
 */
 
 #include "server/server.h"
+#include "common/history.h"
+#include "common/image_cache.h"
+#include "common/iop_order.h"
 #include "develop/develop.h"
 #include "develop/imageop.h"
 #include "develop/pixelpipe.h"
@@ -286,6 +289,102 @@ char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request
 
     json_builder_end_object(b);
   }
+
+  json_builder_end_array(b);
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+
+  json_builder_set_member_name(b, "history_end");
+  json_builder_add_int_value(b, session->dev.history_end);
+
+  json_builder_set_member_name(b, "items");
+  json_builder_begin_array(b);
+
+  // Add "original" as item -1 (same as GTK darktable)
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "num");
+  json_builder_add_int_value(b, -1);
+  json_builder_set_member_name(b, "op");
+  json_builder_add_string_value(b, "");
+  json_builder_set_member_name(b, "name");
+  json_builder_add_string_value(b, "original");
+  json_builder_set_member_name(b, "enabled");
+  json_builder_add_boolean_value(b, FALSE);
+  json_builder_set_member_name(b, "mandatory");
+  json_builder_add_boolean_value(b, TRUE);
+  json_builder_end_object(b);
+
+  dt_pthread_mutex_lock(&session->dev.history_mutex);
+
+  int num = 0;
+  for(GList *hist = session->dev.history; hist; hist = g_list_next(hist))
+  {
+    dt_dev_history_item_t *item = hist->data;
+    if(!item) continue;
+
+    // Skip mask_manager entries
+    if(!strcmp(item->op_name, "mask_manager")) continue;
+
+    json_builder_begin_object(b);
+
+    json_builder_set_member_name(b, "num");
+    json_builder_add_int_value(b, num++);
+
+    json_builder_set_member_name(b, "op");
+    json_builder_add_string_value(b, item->op_name);
+
+    json_builder_set_member_name(b, "name");
+    if(item->module && item->module->name)
+    {
+      const char *display_name = item->module->name();
+      // Skip _builtin_ prefix and empty/default multi_name values
+      const char *mname = item->multi_name;
+      if(g_str_has_prefix(mname, BUILTIN_PREFIX))
+        mname += strlen(BUILTIN_PREFIX);
+      if(mname[0] && strcmp(mname, "0") != 0)
+      {
+        char full_name[256];
+        snprintf(full_name, sizeof(full_name), "%s \xe2\x80\xa2 %s",
+                 display_name, mname);
+        json_builder_add_string_value(b, full_name);
+      }
+      else
+        json_builder_add_string_value(b, display_name);
+    }
+    else
+      json_builder_add_string_value(b, item->op_name);
+
+    json_builder_set_member_name(b, "enabled");
+    json_builder_add_boolean_value(b, item->enabled);
+
+    json_builder_set_member_name(b, "mandatory");
+    json_builder_add_boolean_value(b, item->module && item->module->hide_enable_button);
+
+    json_builder_end_object(b);
+  }
+
+  dt_pthread_mutex_unlock(&session->dev.history_mutex);
 
   json_builder_end_array(b);
   json_builder_end_object(b);
@@ -568,6 +667,97 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   JsonNode *result = json_builder_get_root(b);
   char *resp = dt_server_make_response(req->id, result);
   json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_delete_history(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_imgid_t imgid = session->imgid;
+
+  // Delete history (no undo in server mode).
+  // Pass init_history=FALSE because the TRUE path calls
+  // dt_dev_reload_history_items(darktable.develop) which uses GUI code.
+  dt_history_delete_on_image_ext(imgid, FALSE, FALSE);
+
+  // Clear auto-presets-applied flag so dt_dev_read_history re-applies
+  // default modules (sigmoid, etc.). This is what _remove_preset_flag()
+  // does in the init_history=TRUE path.
+  {
+    dt_image_t *image = dt_image_cache_get(imgid, 'w');
+    if(image)
+    {
+      image->flags &= ~DT_IMAGE_AUTO_PRESETS_APPLIED;
+      dt_image_cache_write_release_info(image, DT_IMAGE_CACHE_SAFE,
+                                        "server_delete_history");
+    }
+  }
+
+  // Server-safe reload: dt_dev_reload_history_items() calls GUI code,
+  // so we do the non-GUI parts inline here.
+  dt_develop_t *dev = &session->dev;
+  dev->focus_hash = FALSE;
+
+  dt_lock_image(imgid);
+
+  // Reset all modules to defaults
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, 0);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  // Remove unused history items from the in-memory list
+  GList *history = g_list_nth(dev->history, dev->history_end);
+  while(history)
+  {
+    GList *next = g_list_next(history);
+    dt_dev_history_item_t *hist = history->data;
+    hist->module->multi_name_hand_edited = FALSE;
+    g_strlcpy(hist->module->multi_name, "", sizeof(hist->module->multi_name));
+    dt_dev_free_history_item(hist);
+    dev->history = g_list_delete_link(dev->history, history);
+    history = next;
+  }
+
+  // Re-read history from the now-clean database (will re-apply auto-presets)
+  dt_dev_read_history(dev);
+  dt_ioppr_set_default_iop_order(dev, imgid);
+
+  // Apply the (now clean) history
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, dev->history_end);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  dt_ioppr_resync_iop_list(dev);
+
+  // Mark pipe dirty for re-rendering
+  if(dev->full.pipe)
+  {
+    dev->full.pipe->changed |= DT_DEV_PIPE_REMOVE;
+    dev->full.pipe->status = DT_DEV_PIXELPIPE_DIRTY;
+  }
+
+  dt_unlock_image(imgid);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+
+  JsonNode *res = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, res);
+  json_node_unref(res);
   g_object_unref(b);
   return resp;
 }

@@ -1306,18 +1306,73 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════
-   Import dialog
+   Dialog overlay (shared base)
    ═══════════════════════════════════════════════════ */
 
-.import-overlay {
+.dialog-overlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--import-overlay-bg);
+  background: rgba(0, 0, 0, 0.5);
 }
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding: 8px 12px;
+  background: var(--plugin-bg-color);
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.dialog-header:active {
+  cursor: grabbing;
+}
+
+.dialog-header-title {
+  flex: 1;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════
+   Confirm dialog
+   ═══════════════════════════════════════════════════ */
+
+.confirm-dialog {
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 0 0 6px 6px;
+  min-width: 320px;
+  max-width: 440px;
+  overflow: hidden;
+}
+
+.confirm-message {
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-color);
+}
+
+.confirm-buttons {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.confirm-buttons .bauhaus-button {
+  flex: 1;
+}
+
+/* ═══════════════════════════════════════════════════
+   Import dialog
+   ═══════════════════════════════════════════════════ */
 
 .import-dialog {
   display: flex;
@@ -1325,34 +1380,11 @@ body {
   width: 90vw;
   height: 85vh;
   max-width: 1200px;
-  border-radius: 8px;
+  border-radius: 0 0 8px 8px;
   overflow: hidden;
   background: var(--bg-color);
   border: 1px solid var(--border-color);
-}
-
-/* ── Header ─────────────────────────────────────── */
-
-.import-header {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  height: 28px;
-  background: var(--plugin-bg-color);
-  flex-shrink: 0;
-  cursor: grab;
-  user-select: none;
-}
-
-.import-header:active {
-  cursor: grabbing;
-}
-
-.import-header-title {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--fg-color);
+  border-top: none;
 }
 
 /* ── Window controls (OS-native style) ─────────── */
@@ -2235,6 +2267,68 @@ button.module-action-btn {
 
 .darkroom-module-toggle:hover {
   color: var(--fg-color);
+}
+
+/* History stack */
+.history-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px 1px 0;
+  color: var(--fg-color);
+}
+
+.history-item[data-active="false"] {
+  opacity: 0.4;
+}
+
+.history-item-num {
+  width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+  font-family: monospace;
+  color: var(--disabled-fg-color);
+}
+
+.history-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item-name[data-enabled="false"] {
+  color: var(--disabled-fg-color);
+}
+
+.history-item-multi {
+  font-size: 0.8em;
+  color: var(--disabled-fg-color);
+}
+
+.history-item-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--disabled-fg-color);
+}
+
+.history-item-icon[data-enabled="true"] {
+  color: var(--fg-color);
+}
+
+.history-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Navigation module */

@@ -62,6 +62,19 @@ export interface ModuleInfo {
   params_size: number;
 }
 
+export interface HistoryItem {
+  num: number;
+  op: string;
+  name: string;
+  enabled: boolean;
+  mandatory: boolean;
+}
+
+export interface HistoryResult {
+  history_end: number;
+  items: HistoryItem[];
+}
+
 export interface ExposureParams {
   mode: number;
   exposure: number;

@@ -108,9 +108,11 @@ char *dt_server_catalog_get_collection_values(dt_server_t *server, const dt_serv
 char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_delete_history(dt_server_t *server, const dt_server_request_t *req);
 
 // Export handlers (dt_server_export.c)
 char *dt_server_export_image(dt_server_t *server, const dt_server_request_t *req);

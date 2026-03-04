@@ -4,6 +4,7 @@ import type {
   SessionInfo,
   PreviewResult,
   PreviewFrameResult,
+  HistoryResult,
   FilmRoll,
   Tag,
 } from "../types/protocol";
@@ -22,6 +23,8 @@ declare global {
     developClose: (sessionId: string) => Promise<unknown>;
     developSetParams: (sessionId: string, op: string, params: Record<string, unknown>) => Promise<unknown>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
+    developGetHistory: (sessionId: string) => Promise<HistoryResult>;
+    developDeleteHistory: (sessionId: string) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number) => Promise<PreviewFrameResult>;
     pickFolder: () => Promise<string | null>;
     listFolders: (path: string) => Promise<FolderEntry[]>;
@@ -63,6 +66,12 @@ export const developSetParams = (
 
 export const developRequestPreview = (sessionId: string) =>
   window.developRequestPreview(sessionId);
+
+export const developGetHistory = (sessionId: string) =>
+  window.developGetHistory(sessionId);
+
+export const developDeleteHistory = (sessionId: string) =>
+  window.developDeleteHistory(sessionId);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number) =>
   window.getPreviewFrame(sessionId, frontBuffer);

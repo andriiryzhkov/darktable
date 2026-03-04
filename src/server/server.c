@@ -92,9 +92,11 @@ static const dt_server_route_t _routes[] = {
   { "develop.open",               dt_server_develop_open },
   { "develop.close",              dt_server_develop_close },
   { "develop.get_modules",        dt_server_develop_get_modules },
+  { "develop.get_history",        dt_server_develop_get_history },
   { "develop.get_params",         dt_server_develop_get_params },
   { "develop.set_params",         dt_server_develop_set_params },
   { "develop.request_preview",    dt_server_develop_request_preview },
+  { "develop.delete_history",     dt_server_develop_delete_history },
   { "export.image",               dt_server_export_image },
   { NULL, NULL }
 };

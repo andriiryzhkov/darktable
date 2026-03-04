@@ -4,9 +4,11 @@ import {
   developClose,
   developSetParams,
   developRequestPreview,
+  developGetHistory,
+  developDeleteHistory,
   getPreviewFrame,
 } from "../api/commands";
-import type { ExposureParams, ModuleInfo } from "../types/protocol";
+import type { ExposureParams, ModuleInfo, HistoryItem } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -34,6 +36,8 @@ interface DevelopState {
   sequence: number;
   exposureParams: ExposureParams | null;
   modules: ModuleInfo[];
+  historyItems: HistoryItem[];
+  historyEnd: number;
   loading: boolean;
   previewError: string | null;
 
@@ -49,6 +53,8 @@ interface DevelopState {
   setExposure: (value: number) => Promise<void>;
   setBlack: (value: number) => Promise<void>;
   enableModule: (op: string, enabled: boolean) => Promise<void>;
+  fetchHistory: () => Promise<void>;
+  deleteHistory: () => Promise<void>;
   setZoom: (zoom: ZoomLevel) => void;
   setPan: (x: number, y: number) => void;
 }
@@ -70,6 +76,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   sequence: 0,
   exposureParams: null,
   modules: [],
+  historyItems: [],
+  historyEnd: 0,
   loading: false,
   previewError: null,
   zoom: "fit" as ZoomLevel,
@@ -142,6 +150,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
           previewError: null,
         });
       }
+
+      // Fetch history stack after first preview
+      await get().fetchHistory();
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -167,6 +178,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       frameData: null,
       exposureParams: null,
       modules: [],
+      historyItems: [],
+      historyEnd: 0,
       sequence: 0,
     });
   },
@@ -216,6 +229,30 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     }
   },
 
+  fetchHistory: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      const result = await developGetHistory(sessionId);
+      set({ historyItems: result.items, historyEnd: result.history_end });
+    } catch (e) {
+      console.error("develop.get_history failed:", e);
+    }
+  },
+
+  deleteHistory: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developDeleteHistory(sessionId);
+      await get().requestPreview();
+      await get().fetchFrame();
+      await get().fetchHistory();
+    } catch (e) {
+      console.error("develop.delete_history failed:", e);
+    }
+  },
+
   setExposure: async (value: number) => {
     const { sessionId } = get();
     if (!sessionId) return;
@@ -223,6 +260,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await developSetParams(sessionId, "exposure", { exposure: value });
       await get().requestPreview();
       await get().fetchFrame();
+      await get().fetchHistory();
     } catch (e) {
       console.error("set exposure failed:", e);
     }
@@ -235,6 +273,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await developSetParams(sessionId, "exposure", { black: value });
       await get().requestPreview();
       await get().fetchFrame();
+      await get().fetchHistory();
     } catch (e) {
       console.error("set black failed:", e);
     }
@@ -252,6 +291,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       }));
       await get().requestPreview();
       await get().fetchFrame();
+      await get().fetchHistory();
     } catch (e) {
       console.error("enable module failed:", e);
     }

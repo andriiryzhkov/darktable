@@ -501,6 +501,46 @@ static void on_develop_request_preview(const char *id, const char *req, void *ar
   g_free(params);
 }
 
+static void on_develop_get_history(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "developGetHistory requires (sessionId)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  const char *session_id = json_array_get_string_element(args, 0);
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, "develop.get_history", params);
+  g_free(params);
+}
+
+static void on_develop_delete_history(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "developDeleteHistory requires (sessionId)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  const char *session_id = json_array_get_string_element(args, 0);
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, "develop.delete_history", params);
+  g_free(params);
+}
+
 /* getPreviewFrame: reads pixels directly from SHM, no IPC */
 
 /* Minimal memory-to-memory JPEG compressor using libjpeg.
@@ -1396,6 +1436,8 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developClose", on_develop_close, ctx);
   webview_bind(ctx->webview, "developSetParams", on_develop_set_params, ctx);
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
+  webview_bind(ctx->webview, "developGetHistory", on_develop_get_history, ctx);
+  webview_bind(ctx->webview, "developDeleteHistory", on_develop_delete_history, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);
   webview_bind(ctx->webview, "listFolders", on_list_folders, ctx);
