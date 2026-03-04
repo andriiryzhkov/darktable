@@ -3,6 +3,7 @@ import { RotateCcw, Menu, Copy, Power } from "lucide-react";
 import type { DarkroomModuleDef } from "./darkroomModules";
 import { useDevelopStore } from "../../stores/developStore";
 import ModuleSlider from "../Sidebar/controls/ModuleSlider";
+import ModuleButton from "../Sidebar/controls/ModuleButton";
 
 interface Props {
   module: DarkroomModuleDef;
@@ -22,7 +23,7 @@ export default function DarkroomModuleCard({ module }: Props) {
 
   return (
     <div className="module-wrapper" data-open={open}>
-      <button className="module-header" onClick={() => setOpen(!open)}>
+      <div className="module-header" onClick={() => setOpen(!open)}>
         <span
           className="darkroom-module-toggle"
           data-enabled={enabled}
@@ -37,17 +38,11 @@ export default function DarkroomModuleCard({ module }: Props) {
           className="module-actions"
           onClick={(e) => e.stopPropagation()}
         >
-          <span title="Multi-instance" className="module-action-btn">
-            <Copy size={12} />
-          </span>
-          <span title="Reset" className="module-action-btn">
-            <RotateCcw size={12} />
-          </span>
-          <span title="Presets" className="module-action-btn">
-            <Menu size={12} />
-          </span>
+          <ModuleButton icon={<Copy size={12} />} />
+          <ModuleButton icon={<RotateCcw size={12} />} />
+          <ModuleButton icon={<Menu size={12} />} />
         </span>
-      </button>
+      </div>
 
       {open && (
         <div className="module-content">
