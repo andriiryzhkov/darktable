@@ -24,9 +24,11 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <glib/gstdio.h>
+#include <jpeglib.h>
 #include <json-glib/json-glib.h>
 #include <nfd.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -501,6 +503,76 @@ static void on_develop_request_preview(const char *id, const char *req, void *ar
 
 /* getPreviewFrame: reads pixels directly from SHM, no IPC */
 
+/* Minimal memory-to-memory JPEG compressor using libjpeg.
+   Input: RGBA 4-byte pixels. Output: JPEG bytes in `out`.
+   Returns compressed size in bytes, or 0 on failure. */
+struct _jpeg_err_mgr
+{
+  struct jpeg_error_mgr pub;
+  jmp_buf setjmp_buffer;
+};
+
+static void _jpeg_error_exit(j_common_ptr cinfo)
+{
+  struct _jpeg_err_mgr *err = (struct _jpeg_err_mgr *)cinfo->err;
+  longjmp(err->setjmp_buffer, 1);
+}
+
+static int _jpeg_compress_rgba(const uint8_t *in, uint8_t *out,
+                                const int width, const int height,
+                                const size_t out_buf_size, const int quality)
+{
+  struct _jpeg_err_mgr jerr;
+  struct jpeg_compress_struct cinfo;
+  unsigned long out_size = (unsigned long)out_buf_size;
+
+  cinfo.err = jpeg_std_error(&jerr.pub);
+  jerr.pub.error_exit = _jpeg_error_exit;
+  if(setjmp(jerr.setjmp_buffer))
+  {
+    jpeg_destroy_compress(&cinfo);
+    return 0;
+  }
+
+  jpeg_create_compress(&cinfo);
+
+  /* Use libjpeg's built-in memory destination */
+  uint8_t *mem_dest = out;
+  jpeg_mem_dest(&cinfo, &mem_dest, &out_size);
+
+  cinfo.image_width = width;
+  cinfo.image_height = height;
+  cinfo.input_components = 3;
+  cinfo.in_color_space = JCS_RGB;
+  jpeg_set_defaults(&cinfo);
+  jpeg_set_quality(&cinfo, quality, TRUE);
+  if(quality > 90) cinfo.comp_info[0].v_samp_factor = 1;
+  if(quality > 92) cinfo.comp_info[0].h_samp_factor = 1;
+
+  jpeg_start_compress(&cinfo, TRUE);
+
+  /* Strip alpha: RGBA → RGB per scanline */
+  uint8_t *row = g_malloc(3 * width);
+  while(cinfo.next_scanline < cinfo.image_height)
+  {
+    const uint8_t *src = in + cinfo.next_scanline * width * 4;
+    for(int i = 0; i < width; i++)
+    {
+      row[3 * i + 0] = src[4 * i + 0];
+      row[3 * i + 1] = src[4 * i + 1];
+      row[3 * i + 2] = src[4 * i + 2];
+    }
+    JSAMPROW tmp[1] = { row };
+    jpeg_write_scanlines(&cinfo, tmp, 1);
+  }
+
+  jpeg_finish_compress(&cinfo);
+  g_free(row);
+  jpeg_destroy_compress(&cinfo);
+
+  return (int)out_size;
+}
+
 static void *_get_preview_frame_worker(void *arg)
 {
   async_req_t *ar = arg;
@@ -516,7 +588,7 @@ static void *_get_preview_frame_worker(void *arg)
     return NULL;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
+  char *session_id = g_strdup(json_array_get_string_element(args, 0));
   gint64 front_buffer = json_array_get_int_element(args, 1);
   g_object_unref(parser);
 
@@ -535,7 +607,9 @@ static void *_get_preview_frame_worker(void *arg)
   if(!session)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
+    fprintf(stderr, "[webview] getPreviewFrame: session '%s' not found\n", session_id);
     _return_error(ctx, ar->id, "session not found");
+    g_free(session_id);
     _async_req_free(ar);
     return NULL;
   }
@@ -543,20 +617,29 @@ static void *_get_preview_frame_worker(void *arg)
   int buf_idx = (front_buffer == 0) ? 0 : 1;
   void *ptr = session->shm_ptr[buf_idx];
 
+  fprintf(stderr, "[webview] getPreviewFrame: session=%s buf=%d ptr=%p\n",
+          session_id, buf_idx, ptr);
+
   if(!ptr)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
+    fprintf(stderr, "[webview] getPreviewFrame: SHM buffer %d not mapped\n", buf_idx);
     _return_error(ctx, ar->id, "SHM buffer not mapped");
+    g_free(session_id);
     _async_req_free(ar);
     return NULL;
   }
 
   // Validate SHM header
   dt_shm_header_t *header = (dt_shm_header_t *)ptr;
+  fprintf(stderr, "[webview] getPreviewFrame: magic=0x%08x version=%u ready=%u w=%u h=%u\n",
+          header->magic, header->version, header->ready, header->width, header->height);
+
   if(header->magic != DT_SHM_MAGIC || header->version != DT_SHM_VERSION)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
     _return_error(ctx, ar->id, "invalid SHM header");
+    g_free(session_id);
     _async_req_free(ar);
     return NULL;
   }
@@ -565,7 +648,9 @@ static void *_get_preview_frame_worker(void *arg)
   if(ready != 1)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
+    fprintf(stderr, "[webview] getPreviewFrame: frame not ready (ready=%u)\n", ready);
     _return_error(ctx, ar->id, "frame not ready");
+    g_free(session_id);
     _async_req_free(ar);
     return NULL;
   }
@@ -576,16 +661,43 @@ static void *_get_preview_frame_worker(void *arg)
   size_t pixel_size = (size_t)stride * (size_t)h;
   uint8_t *pixels = (uint8_t *)ptr + DT_SHM_HEADER_SIZE;
 
-  // Base64 encode pixels
-  gchar *b64 = g_base64_encode(pixels, pixel_size);
+  // Convert BGRA → RGBA for JPEG compression (which expects RGBA input)
+  uint8_t *rgba = g_malloc(pixel_size);
+  for(size_t i = 0; i < pixel_size; i += 4)
+  {
+    rgba[i + 0] = pixels[i + 2]; // R ← B
+    rgba[i + 1] = pixels[i + 1]; // G ← G
+    rgba[i + 2] = pixels[i + 0]; // B ← R
+    rgba[i + 3] = pixels[i + 3]; // A ← A
+  }
   pthread_mutex_unlock(&ctx->session_mutex);
 
-  // Build JSON result: {"width":W, "height":H, "data":"base64..."}
-  char *result = g_strdup_printf("{\"width\":%u,\"height\":%u,\"data\":\"%s\"}", w, h, b64);
-  g_free(b64);
+  // JPEG compress (quality 90 — fast transfer, good quality)
+  size_t jpeg_buf_size = pixel_size + 1024;
+  uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
+  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 90);
+  g_free(rgba);
+
+  gchar *b64;
+  char *result;
+  if(jpeg_size > 0)
+  {
+    b64 = g_base64_encode(jpeg_buf, jpeg_size);
+    result = g_strdup_printf("{\"width\":%u,\"height\":%u,\"format\":\"jpeg\",\"data\":\"%s\"}", w, h, b64);
+    g_free(b64);
+  }
+  else
+  {
+    // Fallback: raw base64 if JPEG fails
+    b64 = g_base64_encode(pixels, pixel_size);
+    result = g_strdup_printf("{\"width\":%u,\"height\":%u,\"format\":\"raw\",\"data\":\"%s\"}", w, h, b64);
+    g_free(b64);
+  }
+  g_free(jpeg_buf);
 
   _return_ok(ctx, ar->id, result);
   g_free(result);
+  g_free(session_id);
   _async_req_free(ar);
   return NULL;
 }

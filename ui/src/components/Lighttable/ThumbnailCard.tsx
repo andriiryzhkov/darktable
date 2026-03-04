@@ -39,7 +39,7 @@ export default function ThumbnailCard({
   selected,
   rating,
   colorLabels,
-  groupId,
+  groupId: _groupId,
   groupSize,
   localCopy,
   altered,

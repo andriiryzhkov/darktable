@@ -10,6 +10,8 @@ interface UIState {
   rightSidebarWidth: number;
   thumbnailSize: number;
   gridColumns: number;
+  filmstripOpen: boolean;
+  filmstripHeight: number;
 
   setActiveView: (view: View) => void;
   toggleLeftSidebar: () => void;
@@ -18,6 +20,8 @@ interface UIState {
   setRightSidebarWidth: (w: number) => void;
   setThumbnailSize: (size: number) => void;
   setGridColumns: (cols: number) => void;
+  toggleFilmstrip: () => void;
+  setFilmstripHeight: (h: number) => void;
 }
 
 const SIDEBAR_MIN = 150;
@@ -32,6 +36,8 @@ export const useUIStore = create<UIState>((set) => ({
   rightSidebarWidth: 280,
   thumbnailSize: 200,
   gridColumns: 0,
+  filmstripOpen: true,
+  filmstripHeight: 100,
 
   setActiveView: (view) => set({ activeView: view }),
   toggleLeftSidebar: () =>
@@ -43,4 +49,6 @@ export const useUIStore = create<UIState>((set) => ({
   setThumbnailSize: (size) =>
     set({ thumbnailSize: Math.max(100, Math.min(400, size)) }),
   setGridColumns: (cols) => set({ gridColumns: cols }),
+  toggleFilmstrip: () => set((s) => ({ filmstripOpen: !s.filmstripOpen })),
+  setFilmstripHeight: (h) => set({ filmstripHeight: Math.max(60, Math.min(200, h)) }),
 }));

@@ -72,7 +72,8 @@ export interface ExposureParams {
 export interface PreviewFrameResult {
   width: number;
   height: number;
-  data: string; // base64-encoded BGRA8 pixels
+  format: "jpeg" | "raw"; // jpeg = JPEG compressed, raw = BGRA8 pixels
+  data: string; // base64-encoded
 }
 
 export interface FilmRoll {

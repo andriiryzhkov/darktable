@@ -1,4 +1,5 @@
 import { useUIStore } from "../../stores/uiStore";
+import { useCatalogStore } from "../../stores/catalogStore";
 import { usePlatform } from "../../hooks/usePlatform";
 import { windowStartDrag, windowZoom } from "../../api/commands";
 import logoSvg from "../../assets/idbutton.svg";
@@ -35,7 +36,10 @@ export default function HeaderBar() {
         {(["lighttable", "darkroom"] as const).map((view) => (
           <button
             key={view}
-            onClick={() => setActiveView(view)}
+            onClick={() => {
+              if (view === "darkroom" && useCatalogStore.getState().selectedIds.size === 0) return;
+              setActiveView(view);
+            }}
             className="headerbar-tab"
             data-active={activeView === view}
           >

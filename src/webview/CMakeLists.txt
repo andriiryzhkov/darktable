@@ -53,6 +53,7 @@ set(CMAKE_C_EXTENSIONS ${_SAVE_C_EXTENSIONS})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB REQUIRED glib-2.0)
 pkg_check_modules(JSON_GLIB REQUIRED json-glib-1.0)
+find_package(JPEG REQUIRED)
 
 set(WEBVIEW_HOST_SOURCES
   main.c
@@ -84,6 +85,7 @@ target_include_directories(darktable-webview PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..        # for "server/server_protocol.h"
   ${GLIB_INCLUDE_DIRS}
   ${JSON_GLIB_INCLUDE_DIRS}
+  ${JPEG_INCLUDE_DIRS}
 )
 
 # webview is C++ internally, so we need C++ linker
@@ -99,6 +101,7 @@ target_link_libraries(darktable-webview
   nfd
   ${GLIB_LIBRARIES}
   ${JSON_GLIB_LIBRARIES}
+  ${JPEG_LIBRARIES}
   pthread
 )
 

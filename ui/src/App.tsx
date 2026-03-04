@@ -9,6 +9,9 @@ import LeftSidebarModules from "./components/Sidebar/LeftSidebarModules";
 import RightSidebarModules from "./components/Sidebar/RightSidebarModules";
 import LighttableView from "./components/Lighttable/LighttableView";
 import DarkroomView from "./components/Darkroom/DarkroomView";
+import DarkroomLeftSidebar from "./components/Darkroom/DarkroomLeftSidebar";
+import DarkroomRightSidebar from "./components/Darkroom/DarkroomRightSidebar";
+import Filmstrip from "./components/Darkroom/Filmstrip";
 import ImportDialog from "./components/Import/ImportDialog";
 
 function App() {
@@ -42,10 +45,6 @@ function App() {
     },
     [setActiveView],
   );
-
-  const backToLighttable = useCallback(() => {
-    setActiveView("lighttable");
-  }, [setActiveView]);
 
   if (status === "connecting") {
     return (
@@ -94,6 +93,7 @@ function App() {
           onResize={setLeftSidebarWidth}
         >
           {activeView === "lighttable" && <LeftSidebarModules />}
+          {activeView === "darkroom" && <DarkroomLeftSidebar />}
         </Sidebar>
 
         {/* Center content */}
@@ -102,9 +102,9 @@ function App() {
             <LighttableView onOpenImage={openDarkroom} />
           )}
           {activeView === "darkroom" && activeImgId !== null && (
-            <DarkroomView imgid={activeImgId} onBack={backToLighttable} />
+            <DarkroomView imgid={activeImgId} />
           )}
-          <BottomBar />
+          {activeView === "lighttable" && <BottomBar />}
         </div>
 
         {/* Right sidebar */}
@@ -116,8 +116,12 @@ function App() {
           onResize={setRightSidebarWidth}
         >
           {activeView === "lighttable" && <RightSidebarModules />}
+          {activeView === "darkroom" && <DarkroomRightSidebar />}
         </Sidebar>
       </div>
+      {activeView === "darkroom" && (
+        <Filmstrip onSelectImage={openDarkroom} />
+      )}
       <ImportDialog />
     </div>
   );

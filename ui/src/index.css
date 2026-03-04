@@ -2086,3 +2086,145 @@ button.module-action-btn {
 .collection-history-item:hover {
   background: var(--hovered-bg-color);
 }
+
+/* ── Filmstrip ─────────────────────────────── */
+.filmstrip {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background-color: var(--filmstrip-bg-color);
+  border-top: 1px solid var(--border-color);
+}
+
+.filmstrip-scroll {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 2px;
+  padding: 4px;
+  align-items: center;
+}
+
+.filmstrip-thumb {
+  flex-shrink: 0;
+  height: 100%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  background-color: var(--thumbnail-bg-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.filmstrip-thumb > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.filmstrip-thumb[data-active="true"] {
+  border-color: var(--selection-color);
+}
+
+.filmstrip-thumb:hover:not([data-active="true"]) {
+  border-color: var(--thumbnail-hover-bg-color);
+}
+
+.filmstrip-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.filmstrip-exif {
+  font-size: 0.7rem;
+  color: var(--plugin-label-color);
+}
+
+/* ── Darkroom module group tabs ────────────── */
+.darkroom-group-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.darkroom-group-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  color: var(--plugin-label-color);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 100ms;
+}
+
+.darkroom-group-tab:hover {
+  background-color: var(--bg-color);
+  color: var(--fg-color);
+}
+
+.darkroom-group-tab[data-active="true"] {
+  background-color: var(--bauhaus-fill);
+  color: var(--grey-25);
+}
+
+/* ── Darkroom search ───────────────────────── */
+.darkroom-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 4px;
+  background-color: var(--field-bg);
+  border-radius: 6px;
+}
+
+.darkroom-search-icon {
+  color: var(--placeholder-text-color);
+  flex-shrink: 0;
+}
+
+.darkroom-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--field-fg);
+  font-size: 0.75rem;
+  font-family: inherit;
+}
+
+.darkroom-search-input::placeholder {
+  color: var(--placeholder-text-color);
+}
+
+/* ── Darkroom module enable toggle ─────────── */
+.darkroom-module-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--disabled-fg-color);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.darkroom-module-toggle[data-enabled="true"] {
+  color: var(--fg-color);
+}
+
+.darkroom-module-toggle:hover {
+  color: var(--fg-color);
+}
