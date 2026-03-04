@@ -36,12 +36,12 @@ export default function BottomBar() {
       {/* Left: rating + color labels */}
       <div className="flex items-center">
         <button className="bottombar-btn" title="Reject">
-          <Ban size={11} />
+          <Ban size={12} />
         </button>
 
         {[1, 2, 3, 4, 5].map((n) => (
           <button key={n} className="bottombar-star" title={`Rate ${n} stars`}>
-            <Star size={13} />
+            <Star size={12} />
           </button>
         ))}
 
@@ -57,7 +57,7 @@ export default function BottomBar() {
         ))}
 
         <button className="bottombar-btn" title="Remove color label">
-          <CircleOff size={11} />
+          <CircleOff size={12} />
         </button>
       </div>
 

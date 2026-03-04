@@ -5,6 +5,7 @@ interface CollapsibleModuleProps {
   title: string;
   defaultOpen?: boolean;
   onReset?: () => void;
+  extraButtons?: ReactNode;
   children: ReactNode;
 }
 
@@ -12,6 +13,7 @@ export default function CollapsibleModule({
   title,
   defaultOpen = false,
   onReset,
+  extraButtons,
   children,
 }: CollapsibleModuleProps) {
   const [open, setOpen] = useState(defaultOpen);
@@ -27,14 +29,14 @@ export default function CollapsibleModule({
         <span className="flex-1">{title}</span>
         <span
           className="module-actions"
-          style={{ visibility: open ? "visible" : "hidden" }}
           onClick={(e) => e.stopPropagation()}
         >
+          {extraButtons}
           <span title="Reset" className="module-action-btn" onClick={onReset}>
-            <RotateCcw size={10} />
+            <RotateCcw size={12} />
           </span>
           <span title="Presets" className="module-action-btn">
-            <Menu size={10} />
+            <Menu size={12} />
           </span>
         </span>
       </button>

@@ -22,7 +22,7 @@ export default function ModuleSection({
       >
         <span className="module-section-title">{title}</span>
         <ChevronDown
-          size={10}
+          size={12}
           className="module-section-chevron"
           style={{ transform: open ? "rotate(180deg)" : "none" }}
         />

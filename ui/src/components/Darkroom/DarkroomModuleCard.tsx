@@ -35,17 +35,16 @@ export default function DarkroomModuleCard({ module }: Props) {
 
         <span
           className="module-actions"
-          style={{ visibility: open ? "visible" : "hidden" }}
           onClick={(e) => e.stopPropagation()}
         >
           <span title="Multi-instance" className="module-action-btn">
-            <Copy size={10} />
-          </span>
-          <span title="Presets" className="module-action-btn">
-            <Menu size={10} />
+            <Copy size={12} />
           </span>
           <span title="Reset" className="module-action-btn">
-            <RotateCcw size={10} />
+            <RotateCcw size={12} />
+          </span>
+          <span title="Presets" className="module-action-btn">
+            <Menu size={12} />
           </span>
         </span>
       </button>

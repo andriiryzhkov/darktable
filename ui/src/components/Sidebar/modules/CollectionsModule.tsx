@@ -300,7 +300,7 @@ export default function CollectionsModule() {
                   >
                     {item.hasChildren && (
                       <ChevronRight
-                        size={10}
+                        size={12}
                         style={{
                           transform: expandedFolders.has(item.fullPath)
                             ? "rotate(90deg)"

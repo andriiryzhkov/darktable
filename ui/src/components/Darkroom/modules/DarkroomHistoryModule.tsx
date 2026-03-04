@@ -11,8 +11,8 @@ export default function DarkroomHistoryModule() {
       {sessionId ? (
         <div>
           <div className="bauhaus-button-row">
-            <ModuleButton label="compress" icon={<Archive size={10} />} />
-            <ModuleButton label="discard" icon={<Trash2 size={10} />} />
+            <ModuleButton label="compress" icon={<Archive size={12} />} />
+            <ModuleButton label="discard" icon={<Trash2 size={12} />} />
           </div>
           <p
             className="text-xs"

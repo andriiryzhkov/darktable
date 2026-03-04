@@ -315,7 +315,7 @@ function SortControls() {
         title={sortDirection === "asc" ? "Ascending — click for descending" : "Descending — click for ascending"}
         onClick={toggleSortDirection}
       >
-        {sortDirection === "asc" ? <ArrowUpNarrowWide size={11} /> : <ArrowDownWideNarrow size={11} />}
+        {sortDirection === "asc" ? <ArrowUpNarrowWide size={12} /> : <ArrowDownWideNarrow size={12} />}
       </button>
       <ModuleCombo
         label="sort by"

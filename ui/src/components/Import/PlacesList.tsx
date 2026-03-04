@@ -42,7 +42,7 @@ export default function PlacesList() {
             <Minus size={12} />
           </button>
           <button className="module-action-btn" title="reset places" onClick={handleReset}>
-            <RotateCcw size={11} />
+            <RotateCcw size={12} />
           </button>
         </div>
       </div>

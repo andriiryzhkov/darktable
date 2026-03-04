@@ -8,6 +8,21 @@ import {
 } from "../api/commands";
 import type { ExposureParams, ModuleInfo } from "../types/protocol";
 
+export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
+export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+
+export const ZOOM_LABELS: Record<ZoomLevel, string> = {
+  small: "small",
+  fit: "fit",
+  fill: "fill",
+  "50": "50%",
+  "100": "100%",
+  "200": "200%",
+  "400": "400%",
+  "800": "800%",
+  "1600": "1600%",
+};
+
 interface DevelopState {
   sessionId: string | null;
   imgid: number | null;
@@ -22,6 +37,11 @@ interface DevelopState {
   loading: boolean;
   previewError: string | null;
 
+  // Zoom & pan
+  zoom: ZoomLevel;
+  panX: number; // 0..1, center of viewport in image space
+  panY: number;
+
   openSession: (imgid: number) => Promise<void>;
   closeSession: () => Promise<void>;
   requestPreview: () => Promise<void>;
@@ -29,6 +49,8 @@ interface DevelopState {
   setExposure: (value: number) => Promise<void>;
   setBlack: (value: number) => Promise<void>;
   enableModule: (op: string, enabled: boolean) => Promise<void>;
+  setZoom: (zoom: ZoomLevel) => void;
+  setPan: (x: number, y: number) => void;
 }
 
 const PREVIEW_WIDTH = 1920;
@@ -50,18 +72,24 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   modules: [],
   loading: false,
   previewError: null,
+  zoom: "fit" as ZoomLevel,
+  panX: 0.5,
+  panY: 0.5,
+
+  setZoom: (zoom: ZoomLevel) => set({ zoom, panX: 0.5, panY: 0.5 }),
+  setPan: (panX: number, panY: number) => set({ panX, panY }),
 
   openSession: async (imgid: number) => {
     // Bump generation — any in-flight operations for prior sessions become stale
     const gen = ++sessionGeneration;
 
-    // Close previous session if any (fire-and-forget)
+    // Close previous session — must await so server frees the slot before we open a new one
     const prevSession = get().sessionId;
     if (prevSession) {
-      developClose(prevSession).catch(() => {});
+      await developClose(prevSession).catch(() => {});
     }
 
-    set({ loading: true, imgid, previewError: null, sessionId: null, previewSrc: null, frameData: null });
+    set({ loading: true, imgid, previewError: null, sessionId: null, previewSrc: null, frameData: null, zoom: "fit" as ZoomLevel, panX: 0.5, panY: 0.5 });
 
     try {
       const result = await developOpen(imgid, PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -126,7 +154,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     ++sessionGeneration; // invalidate any in-flight operations
     const { sessionId } = get();
     if (sessionId) {
-      developClose(sessionId).catch(() => {});
+      await developClose(sessionId).catch(() => {});
     }
     set({
       sessionId: null,

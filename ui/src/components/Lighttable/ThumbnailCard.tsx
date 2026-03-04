@@ -99,17 +99,17 @@ export default function ThumbnailCard({
         <div className="thumb-top-right">
           {altered && (
             <span className="thumb-status-icon">
-              <Pencil size={10} />
+              <Pencil size={12} />
             </span>
           )}
           {localCopy && (
             <span className="thumb-status-icon">
-              <Copy size={10} />
+              <Copy size={12} />
             </span>
           )}
           {groupSize > 1 && (
             <span className="thumb-status-icon thumb-group-badge">
-              <Group size={10} />
+              <Group size={12} />
               <span className="thumb-group-count">{groupSize}</span>
             </span>
           )}

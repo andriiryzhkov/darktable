@@ -27,7 +27,7 @@ function ActionButton({
       }}
       title={label}
     >
-      {Icon && <Icon size={11} />}
+      {Icon && <Icon size={12} />}
       <span>{label}</span>
     </button>
   );
@@ -114,7 +114,7 @@ export default function ActionsModule() {
             border: "1px solid var(--button-border)",
           }}
         >
-          <FolderOpen size={11} />
+          <FolderOpen size={12} />
           <span>show in files</span>
         </button>
       </div>
