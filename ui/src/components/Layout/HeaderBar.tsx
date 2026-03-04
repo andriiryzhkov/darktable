@@ -1,5 +1,6 @@
 import { useUIStore } from "../../stores/uiStore";
-import logoSrc from "../../assets/darktable-logo.png";
+import logoSvg from "../../assets/idbutton.svg";
+import titleSvg from "../../assets/darktable.svg";
 
 export default function HeaderBar() {
   const { activeView, setActiveView } = useUIStore();
@@ -8,8 +9,8 @@ export default function HeaderBar() {
     <div className="headerbar">
       {/* Left: logo + title + version */}
       <div className="flex items-center gap-2">
-        <img className="headerbar-logo" src={logoSrc} alt="darktable" />
-        <span className="headerbar-title">darktable</span>
+        <img className="headerbar-logo" src={logoSvg} alt="darktable" />
+        <img className="headerbar-title-svg" src={titleSvg} alt="darktable" />
         <span className="headerbar-version">5.5.0</span>
       </div>
 

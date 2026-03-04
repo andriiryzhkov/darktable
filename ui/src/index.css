@@ -849,36 +849,35 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
-  height: 28px;
+  padding: 0 16px;
+  height: 52px;
   flex-shrink: 0;
   background-color: var(--plugin-bg-color);
 }
 
 .headerbar-logo {
-  width: 16px;
-  height: 16px;
+  width: 36px;
+  height: 36px;
 }
 
-.headerbar-title {
-  font-size: 0.875rem;
-  font-weight: 700;
-  color: var(--fg-color);
+.headerbar-title-svg {
+  height: 20px;
+  width: auto;
 }
 
 .headerbar-version {
   color: var(--plugin-label-color);
-  font-size: 0.7em;
+  font-size: 0.9em;
 }
 
 .headerbar-tabs {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 20px;
 }
 
 .headerbar-tab {
-  font-size: 0.875rem;
+  font-size: 1.1rem;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -886,9 +885,25 @@ body {
   font-weight: 400;
 }
 
+.headerbar-tab {
+  position: relative;
+}
+
 .headerbar-tab[data-active="true"] {
   color: var(--fg-color);
   font-weight: 500;
+}
+
+.headerbar-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 2px;
+  background-color: var(--fg-color);
+  border-radius: 1px;
 }
 
 /* Top toolbar */
