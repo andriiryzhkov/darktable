@@ -1,17 +1,17 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
-interface ModuleSectionProps {
+interface BauhausSectionProps {
   title: string;
   defaultOpen?: boolean;
   children: ReactNode;
 }
 
-export default function ModuleSection({
+export default function BauhausSection({
   title,
   defaultOpen = false,
   children,
-}: ModuleSectionProps) {
+}: BauhausSectionProps) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (

@@ -1,5 +1,5 @@
 import CollapsibleModule from "../CollapsibleModule";
-import ModuleButton from "../controls/ModuleButton";
+import BauhausButton from "../../controls/BauhausButton";
 import { useCatalogStore } from "../../../stores/catalogStore";
 
 export default function SelectionModule() {
@@ -17,11 +17,11 @@ export default function SelectionModule() {
   return (
     <CollapsibleModule title="selection" defaultOpen>
       <div className="module-button-grid">
-        <ModuleButton label="select all" onClick={selectAll} disabled={!hasImages} />
-        <ModuleButton label="select none" onClick={clearSelection} disabled={!hasSelection} />
-        <ModuleButton label="invert selection" onClick={invertSelection} disabled={!hasImages} />
-        <ModuleButton label="select film roll" onClick={selectFilmRoll} disabled={!hasSelection} />
-        <ModuleButton label="select untouched" onClick={selectUntouched} disabled={!hasImages} />
+        <BauhausButton label="select all" onClick={selectAll} disabled={!hasImages} />
+        <BauhausButton label="select none" onClick={clearSelection} disabled={!hasSelection} />
+        <BauhausButton label="invert selection" onClick={invertSelection} disabled={!hasImages} />
+        <BauhausButton label="select film roll" onClick={selectFilmRoll} disabled={!hasSelection} />
+        <BauhausButton label="select untouched" onClick={selectUntouched} disabled={!hasImages} />
       </div>
     </CollapsibleModule>
   );

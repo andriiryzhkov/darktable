@@ -1,23 +1,44 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Suspense } from "react";
 import { Search } from "lucide-react";
 import {
+  IOP_MODULES,
+  IOP_GROUP_BASIC,
+  IOP_GROUP_TONE,
+  IOP_GROUP_COLOR,
+  IOP_GROUP_CORRECT,
+  IOP_GROUP_EFFECT,
+  type IopModuleDef,
+} from "../modules/registry";
+import {
   DARKROOM_MODULE_GROUPS,
-  DARKROOM_MODULES,
   type ModuleGroup,
 } from "./darkroomModules";
-import DarkroomModuleCard from "./DarkroomModuleCard";
+import ProcessingModuleCard from "../modules/ProcessingModuleCard";
+
+// Map UI group id to IOP_GROUP bitmask
+const GROUP_MAP: Record<string, number> = {
+  basic: IOP_GROUP_BASIC,
+  tone: IOP_GROUP_TONE,
+  color: IOP_GROUP_COLOR,
+  correct: IOP_GROUP_CORRECT,
+  effect: IOP_GROUP_EFFECT,
+};
 
 export default function DarkroomRightSidebar() {
   const [activeGroup, setActiveGroup] = useState<ModuleGroup>("active");
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredModules = useMemo(() => {
-    let modules = DARKROOM_MODULES;
+    let modules: IopModuleDef[] = IOP_MODULES;
 
     if (activeGroup === "active") {
-      modules = modules.filter((m) => m.enabled);
+      // TODO: filter by actually enabled modules from develop store
+      modules = [...modules];
     } else if (activeGroup !== "favorites") {
-      modules = modules.filter((m) => m.group === activeGroup);
+      const mask = GROUP_MAP[activeGroup];
+      if (mask) {
+        modules = modules.filter((m) => (m.defaultGroup & mask) !== 0);
+      }
     }
 
     if (searchQuery.trim()) {
@@ -63,9 +84,15 @@ export default function DarkroomRightSidebar() {
 
       {/* Module list */}
       <div className="flex-1 overflow-y-auto">
-        {filteredModules.map((mod) => (
-          <DarkroomModuleCard key={mod.op} module={mod} />
-        ))}
+        <Suspense fallback={null}>
+          {filteredModules.map((mod) => (
+            <ProcessingModuleCard
+              key={mod.op}
+              module={mod}
+              enabled={true}
+            />
+          ))}
+        </Suspense>
         {filteredModules.length === 0 && (
           <p
             className="text-xs text-center py-4"

@@ -1,6 +1,6 @@
 import { useRef, useCallback } from "react";
 import { useDevelopStore, ZOOM_LEVELS, ZOOM_LABELS, type ZoomLevel } from "../../../stores/developStore";
-import ModuleCombo from "../../Sidebar/controls/ModuleCombo";
+import BauhausCombo from "../../controls/BauhausCombo";
 
 const ZOOM_OPTIONS = ZOOM_LEVELS.map((l) => ZOOM_LABELS[l]);
 const LABEL_TO_ZOOM = Object.fromEntries(
@@ -119,7 +119,7 @@ export default function NavigationModule() {
           </>
         )}
         <div className="nav-module-zoom">
-          <ModuleCombo
+          <BauhausCombo
             hideLabel
             options={[...ZOOM_OPTIONS]}
             value={ZOOM_LABELS[zoom]}

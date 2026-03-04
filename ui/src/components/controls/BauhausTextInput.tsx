@@ -1,14 +1,14 @@
-interface ModuleTextInputProps {
+interface BauhausTextInputProps {
   value?: string;
   placeholder?: string;
   onChange?: (value: string) => void;
 }
 
-export default function ModuleTextInput({
+export default function BauhausTextInput({
   value = "",
   placeholder,
   onChange,
-}: ModuleTextInputProps) {
+}: BauhausTextInputProps) {
   return (
     <input
       type="text"

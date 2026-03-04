@@ -481,6 +481,28 @@ static void on_develop_set_params(const char *id, const char *req, void *arg)
   g_free(ipc_params);
 }
 
+static void on_develop_get_params(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developGetParams requires (sessionId, op)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  const char *session_id = json_array_get_string_element(args, 0);
+  const char *op = json_array_get_string_element(args, 1);
+  g_object_unref(parser);
+
+  char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
+                                     session_id, op);
+  _ipc_passthrough(ctx, id, "develop.get_params", ipc_params);
+  g_free(ipc_params);
+}
+
 static void on_develop_request_preview(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -1435,6 +1457,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developOpen", on_develop_open, ctx);
   webview_bind(ctx->webview, "developClose", on_develop_close, ctx);
   webview_bind(ctx->webview, "developSetParams", on_develop_set_params, ctx);
+  webview_bind(ctx->webview, "developGetParams", on_develop_get_params, ctx);
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
   webview_bind(ctx->webview, "developGetHistory", on_develop_get_history, ctx);
   webview_bind(ctx->webview, "developDeleteHistory", on_develop_delete_history, ctx);

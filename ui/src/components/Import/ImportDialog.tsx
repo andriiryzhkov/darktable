@@ -5,7 +5,7 @@ import PlacesList from "./PlacesList";
 import FolderTree from "./FolderTree";
 import FileList from "./FileList";
 import ImportBottomBar from "./ImportBottomBar";
-import ModuleCheckbox from "../Sidebar/controls/ModuleCheckbox";
+import BauhausCheckbox from "../controls/BauhausCheckbox";
 
 export default function ImportDialog() {
   const isOpen = useImportStore((s) => s.isOpen);
@@ -92,19 +92,19 @@ export default function ImportDialog() {
           <div className="import-right">
             {/* Toolbar */}
             <div className="import-toolbar">
-              <ModuleCheckbox
+              <BauhausCheckbox
                 label="select only new images"
                 checked={selectOnlyNew}
                 align="left"
                 onChange={setSelectOnlyNew}
               />
-              <ModuleCheckbox
+              <BauhausCheckbox
                 label="recursive directory"
                 checked={recursive}
                 align="left"
                 onChange={setRecursive}
               />
-              <ModuleCheckbox
+              <BauhausCheckbox
                 label="ignore non-raw images"
                 checked={ignoreNonRaw}
                 align="left"

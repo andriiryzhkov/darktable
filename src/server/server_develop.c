@@ -18,6 +18,7 @@
 
 #include "server/server.h"
 #include "common/history.h"
+#include "common/image.h"
 #include "common/image_cache.h"
 #include "common/iop_order.h"
 #include "develop/develop.h"
@@ -452,6 +453,26 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
     json_builder_add_double_value(b, p->black);
     json_builder_set_member_name(b, "compensate_exposure_bias");
     json_builder_add_boolean_value(b, p->compensate_exposure_bias);
+    json_builder_set_member_name(b, "compensate_hilite_pres");
+    json_builder_add_boolean_value(b, p->compensate_hilite_pres);
+    json_builder_set_member_name(b, "deflicker_percentile");
+    json_builder_add_double_value(b, p->deflicker_percentile);
+    json_builder_set_member_name(b, "deflicker_target_level");
+    json_builder_add_double_value(b, p->deflicker_target_level);
+
+    // Computed EXIF bias values for dynamic checkbox labels
+    float exposure_bias = 0.0f;
+    if(session->dev.image_storage.exif_exposure_bias != DT_EXIF_TAG_UNINITIALIZED)
+      exposure_bias = CLAMPF(session->dev.image_storage.exif_exposure_bias, -5.0f, 5.0f);
+    json_builder_set_member_name(b, "exposure_bias_ev");
+    json_builder_add_double_value(b, exposure_bias);
+
+    float highlight_bias = 0.0f;
+    if(session->dev.image_storage.exif_highlight_preservation > 0.0f
+       && session->dev.image_storage.exif_highlight_preservation != DT_EXIF_TAG_UNINITIALIZED)
+      highlight_bias = CLAMPF(session->dev.image_storage.exif_highlight_preservation, -1.0f, 4.0f);
+    json_builder_set_member_name(b, "highlight_bias_ev");
+    json_builder_add_double_value(b, highlight_bias);
   }
   else
   {
@@ -514,12 +535,20 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   {
     _server_exposure_params_t *p = (_server_exposure_params_t *)target->params;
 
+    if(json_object_has_member(new_params, "mode"))
+      p->mode = (_server_exposure_mode_t)json_object_get_int_member(new_params, "mode");
     if(json_object_has_member(new_params, "exposure"))
       p->exposure = (float)json_object_get_double_member(new_params, "exposure");
     if(json_object_has_member(new_params, "black"))
       p->black = (float)json_object_get_double_member(new_params, "black");
     if(json_object_has_member(new_params, "compensate_exposure_bias"))
       p->compensate_exposure_bias = json_object_get_boolean_member(new_params, "compensate_exposure_bias");
+    if(json_object_has_member(new_params, "compensate_hilite_pres"))
+      p->compensate_hilite_pres = json_object_get_boolean_member(new_params, "compensate_hilite_pres");
+    if(json_object_has_member(new_params, "deflicker_percentile"))
+      p->deflicker_percentile = (float)json_object_get_double_member(new_params, "deflicker_percentile");
+    if(json_object_has_member(new_params, "deflicker_target_level"))
+      p->deflicker_target_level = (float)json_object_get_double_member(new_params, "deflicker_target_level");
   }
   else
   {

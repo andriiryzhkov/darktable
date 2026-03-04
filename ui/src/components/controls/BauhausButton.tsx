@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
 
-interface ModuleButtonProps {
+interface BauhausButtonProps {
   label?: string;
   icon?: ReactNode;
   disabled?: boolean;
   onClick?: () => void;
 }
 
-export default function ModuleButton({ label, icon, disabled, onClick }: ModuleButtonProps) {
+export default function BauhausButton({ label, icon, disabled, onClick }: BauhausButtonProps) {
   const iconOnly = icon && !label;
   return (
     <button

@@ -22,6 +22,7 @@ declare global {
     developOpen: (imgid: number, width: number, height: number) => Promise<SessionInfo>;
     developClose: (sessionId: string) => Promise<unknown>;
     developSetParams: (sessionId: string, op: string, params: Record<string, unknown>) => Promise<unknown>;
+    developGetParams: (sessionId: string, op: string) => Promise<{ op: string; enabled: boolean; params: Record<string, unknown> }>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
     developGetHistory: (sessionId: string) => Promise<HistoryResult>;
     developDeleteHistory: (sessionId: string) => Promise<unknown>;
@@ -63,6 +64,9 @@ export const developSetParams = (
   op: string,
   params: Record<string, unknown>,
 ) => window.developSetParams(sessionId, op, params);
+
+export const developGetParams = (sessionId: string, op: string) =>
+  window.developGetParams(sessionId, op);
 
 export const developRequestPreview = (sessionId: string) =>
   window.developRequestPreview(sessionId);

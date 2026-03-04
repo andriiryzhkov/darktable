@@ -6,7 +6,7 @@ export interface ComboGroup {
   options: string[];
 }
 
-interface ModuleComboProps {
+interface BauhausComboProps {
   label?: string;
   hideLabel?: boolean;
   options?: string[];
@@ -17,7 +17,7 @@ interface ModuleComboProps {
   onAction?: () => void;
 }
 
-export default function ModuleCombo({
+export default function BauhausCombo({
   label,
   hideLabel,
   options,
@@ -26,7 +26,7 @@ export default function ModuleCombo({
   onChange,
   actionIcon,
   onAction,
-}: ModuleComboProps) {
+}: BauhausComboProps) {
   // Flatten groups into a single options list if groups are provided
   const allOptions = groups
     ? groups.flatMap((g) => g.options)

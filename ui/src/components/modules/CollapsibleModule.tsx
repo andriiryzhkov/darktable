@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight, RotateCcw, Menu } from "lucide-react";
-import ModuleButton from "./controls/ModuleButton";
+import BauhausButton from "../controls/BauhausButton";
 
 interface CollapsibleModuleProps {
   title: string;
@@ -33,8 +33,8 @@ export default function CollapsibleModule({
           onClick={(e) => e.stopPropagation()}
         >
           {extraButtons}
-          <ModuleButton icon={<RotateCcw size={12} />} onClick={onReset} />
-          <ModuleButton icon={<Menu size={12} />} />
+          <BauhausButton icon={<RotateCcw size={12} />} onClick={onReset} />
+          <BauhausButton icon={<Menu size={12} />} />
         </span>
       </div>
       {open && <div className="module-content">{children}</div>}

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import CollapsibleModule from "../CollapsibleModule";
-import ModuleCombo, { type ComboGroup } from "../controls/ModuleCombo";
-import ModuleInput from "../controls/ModuleInput";
-import ModuleButton from "../controls/ModuleButton";
+import BauhausCombo, { type ComboGroup } from "../../controls/BauhausCombo";
+import BauhausInput from "../../controls/BauhausInput";
+import BauhausButton from "../../controls/BauhausButton";
 import { useCollectionsStore } from "../../../stores/collectionsStore";
 import type {
   CollectionMode,
@@ -233,7 +233,7 @@ export default function CollectionsModule() {
             >
               {/* Property combo — no label */}
               <div className="collection-rule-property">
-                <ModuleCombo
+                <BauhausCombo
                   label=""
                   groups={propertyGroups}
                   value={PROPERTY_LABELS[rule.property]}
@@ -244,7 +244,7 @@ export default function CollectionsModule() {
                 />
               </div>
               {/* Text input */}
-              <ModuleInput
+              <BauhausInput
                 label=""
                 value={rule.text}
                 onChange={(val) => setRuleText(rule.id, val)}
@@ -354,7 +354,7 @@ export default function CollectionsModule() {
 
         {/* Bottom bar */}
         <div className="collection-bottom-bar" ref={historyRef}>
-          <ModuleButton
+          <BauhausButton
             label="history"
             onClick={() => setHistoryOpen(!historyOpen)}
           />

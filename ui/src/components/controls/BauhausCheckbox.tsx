@@ -1,18 +1,18 @@
 import { useState, useCallback } from "react";
 
-interface ModuleCheckboxProps {
+interface BauhausCheckboxProps {
   label: string;
   checked?: boolean;
   align?: "left" | "right";
   onChange?: (checked: boolean) => void;
 }
 
-export default function ModuleCheckbox({
+export default function BauhausCheckbox({
   label,
   checked: controlledChecked,
   align = "right",
   onChange,
-}: ModuleCheckboxProps) {
+}: BauhausCheckboxProps) {
   const [internal, setInternal] = useState(false);
   const checked = controlledChecked ?? internal;
 

@@ -1,19 +1,18 @@
-import ImportModule from "./modules/ImportModule";
-import CollectionsModule from "./modules/CollectionsModule";
-import CollectionFiltersModule from "./modules/CollectionFiltersModule";
-import ImageInfoModule from "./modules/ImageInfoModule";
-import ScriptsModule from "./modules/ScriptsModule";
-import ExportModule from "./modules/ExportModule";
+import { Suspense } from "react";
+import {
+  getLibModules,
+  VIEW_LIGHTTABLE,
+  PANEL_LEFT_CENTER,
+} from "../modules/registry";
+
+const modules = getLibModules(VIEW_LIGHTTABLE, PANEL_LEFT_CENTER);
 
 export default function LeftSidebarModules() {
   return (
-    <>
-      <ImportModule />
-      <CollectionsModule />
-      <CollectionFiltersModule />
-      <ImageInfoModule />
-      <ScriptsModule />
-      <ExportModule />
-    </>
+    <Suspense fallback={null}>
+      {modules.map((m) => (
+        <m.component key={m.op} />
+      ))}
+    </Suspense>
   );
 }

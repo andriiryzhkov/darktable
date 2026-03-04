@@ -1,8 +1,8 @@
 import { useState } from "react";
-import CollapsibleModule from "../../Sidebar/CollapsibleModule";
+import CollapsibleModule from "../CollapsibleModule";
 import ConfirmDialog from "../../ConfirmDialog";
 import { useDevelopStore } from "../../../stores/developStore";
-import ModuleButton from "../../Sidebar/controls/ModuleButton";
+import BauhausButton from "../../controls/BauhausButton";
 import { CircleDot, Power } from "lucide-react";
 
 export default function DarkroomHistoryModule() {
@@ -58,7 +58,7 @@ export default function DarkroomHistoryModule() {
               ))}
             </div>
             <div className="bauhaus-button-row" style={{ marginTop: 4 }}>
-              <ModuleButton label="compress history stack" />
+              <BauhausButton label="compress history stack" />
             </div>
           </div>
         ) : (

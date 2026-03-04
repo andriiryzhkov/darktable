@@ -35,9 +35,9 @@ interface ModuleInputSelectProps extends ModuleInputBaseProps {
   step?: never;
 }
 
-type ModuleInputProps = ModuleInputTextProps | ModuleInputNumberProps | ModuleInputSelectProps;
+type BauhausInputProps = ModuleInputTextProps | ModuleInputNumberProps | ModuleInputSelectProps;
 
-export default function ModuleInput(props: ModuleInputProps) {
+export default function BauhausInput(props: BauhausInputProps) {
   const { label, placeholder } = props;
 
   if (props.type === "integer") {

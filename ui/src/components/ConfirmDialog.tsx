@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import DialogOverlay from "./DialogOverlay";
-import ModuleButton from "./Sidebar/controls/ModuleButton";
+import BauhausButton from "./controls/BauhausButton";
 
 interface ConfirmDialogProps {
   title: string;
@@ -31,8 +31,8 @@ export default function ConfirmDialog({
       <div className="confirm-dialog">
         <div className="confirm-message">{message}</div>
         <div className="confirm-buttons">
-          <ModuleButton label="yes" onClick={onConfirm} />
-          <ModuleButton label="no" onClick={onCancel} />
+          <BauhausButton label="yes" onClick={onConfirm} />
+          <BauhausButton label="no" onClick={onCancel} />
         </div>
       </div>
     </DialogOverlay>

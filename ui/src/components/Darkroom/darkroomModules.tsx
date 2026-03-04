@@ -8,15 +8,6 @@ export interface ModuleGroupDef {
   icon: ReactNode;
 }
 
-export interface DarkroomModuleDef {
-  op: string;
-  name: string;
-  group: ModuleGroup;
-  enabled: boolean;
-  tags?: string[];
-  defaultOpen?: boolean;
-}
-
 const SvgIcon = ({ children }: { children: ReactNode }) => (
   <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
     {children}
@@ -59,15 +50,4 @@ export const DARKROOM_MODULE_GROUPS: ModuleGroupDef[] = [
     label: "effect",
     icon: <SvgIcon><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3z" /></SvgIcon>,
   },
-];
-
-export const DARKROOM_MODULES: DarkroomModuleDef[] = [
-  { op: "sigmoid",      name: "sigmoid",                group: "basic",   enabled: true,  tags: ["tone mapping", "filmic", "display transform"], defaultOpen: false },
-  { op: "crop",         name: "crop",                   group: "basic",   enabled: false, tags: ["aspect ratio", "crop", "trim"] },
-  { op: "exposure",     name: "exposure",               group: "basic",   enabled: true,  tags: ["brightness", "black point", "ev"], defaultOpen: false },
-  { op: "orientation",  name: "orientation",             group: "basic",   enabled: true,  tags: ["rotate", "flip", "auto"] },
-  { op: "ashift",       name: "rotate and perspective",  group: "correct", enabled: false, tags: ["keystone", "perspective", "rotation"] },
-  { op: "lens",         name: "lens correction",         group: "correct", enabled: false, tags: ["distortion", "vignetting", "ca", "chromatic"] },
-  { op: "denoise",      name: "denoise (profiled)",      group: "correct", enabled: true,  tags: ["noise reduction", "nr"] },
-  { op: "temperature",  name: "white balance",           group: "color",   enabled: true,  tags: ["color temperature", "tint", "wb"] },
 ];

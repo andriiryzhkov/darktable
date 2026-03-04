@@ -1,14 +1,14 @@
-interface ModuleSelectProps {
+interface BauhausSelectProps {
   options: string[];
   value?: string;
   onChange?: (value: string) => void;
 }
 
-export default function ModuleSelect({
+export default function BauhausSelect({
   options,
   value,
   onChange,
-}: ModuleSelectProps) {
+}: BauhausSelectProps) {
   return (
     <select
       className="dt-select"

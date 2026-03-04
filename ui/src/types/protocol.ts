@@ -80,6 +80,11 @@ export interface ExposureParams {
   exposure: number;
   black: number;
   compensate_exposure_bias: boolean;
+  compensate_hilite_pres: boolean;
+  deflicker_percentile: number;
+  deflicker_target_level: number;
+  exposure_bias_ev: number;
+  highlight_bias_ev: number;
 }
 
 export interface PreviewFrameResult {

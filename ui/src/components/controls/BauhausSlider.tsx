@@ -1,6 +1,6 @@
 import { useCallback, useRef, type ReactNode } from "react";
 
-interface ModuleSliderProps {
+interface BauhausSliderProps {
   label: string;
   value: number;
   min: number;
@@ -20,7 +20,7 @@ function defaultFormat(v: number): string {
   return v.toPrecision(4);
 }
 
-export default function ModuleSlider({
+export default function BauhausSlider({
   label,
   value,
   min,
@@ -33,7 +33,7 @@ export default function ModuleSlider({
   onChange,
   actionIcon,
   onAction,
-}: ModuleSliderProps) {
+}: BauhausSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
 
   const valueFromX = useCallback(

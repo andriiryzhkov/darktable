@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
-interface ModuleRowProps {
+interface BauhausRowProps {
   label: string;
   children: ReactNode;
 }
 
-export default function ModuleRow({ label, children }: ModuleRowProps) {
+export default function BauhausRow({ label, children }: BauhausRowProps) {
   return (
     <div className="module-row">
       <span className="module-row-label">{label}</span>

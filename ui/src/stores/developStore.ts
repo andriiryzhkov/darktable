@@ -3,6 +3,7 @@ import {
   developOpen,
   developClose,
   developSetParams,
+  developGetParams,
   developRequestPreview,
   developGetHistory,
   developDeleteHistory,
@@ -50,8 +51,8 @@ interface DevelopState {
   closeSession: () => Promise<void>;
   requestPreview: () => Promise<void>;
   fetchFrame: () => Promise<void>;
-  setExposure: (value: number) => Promise<void>;
-  setBlack: (value: number) => Promise<void>;
+  fetchModuleParams: (op: string) => Promise<void>;
+  setModuleParam: (op: string, params: Record<string, unknown>) => Promise<void>;
   enableModule: (op: string, enabled: boolean) => Promise<void>;
   fetchHistory: () => Promise<void>;
   deleteHistory: () => Promise<void>;
@@ -151,8 +152,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         });
       }
 
-      // Fetch history stack after first preview
+      // Fetch history stack and module params after first preview
       await get().fetchHistory();
+      await get().fetchModuleParams("exposure");
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -253,29 +255,30 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     }
   },
 
-  setExposure: async (value: number) => {
+  fetchModuleParams: async (op: string) => {
     const { sessionId } = get();
     if (!sessionId) return;
     try {
-      await developSetParams(sessionId, "exposure", { exposure: value });
-      await get().requestPreview();
-      await get().fetchFrame();
-      await get().fetchHistory();
+      const result = await developGetParams(sessionId, op);
+      if (op === "exposure") {
+        set({ exposureParams: result.params as unknown as ExposureParams });
+      }
     } catch (e) {
-      console.error("set exposure failed:", e);
+      console.error(`fetch ${op} params failed:`, e);
     }
   },
 
-  setBlack: async (value: number) => {
+  setModuleParam: async (op: string, params: Record<string, unknown>) => {
     const { sessionId } = get();
     if (!sessionId) return;
     try {
-      await developSetParams(sessionId, "exposure", { black: value });
+      await developSetParams(sessionId, op, params);
       await get().requestPreview();
       await get().fetchFrame();
       await get().fetchHistory();
+      await get().fetchModuleParams(op);
     } catch (e) {
-      console.error("set black failed:", e);
+      console.error(`set ${op} params failed:`, e);
     }
   },
 

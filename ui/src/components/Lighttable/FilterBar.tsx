@@ -10,7 +10,7 @@ import {
   SORT_GROUPS,
   type FilterType,
 } from "../../stores/filterStore";
-import ModuleCombo from "../Sidebar/controls/ModuleCombo";
+import BauhausCombo from "../controls/BauhausCombo";
 
 const STAR_PATH =
   "M12 2l2.9 6.6L22 9.5l-5 4.8 1.2 7.2L12 18l-6.2 3.5L7 14.3l-5-4.8 7.1-.9z";
@@ -36,7 +36,7 @@ function ModuleOrderFilter() {
   const setModuleOrder = useFilterStore((s) => s.setModuleOrder);
 
   return (
-    <ModuleCombo
+    <BauhausCombo
       label="module order"
       hideLabel
       options={MODULE_ORDER_LABELS}
@@ -317,7 +317,7 @@ function SortControls() {
       >
         {sortDirection === "asc" ? <ArrowUpNarrowWide size={12} /> : <ArrowDownWideNarrow size={12} />}
       </button>
-      <ModuleCombo
+      <BauhausCombo
         label="sort by"
         hideLabel
         groups={SORT_COMBO_GROUPS}
