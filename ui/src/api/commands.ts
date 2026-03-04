@@ -34,6 +34,8 @@ declare global {
     catalogGetCollectionValues: (property: string, filter: string) => Promise<{ values: PropertyValue[] }>;
     catalogGetFilmrolls: () => Promise<{ filmrolls: FilmRoll[] }>;
     catalogGetTags: () => Promise<{ tags: Tag[] }>;
+    windowStartDrag: () => Promise<void>;
+    windowZoom: () => Promise<void>;
   }
 }
 
@@ -88,3 +90,7 @@ export const catalogGetCollectionValues = (property: string, filter: string) =>
 export const catalogGetFilmrolls = () => window.catalogGetFilmrolls();
 
 export const catalogGetTags = () => window.catalogGetTags();
+
+export const windowStartDrag = () => window.windowStartDrag();
+
+export const windowZoom = () => window.windowZoom();

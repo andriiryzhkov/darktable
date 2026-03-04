@@ -18,6 +18,7 @@
 
 #include "bindings.h"
 #include "ipc.h"
+#include "titlebar.h"
 #include "server/server_protocol.h"
 
 #include <errno.h>
@@ -1197,6 +1198,24 @@ static void on_get_file_thumbnail(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+/* ── Window titlebar actions ──────────────────────────────────── */
+
+static void on_window_start_drag(const char *id, const char *req, void *arg)
+{
+  (void)req;
+  dt_webview_ctx_t *ctx = arg;
+  dt_titlebar_start_drag(ctx->webview);
+  _return_ok(ctx, id, "null");
+}
+
+static void on_window_zoom(const char *id, const char *req, void *arg)
+{
+  (void)req;
+  dt_webview_ctx_t *ctx = arg;
+  dt_titlebar_zoom(ctx->webview);
+  _return_ok(ctx, id, "null");
+}
+
 /* ── Native folder picker (via nativefiledialog-extended) ─────── */
 
 static void on_pick_folder(const char *id, const char *req, void *arg)
@@ -1256,4 +1275,6 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "catalogGetCollectionValues", on_catalog_get_collection_values, ctx);
   webview_bind(ctx->webview, "catalogGetFilmrolls", on_catalog_get_filmrolls, ctx);
   webview_bind(ctx->webview, "catalogGetTags", on_catalog_get_tags, ctx);
+  webview_bind(ctx->webview, "windowStartDrag", on_window_start_drag, ctx);
+  webview_bind(ctx->webview, "windowZoom", on_window_zoom, ctx);
 }

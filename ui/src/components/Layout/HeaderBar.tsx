@@ -1,12 +1,28 @@
 import { useUIStore } from "../../stores/uiStore";
+import { usePlatform } from "../../hooks/usePlatform";
+import { windowStartDrag, windowZoom } from "../../api/commands";
 import logoSvg from "../../assets/idbutton.svg";
 import titleSvg from "../../assets/darktable.svg";
 
+function isInteractive(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.closest("button, a, input, select") !== null;
+}
+
 export default function HeaderBar() {
   const { activeView, setActiveView } = useUIStore();
+  const platform = usePlatform();
 
   return (
-    <div className="headerbar">
+    <div
+      className={`headerbar${platform === "macos" ? " headerbar--mac" : ""}`}
+      onMouseDown={(e) => {
+        if (e.button === 0 && !isInteractive(e.target)) windowStartDrag();
+      }}
+      onDoubleClick={(e) => {
+        if (!isInteractive(e.target)) windowZoom();
+      }}
+    >
       {/* Left: logo + title + version */}
       <div className="flex items-center gap-2">
         <img className="headerbar-logo" src={logoSvg} alt="darktable" />

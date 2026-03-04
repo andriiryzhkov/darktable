@@ -18,6 +18,7 @@
 
 #include "bindings.h"
 #include "ipc.h"
+#include "titlebar.h"
 
 #include <glib.h>
 #include <signal.h>
@@ -275,6 +276,9 @@ int main(int argc, char *argv[])
 
   webview_set_title(ctx.webview, "darktable");
   webview_set_size(ctx.webview, 1400, 900, WEBVIEW_HINT_NONE);
+
+  // remove native titlebar, keep native window controls
+  dt_titlebar_init(ctx.webview);
 
   // Register JS bindings
   dt_webview_register_bindings(&ctx);

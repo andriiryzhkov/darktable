@@ -61,6 +61,20 @@ set(WEBVIEW_HOST_SOURCES
   ../server/server_protocol.c
 )
 
+# Platform-specific titlebar implementation
+if(APPLE)
+  list(APPEND WEBVIEW_HOST_SOURCES platform/titlebar_macos.m)
+  # _XOPEN_SOURCE from parent build hides BSD types (u_int) in Cocoa headers
+  set_source_files_properties(platform/titlebar_macos.m PROPERTIES
+    COMPILE_DEFINITIONS _DARWIN_C_SOURCE
+    COMPILE_OPTIONS "-Wno-error"
+  )
+elseif(WIN32)
+  list(APPEND WEBVIEW_HOST_SOURCES platform/titlebar_windows.c)
+else()
+  list(APPEND WEBVIEW_HOST_SOURCES platform/titlebar_linux.c)
+endif()
+
 add_executable(darktable-webview ${WEBVIEW_HOST_SOURCES})
 
 # We include C API headers only (api.h, types.h, errors.h) — no C++ in our code.
@@ -89,6 +103,13 @@ target_link_libraries(darktable-webview
 
 if(APPLE)
   target_link_libraries(darktable-webview "-framework WebKit" "-framework Cocoa")
+elseif(WIN32)
+  target_link_libraries(darktable-webview dwmapi user32)
+else()
+  pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+  target_include_directories(darktable-webview PRIVATE ${GTK3_INCLUDE_DIRS})
+  target_link_directories(darktable-webview PRIVATE ${GTK3_LIBRARY_DIRS})
+  target_link_libraries(darktable-webview ${GTK3_LIBRARIES})
 endif()
 
 set_target_properties(darktable-webview

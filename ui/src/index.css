@@ -855,6 +855,11 @@ body {
   background-color: var(--plugin-bg-color);
 }
 
+/* Reserve space for macOS traffic lights */
+.headerbar--mac {
+  padding-left: 80px;
+}
+
 .headerbar-logo {
   width: 36px;
   height: 36px;
