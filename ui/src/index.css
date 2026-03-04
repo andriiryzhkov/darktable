@@ -756,16 +756,11 @@ body {
 }
 
 .bauhaus-combo-popup {
-  position: absolute;
-  top: -2px;
-  left: -6px;
-  right: -6px;
-  z-index: 100;
+  position: fixed;
+  z-index: 10000;
   background-color: var(--bauhaus-bg);
   border-radius: 4px;
   padding: 3px 0;
-  max-height: 200px;
-  overflow-y: auto;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
@@ -917,18 +912,244 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 8px;
-  height: 24px;
+  height: 26px;
   flex-shrink: 0;
   background-color: var(--plugin-bg-color);
+  border-bottom: 1px solid var(--border-color);
 }
 
-.top-toolbar-select {
-  width: 100px;
+.top-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .top-toolbar-info {
+  font-size: 0.7rem;
+  color: var(--plugin-label-color);
+  white-space: nowrap;
+}
+
+/* Filter bar (embedded in top-toolbar) */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-pill {
+  display: flex;
+  align-items: center;
+  background-color: var(--bg-color);
+  border-radius: 6px;
+  padding: 2px 6px;
+  height: 20px;
+}
+
+.filter-bar-section {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.filter-pill .bauhaus-combo {
+  width: 72px;
+  margin-bottom: 0;
+}
+
+.filter-pill .bauhaus-combo-popup-row {
+  gap: 16px;
+}
+
+.filter-sort {
+  gap: 2px;
+}
+
+.filter-sort .bauhaus-combo {
+  width: 110px;
+}
+
+/* Color label filter circles */
+.filter-color-circle {
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 100ms;
+  flex-shrink: 0;
+}
+
+.filter-color-circle:hover {
+  opacity: 1;
+}
+
+.filter-color-mode {
+  cursor: pointer;
+  color: var(--fg-color);
+  opacity: 0.6;
+  margin-left: 2px;
+  display: flex;
+  align-items: center;
+}
+
+.filter-color-mode:hover {
+  opacity: 1;
+}
+
+.filter-color-mode[data-disabled="true"] {
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+/* Star rating filter */
+.filter-rating {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.filter-rating-star {
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.filter-rating-star:hover {
+  opacity: 1;
+}
+
+.filter-rating-icon {
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.filter-rating-icon:hover {
+  opacity: 1;
+}
+
+.filter-rating-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--bauhaus-bg);
+  border-radius: 4px;
+  padding: 3px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.filter-rating-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
   font-size: 0.75rem;
   color: var(--plugin-label-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-rating-menu-item:hover {
+  background-color: var(--bauhaus-indicator);
+  color: var(--fg-color);
+}
+
+/* Text search filter */
+.filter-search {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.filter-search-input {
+  background-color: var(--bauhaus-bg);
+  color: var(--bauhaus-fg);
+  border: 1px solid var(--bauhaus-border);
+  padding: 1px 18px 1px 4px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  border-radius: 2px;
+  width: 120px;
+  height: 18px;
+}
+
+.filter-search-input:focus {
+  outline: none;
+  border-color: var(--bauhaus-fill);
+  color: var(--fg-color);
+}
+
+.filter-search-input::placeholder {
+  color: var(--placeholder-text-color);
+}
+
+.filter-search-clear {
+  position: absolute;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+}
+
+.filter-search-clear:hover {
+  color: var(--fg-color);
+}
+
+/* Filter config popup */
+.filter-config-popup {
+  position: fixed;
+  background-color: var(--bauhaus-bg);
+  border-radius: 4px;
+  padding: 4px 0;
+  z-index: 1000;
+  min-width: 140px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.filter-config-header {
+  font-size: 0.7rem;
+  color: var(--plugin-label-color);
+  padding: 2px 8px 4px;
+}
+
+.filter-config-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 0.75rem;
+  color: var(--fg-color);
+  cursor: pointer;
+}
+
+.filter-config-item:hover {
+  background-color: var(--bauhaus-bg-hover);
+}
+
+.filter-config-check {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid var(--bauhaus-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--fg-color);
+}
+
+.filter-config-check[data-checked="true"] {
+  background-color: var(--bauhaus-fill);
+  border-color: var(--bauhaus-fill);
+}
+
+.filter-config-divider {
+  height: 1px;
+  background-color: var(--grey-40);
+  margin: 3px 8px;
 }
 
 /* Bottom bar */

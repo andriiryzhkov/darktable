@@ -45,6 +45,8 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
   int filter_tag_id = -1;
   int filter_rating_min = -1;
   const char *filter_text = NULL;
+  const char *sort_field = NULL;
+  const char *sort_order = NULL;
 
   if(req->params)
   {
@@ -60,6 +62,10 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
       filter_rating_min = (int)json_object_get_int_member(req->params, "rating_min");
     if(json_object_has_member(req->params, "text"))
       filter_text = json_object_get_string_member(req->params, "text");
+    if(json_object_has_member(req->params, "sort"))
+      sort_field = json_object_get_string_member(req->params, "sort");
+    if(json_object_has_member(req->params, "sort_order"))
+      sort_order = json_object_get_string_member(req->params, "sort_order");
   }
 
   // Clamp limit
@@ -112,25 +118,52 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
         clause = g_strdup_printf("i.filename LIKE '%s'", like_val);
       else if(!g_strcmp0(prop, "rating"))
       {
-        // text is like "3 stars", "unrated", "rejected" — match the rating number
-        int rating = -1;
-        if(strstr(text, "unrated")) rating = 0;
-        else if(strstr(text, "rejected")) rating = 6;
-        else rating = atoi(text);
-        if(rating >= 0)
-          clause = g_strdup_printf("(i.flags & 7) = %d", rating);
+        // supports: "unrated", "rejected", "3", ">=3", "<=2"
+        if(strstr(text, "unrated"))
+          clause = g_strdup("(i.flags & 7) = 0");
+        else if(strstr(text, "rejected"))
+          clause = g_strdup("(i.flags & 7) = 6");
+        else
+        {
+          const char *p = text;
+          while(*p == ' ') p++;
+          const char *op = "=";
+          if(p[0] == '>' && p[1] == '=') { op = ">="; p += 2; }
+          else if(p[0] == '<' && p[1] == '=') { op = "<="; p += 2; }
+          else if(p[0] == '>') { op = ">"; p += 1; }
+          else if(p[0] == '<') { op = "<"; p += 1; }
+          while(*p == ' ') p++;
+          int rating = atoi(p);
+          if(rating >= 0 && rating <= 5)
+            clause = g_strdup_printf("(i.flags & 7) %s %d AND (i.flags & 7) < 6", op, rating);
+        }
       }
       else if(!g_strcmp0(prop, "color_label"))
       {
-        int color = -1;
-        if(strstr(text, "red")) color = 0;
-        else if(strstr(text, "yellow")) color = 1;
-        else if(strstr(text, "green")) color = 2;
-        else if(strstr(text, "blue")) color = 3;
-        else if(strstr(text, "purple")) color = 4;
-        if(color >= 0)
+        // supports comma-separated: "red,green,blue"
+        GString *color_set = g_string_new("");
+        gchar **tokens = g_strsplit(text, ",", -1);
+        for(int t = 0; tokens[t]; t++)
+        {
+          g_strstrip(tokens[t]);
+          int color = -1;
+          if(!g_ascii_strcasecmp(tokens[t], "red")) color = 0;
+          else if(!g_ascii_strcasecmp(tokens[t], "yellow")) color = 1;
+          else if(!g_ascii_strcasecmp(tokens[t], "green")) color = 2;
+          else if(!g_ascii_strcasecmp(tokens[t], "blue")) color = 3;
+          else if(!g_ascii_strcasecmp(tokens[t], "purple")) color = 4;
+          if(color >= 0)
+          {
+            if(color_set->len > 0) g_string_append_c(color_set, ',');
+            g_string_append_printf(color_set, "%d", color);
+          }
+        }
+        g_strfreev(tokens);
+        if(color_set->len > 0)
           clause = g_strdup_printf(
-            "i.id IN (SELECT imgid FROM main.color_labels WHERE color = %d)", color);
+            "i.id IN (SELECT imgid FROM main.color_labels WHERE color IN (%s))",
+            color_set->str);
+        g_string_free(color_set, TRUE);
       }
       else if(!g_strcmp0(prop, "title") || !g_strcmp0(prop, "description") || !g_strcmp0(prop, "creator"))
         clause = g_strdup_printf(
@@ -247,7 +280,36 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
       g_string_append(query, " AND i.filename LIKE ?6");
   }
 
-  g_string_append(query, " ORDER BY i.datetime_taken DESC LIMIT ?1 OFFSET ?2");
+  // Build ORDER BY from sort params
+  const char *order_col = "i.datetime_taken";
+  const char *order_dir = "DESC";
+
+  if(sort_field)
+  {
+    if(!g_strcmp0(sort_field, "filename"))              order_col = "i.filename";
+    else if(!g_strcmp0(sort_field, "full path"))        order_col = "f.folder, i.filename";
+    else if(!g_strcmp0(sort_field, "aspect ratio"))     order_col = "i.aspect_ratio";
+    else if(!g_strcmp0(sort_field, "capture time"))     order_col = "i.datetime_taken";
+    else if(!g_strcmp0(sort_field, "import time"))      order_col = "i.import_timestamp";
+    else if(!g_strcmp0(sort_field, "modification time")) order_col = "i.change_timestamp";
+    else if(!g_strcmp0(sort_field, "export time"))      order_col = "i.export_timestamp";
+    else if(!g_strcmp0(sort_field, "print time"))       order_col = "i.print_timestamp";
+    else if(!g_strcmp0(sort_field, "rating"))           order_col = "CASE WHEN i.flags & 8 = 8 THEN -1 ELSE i.flags & 7 END";
+    else if(!g_strcmp0(sort_field, "color label"))      order_col = "i.color_labels";
+    else if(!g_strcmp0(sort_field, "title"))            order_col = "i.filename"; // TODO: join metadata
+    else if(!g_strcmp0(sort_field, "description"))      order_col = "i.filename"; // TODO: join metadata
+    else if(!g_strcmp0(sort_field, "group"))            order_col = "i.group_id";
+    else if(!g_strcmp0(sort_field, "id"))               order_col = "i.id";
+    else if(!g_strcmp0(sort_field, "custom sort"))      order_col = "i.position";
+    else if(!g_strcmp0(sort_field, "shuffle"))          order_col = "RANDOM()";
+  }
+
+  if(sort_order && !g_strcmp0(sort_order, "asc"))
+    order_dir = "ASC";
+  else if(sort_order && !g_strcmp0(sort_order, "desc"))
+    order_dir = "DESC";
+
+  g_string_append_printf(query, " ORDER BY %s %s LIMIT ?1 OFFSET ?2", order_col, order_dir);
 
   // Build matching count query
   GString *count_query = g_string_new(

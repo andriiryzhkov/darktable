@@ -195,21 +195,39 @@ static void on_catalog_query(const char *id, const char *req, void *arg)
       g_object_unref(gen);
     }
   }
+
+  // Optional 4th arg: sort field, 5th arg: sort order
+  const char *sort_field = NULL;
+  const char *sort_order = NULL;
+  if(json_array_get_length(args) >= 4)
+  {
+    JsonNode *n = json_array_get_element(args, 3);
+    if(n && JSON_NODE_HOLDS_VALUE(n))
+      sort_field = json_node_get_string(n);
+  }
+  if(json_array_get_length(args) >= 5)
+  {
+    JsonNode *n = json_array_get_element(args, 4);
+    if(n && JSON_NODE_HOLDS_VALUE(n))
+      sort_order = json_node_get_string(n);
+  }
   g_object_unref(parser);
 
-  char *params;
+  GString *params_str = g_string_new("{");
+  g_string_append_printf(params_str, "\"offset\":%" G_GINT64_FORMAT
+                                     ",\"limit\":%" G_GINT64_FORMAT, offset, limit);
   if(rules_json)
   {
-    params = g_strdup_printf("{\"offset\":%" G_GINT64_FORMAT
-                             ",\"limit\":%" G_GINT64_FORMAT
-                             ",\"rules\":%s}", offset, limit, rules_json);
+    g_string_append_printf(params_str, ",\"rules\":%s", rules_json);
     g_free(rules_json);
   }
-  else
-  {
-    params = g_strdup_printf("{\"offset\":%" G_GINT64_FORMAT
-                             ",\"limit\":%" G_GINT64_FORMAT "}", offset, limit);
-  }
+  if(sort_field)
+    g_string_append_printf(params_str, ",\"sort\":\"%s\"", sort_field);
+  if(sort_order)
+    g_string_append_printf(params_str, ",\"sort_order\":\"%s\"", sort_order);
+  g_string_append_c(params_str, '}');
+
+  char *params = g_string_free(params_str, FALSE);
   _ipc_passthrough(ctx, id, "catalog.query", params);
   g_free(params);
 }

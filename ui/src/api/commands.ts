@@ -16,7 +16,7 @@ import type { FolderEntry, FileEntry } from "../types/import";
 declare global {
   interface Window {
     ping: () => Promise<unknown>;
-    catalogQuery: (offset: number, limit: number, rules?: CollectionRuleParam[]) => Promise<CatalogQueryResult>;
+    catalogQuery: (offset: number, limit: number, rules?: CollectionRuleParam[], sort?: string, sortOrder?: string) => Promise<CatalogQueryResult>;
     catalogGetThumbnail: (imgid: number) => Promise<ThumbnailResult>;
     developOpen: (imgid: number, width: number, height: number) => Promise<SessionInfo>;
     developClose: (sessionId: string) => Promise<unknown>;
@@ -43,8 +43,8 @@ export type PlatformOS = "macos" | "windows" | "linux";
 
 export const ping = () => window.ping();
 
-export const catalogQuery = (offset: number, limit: number, rules?: CollectionRuleParam[]) =>
-  window.catalogQuery(offset, limit, rules);
+export const catalogQuery = (offset: number, limit: number, rules?: CollectionRuleParam[], sort?: string, sortOrder?: string) =>
+  window.catalogQuery(offset, limit, rules, sort, sortOrder);
 
 export const catalogGetThumbnail = (imgid: number) =>
   window.catalogGetThumbnail(imgid);

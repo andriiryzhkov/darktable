@@ -3,6 +3,7 @@ import { catalogQuery } from "../api/commands";
 import type { ImageInfo } from "../types/protocol";
 import { on } from "../events/eventBus";
 import { useCollectionsStore } from "./collectionsStore";
+import { useFilterStore } from "./filterStore";
 
 // Seed-based pseudo-random for deterministic mock data per image ID
 function mockRng(seed: number): number {
@@ -49,17 +50,20 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   fetchAll: async () => {
     set({ loading: true });
     try {
-      const rulesParams = useCollectionsStore.getState().getRulesParams();
-      const rules = rulesParams.length > 0 ? rulesParams : undefined;
+      const collectionRules = useCollectionsStore.getState().getRulesParams();
+      const filterRules = useFilterStore.getState().getFilterRules();
+      const allRules = [...collectionRules, ...filterRules];
+      const rules = allRules.length > 0 ? allRules : undefined;
+      const { sortBy, sortDirection } = useFilterStore.getState();
       // First query to discover total count
-      const first = await catalogQuery(0, 1, rules);
+      const first = await catalogQuery(0, 1, rules, sortBy, sortDirection);
       const total = first.total;
       if (total === 0) {
         set({ images: [], total: 0, loading: false });
         return;
       }
       // Fetch all image metadata in one request
-      const result = await catalogQuery(0, total, rules);
+      const result = await catalogQuery(0, total, rules, sortBy, sortDirection);
       set({
         images: result.images.map(enrichImage),
         total: result.total,
