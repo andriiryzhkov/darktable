@@ -5,21 +5,13 @@ import { on } from "../events/eventBus";
 import { useCollectionsStore } from "./collectionsStore";
 import { useFilterStore } from "./filterStore";
 
-// Seed-based pseudo-random for deterministic mock data per image ID
-function mockRng(seed: number): number {
-  const x = Math.sin(seed * 9301 + 49297) * 233280;
-  return x - Math.floor(x);
-}
-
 function enrichImage(img: ImageInfo): ImageInfo {
   return {
     ...img,
-    rating: img.rating ?? Math.floor(mockRng(img.id) * 6),
-    color_labels: img.color_labels ?? (mockRng(img.id + 1000) > 0.6
-      ? Math.floor(mockRng(img.id + 2000) * 31)
-      : 0),
+    rating: img.rating ?? 0,
+    color_labels: img.color_labels ?? 0,
     group_id: img.group_id ?? 0,
-    altered: img.altered ?? mockRng(img.id + 3000) > 0.7,
+    altered: img.altered ?? false,
     local_copy: img.local_copy ?? false,
   };
 }

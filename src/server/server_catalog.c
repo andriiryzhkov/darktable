@@ -118,8 +118,39 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
         clause = g_strdup_printf("i.filename LIKE '%s'", like_val);
       else if(!g_strcmp0(prop, "rating"))
       {
-        // supports: "unrated", "rejected", "3", ">=3", "<=2"
-        if(strstr(text, "unrated"))
+        // supports: "unrated", "rejected", "3", ">=3", "<=2",
+        // and comma-separated: "rejected,unrated,1,2,3"
+        if(strchr(text, ','))
+        {
+          // Comma-separated list: build OR clause
+          GString *or_clause = g_string_new("(");
+          gchar **tokens = g_strsplit(text, ",", -1);
+          gboolean or_first = TRUE;
+          for(int t = 0; tokens[t]; t++)
+          {
+            g_strstrip(tokens[t]);
+            if(!tokens[t][0]) continue;
+            if(!or_first) g_string_append(or_clause, " OR ");
+            or_first = FALSE;
+            if(!g_ascii_strcasecmp(tokens[t], "rejected"))
+              g_string_append(or_clause, "(i.flags & 7) = 6");
+            else if(!g_ascii_strcasecmp(tokens[t], "unrated"))
+              g_string_append(or_clause, "(i.flags & 7) = 0");
+            else
+            {
+              int rv = atoi(tokens[t]);
+              if(rv >= 1 && rv <= 5)
+                g_string_append_printf(or_clause, "(i.flags & 7) = %d", rv);
+            }
+          }
+          g_strfreev(tokens);
+          g_string_append_c(or_clause, ')');
+          if(!or_first)
+            clause = g_string_free(or_clause, FALSE);
+          else
+            g_string_free(or_clause, TRUE);
+        }
+        else if(strstr(text, "unrated"))
           clause = g_strdup("(i.flags & 7) = 0");
         else if(strstr(text, "rejected"))
           clause = g_strdup("(i.flags & 7) = 6");
@@ -250,7 +281,11 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
     "SELECT i.id, i.film_id, i.filename, i.datetime_taken,"
     "       i.flags, i.width, i.height, i.aspect_ratio,"
     "       i.exposure, i.aperture, i.iso, i.focal_length,"
-    "       f.folder"
+    "       f.folder,"
+    "       i.group_id,"
+    "       CASE WHEN i.history_end > 0 THEN 1 ELSE 0 END,"
+    "       COALESCE((SELECT SUM(1 << cl.color) FROM main.color_labels AS cl"
+    "                 WHERE cl.imgid = i.id), 0)"
     " FROM main.images AS i"
     " LEFT JOIN main.film_rolls AS f ON i.film_id = f.id");
 
@@ -415,6 +450,21 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
     json_builder_set_member_name(b, "folder");
     const char *folder = (const char *)sqlite3_column_text(stmt, 12);
     json_builder_add_string_value(b, folder ? folder : "");
+
+    // Derived fields
+    int flags = sqlite3_column_int(stmt, 4);
+    int raw_rating = flags & 7;
+    json_builder_set_member_name(b, "rating");
+    json_builder_add_int_value(b, raw_rating == 6 ? 0 : raw_rating);
+
+    json_builder_set_member_name(b, "group_id");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 13));
+
+    json_builder_set_member_name(b, "altered");
+    json_builder_add_boolean_value(b, sqlite3_column_int(stmt, 14) != 0);
+
+    json_builder_set_member_name(b, "color_labels");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 15));
 
     json_builder_end_object(b);
   }
