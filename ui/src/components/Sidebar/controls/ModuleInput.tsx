@@ -189,7 +189,7 @@ function IntegerInput({
         disabled={value <= min}
       >
         <svg viewBox="0 0 8 2" xmlns="http://www.w3.org/2000/svg">
-          <path d="M0 1h8" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M0 1h8" stroke="currentColor" strokeWidth="2" />
         </svg>
       </button>
       <input
@@ -207,7 +207,7 @@ function IntegerInput({
         disabled={value >= max}
       >
         <svg viewBox="0 0 8 8" xmlns="http://www.w3.org/2000/svg">
-          <path d="M0 4h8M4 0v8" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M0 4h8M4 0v8" stroke="currentColor" strokeWidth="2" />
         </svg>
       </button>
     </div>

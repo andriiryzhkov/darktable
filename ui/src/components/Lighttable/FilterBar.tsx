@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUp, ArrowDown, Filter, Check } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, Filter, Check } from "lucide-react";
 import {
   useFilterStore,
   ALL_FILTER_TYPES,
@@ -70,7 +70,7 @@ function ColorCircle({
         r={4.5}
         fill={active ? stroke : "none"}
         stroke={stroke}
-        strokeWidth={1.5}
+        strokeWidth={2}
       />
     </svg>
   );
@@ -111,7 +111,7 @@ function ColorLabelFilter() {
             <circle cx="10" cy="5" r="3" />
           </svg>
         ) : (
-          <svg viewBox="0 0 14 10" width="14" height="10" fill="none" stroke="currentColor" strokeWidth="1.4">
+          <svg viewBox="0 0 14 10" width="14" height="10" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="5" cy="5" r="3.5" />
             <circle cx="9" cy="5" r="3.5" />
           </svg>
@@ -315,7 +315,7 @@ function SortControls() {
         title={sortDirection === "asc" ? "Ascending — click for descending" : "Descending — click for ascending"}
         onClick={toggleSortDirection}
       >
-        {sortDirection === "asc" ? <ArrowUp size={11} /> : <ArrowDown size={11} />}
+        {sortDirection === "asc" ? <ArrowUpNarrowWide size={11} /> : <ArrowDownWideNarrow size={11} />}
       </button>
       <ModuleCombo
         label="sort by"

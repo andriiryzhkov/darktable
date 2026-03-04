@@ -20,7 +20,7 @@ import {
 const MODE_ICONS: Record<CollectionMode, JSX.Element> = {
   // Two interlocking rings — AND / narrow down
   and: (
-    <svg viewBox="0 0 14 10" width="14" height="10" fill="none" stroke="currentColor" strokeWidth="1.4">
+    <svg viewBox="0 0 14 10" width="14" height="10" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="5" cy="5" r="3.5" />
       <circle cx="9" cy="5" r="3.5" />
     </svg>
@@ -34,7 +34,7 @@ const MODE_ICONS: Record<CollectionMode, JSX.Element> = {
   ),
   // Diagonal slash — EXCEPT / exclude
   and_not: (
-    <svg viewBox="0 0 10 10" width="10" height="10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+    <svg viewBox="0 0 10 10" width="10" height="10" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <line x1="2" y1="8" x2="8" y2="2" />
     </svg>
   ),
