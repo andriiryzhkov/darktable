@@ -197,19 +197,20 @@ static void on_catalog_query(const char *id, const char *req, void *arg)
   }
 
   // Optional 4th arg: sort field, 5th arg: sort order
-  const char *sort_field = NULL;
-  const char *sort_order = NULL;
+  // g_strdup because json_node_get_string returns pointer into parser memory
+  char *sort_field = NULL;
+  char *sort_order = NULL;
   if(json_array_get_length(args) >= 4)
   {
     JsonNode *n = json_array_get_element(args, 3);
     if(n && JSON_NODE_HOLDS_VALUE(n))
-      sort_field = json_node_get_string(n);
+      sort_field = g_strdup(json_node_get_string(n));
   }
   if(json_array_get_length(args) >= 5)
   {
     JsonNode *n = json_array_get_element(args, 4);
     if(n && JSON_NODE_HOLDS_VALUE(n))
-      sort_order = json_node_get_string(n);
+      sort_order = g_strdup(json_node_get_string(n));
   }
   g_object_unref(parser);
 
@@ -227,6 +228,8 @@ static void on_catalog_query(const char *id, const char *req, void *arg)
     g_string_append_printf(params_str, ",\"sort_order\":\"%s\"", sort_order);
   g_string_append_c(params_str, '}');
 
+  g_free(sort_field);
+  g_free(sort_order);
   char *params = g_string_free(params_str, FALSE);
   _ipc_passthrough(ctx, id, "catalog.query", params);
   g_free(params);
