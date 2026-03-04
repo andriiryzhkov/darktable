@@ -141,12 +141,26 @@ function RangeRatingFilter() {
   const setRatingRange = useFilterStore((s) => s.setRatingRange);
   const clearRating = useFilterStore((s) => s.clearRating);
   const dragStart = useRef<number | null>(null);
+  const [dragHover, setDragHover] = useState<number | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Compute visual preview: during drag show the range being selected
+  const preview = useCallback((value: number): boolean => {
+    if (dragStart.current === null || dragHover === null) return ratingSelection.has(value);
+    const lo = Math.min(dragStart.current, dragHover);
+    const hi = Math.max(dragStart.current, dragHover);
+    return value >= lo && value <= hi;
+  }, [dragHover, ratingSelection]);
 
   // Click: toggle single value. Mousedown+drag: select range.
   const handleMouseDown = useCallback((value: number) => {
     dragStart.current = value;
+    setDragHover(value);
+  }, []);
+
+  const handleMouseEnter = useCallback((value: number) => {
+    if (dragStart.current !== null) setDragHover(value);
   }, []);
 
   const handleMouseUp = useCallback((value: number) => {
@@ -156,6 +170,7 @@ function RangeRatingFilter() {
       toggleRating(value);
     }
     dragStart.current = null;
+    setDragHover(null);
   }, [toggleRating, setRatingRange]);
 
   // Right-click context menu
@@ -203,11 +218,12 @@ function RangeRatingFilter() {
         strokeWidth={2}
         strokeLinecap="round"
         onMouseDown={() => handleMouseDown(-1)}
+        onMouseEnter={() => handleMouseEnter(-1)}
         onMouseUp={() => handleMouseUp(-1)}
       >
-        <circle cx={12} cy={12} r={10} fill={ratingSelection.has(-1) ? "var(--fg-color)" : "none"} />
-        <line x1={8} y1={8} x2={16} y2={16} stroke={ratingSelection.has(-1) ? "var(--bg-color)" : "var(--fg-color)"} />
-        <line x1={16} y1={8} x2={8} y2={16} stroke={ratingSelection.has(-1) ? "var(--bg-color)" : "var(--fg-color)"} />
+        <circle cx={12} cy={12} r={10} fill={preview(-1) ? "var(--fg-color)" : "none"} />
+        <line x1={8} y1={8} x2={16} y2={16} stroke={preview(-1) ? "var(--bg-color)" : "var(--fg-color)"} />
+        <line x1={16} y1={8} x2={8} y2={16} stroke={preview(-1) ? "var(--bg-color)" : "var(--fg-color)"} />
       </svg>
       {/* unrated (dash in circle) */}
       <svg
@@ -220,10 +236,11 @@ function RangeRatingFilter() {
         strokeWidth={2}
         strokeLinecap="round"
         onMouseDown={() => handleMouseDown(0)}
+        onMouseEnter={() => handleMouseEnter(0)}
         onMouseUp={() => handleMouseUp(0)}
       >
-        <circle cx={12} cy={12} r={10} fill={ratingSelection.has(0) ? "var(--fg-color)" : "none"} />
-        <line x1={7} y1={12} x2={17} y2={12} stroke={ratingSelection.has(0) ? "var(--bg-color)" : "var(--fg-color)"} />
+        <circle cx={12} cy={12} r={10} fill={preview(0) ? "var(--fg-color)" : "none"} />
+        <line x1={7} y1={12} x2={17} y2={12} stroke={preview(0) ? "var(--bg-color)" : "var(--fg-color)"} />
       </svg>
       {/* stars 1-5 */}
       {[1, 2, 3, 4, 5].map((n) => (
@@ -233,11 +250,12 @@ function RangeRatingFilter() {
           width={13}
           height={13}
           viewBox="0 0 24 24"
-          fill={ratingSelection.has(n) ? "var(--fg-color)" : "none"}
+          fill={preview(n) ? "var(--fg-color)" : "none"}
           stroke="var(--fg-color)"
           strokeWidth={2}
           strokeLinejoin="round"
           onMouseDown={() => handleMouseDown(n)}
+          onMouseEnter={() => handleMouseEnter(n)}
           onMouseUp={() => handleMouseUp(n)}
         >
           <path d={STAR_PATH} />
