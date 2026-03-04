@@ -26,6 +26,7 @@ interface ThumbnailCardProps {
   rating: number;
   colorLabels: number;
   groupId: number;
+  groupSize: number;
   localCopy: boolean;
   altered: boolean;
   onSelect: (e: React.MouseEvent) => void;
@@ -39,6 +40,7 @@ export default function ThumbnailCard({
   rating,
   colorLabels,
   groupId,
+  groupSize,
   localCopy,
   altered,
   onSelect,
@@ -105,8 +107,11 @@ export default function ThumbnailCard({
               <Copy size={10} />
             </span>
           )}
-          {groupId > 0 && (
-            <span className="thumb-status-icon">G</span>
+          {groupSize > 1 && (
+            <span className="thumb-status-icon thumb-group-badge">
+              <Copy size={10} />
+              <span className="thumb-group-count">{groupSize}</span>
+            </span>
           )}
         </div>
 

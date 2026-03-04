@@ -57,6 +57,7 @@ interface FilterState {
   ratingSelection: Set<number>; // -1=rejected, 0=unrated, 1-5=stars
   sortBy: string;
   sortDirection: SortDirection;
+  grouping: boolean;
 
   setModuleOrder: (value: string) => void;
   toggleColor: (color: string) => void;
@@ -69,6 +70,7 @@ interface FilterState {
   clearRating: () => void;
   setSortBy: (value: string) => void;
   toggleSortDirection: () => void;
+  toggleGrouping: () => void;
   addFilter: (type: FilterType) => void;
   removeFilter: (type: FilterType) => void;
   resetFilters: () => void;
@@ -83,6 +85,7 @@ export const useFilterStore = create<FilterState>((set, get) => ({
   ratingSelection: new Set<number>(),
   sortBy: "filename",
   sortDirection: "asc",
+  grouping: true,
 
   setModuleOrder: (value) => {
     set({ moduleOrder: value });
@@ -164,6 +167,10 @@ export const useFilterStore = create<FilterState>((set, get) => ({
   toggleSortDirection: () => {
     set((s) => ({ sortDirection: s.sortDirection === "asc" ? "desc" : "asc" }));
     emit("collection.changed", { reason: "sort" });
+  },
+
+  toggleGrouping: () => {
+    set((s) => ({ grouping: !s.grouping }));
   },
 
   addFilter: (type) => {

@@ -1,5 +1,6 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useMemo } from "react";
 import { useCatalogStore } from "../../stores/catalogStore";
+import { useFilterStore } from "../../stores/filterStore";
 import { useUIStore } from "../../stores/uiStore";
 import ThumbnailCard from "./ThumbnailCard";
 import TopToolbar from "./TopToolbar";
@@ -10,8 +11,21 @@ interface Props {
 
 export default function LighttableView({ onOpenImage }: Props) {
   const { images, loading, selectedIds, selectImage } = useCatalogStore();
+  const grouping = useFilterStore((s) => s.grouping);
   const thumbnailSize = useUIStore((s) => s.thumbnailSize);
   const setGridColumns = useUIStore((s) => s.setGridColumns);
+  const groupSizes = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const img of images) {
+      const gid = img.group_id ?? img.id;
+      counts.set(gid, (counts.get(gid) ?? 0) + 1);
+    }
+    return counts;
+  }, [images]);
+  const displayedImages = useMemo(
+    () => grouping ? images.filter((img) => img.id === (img.group_id ?? img.id)) : images,
+    [images, grouping],
+  );
   const gridRef = useRef<HTMLDivElement>(null);
 
   const handleSelect = useCallback(
@@ -50,7 +64,7 @@ export default function LighttableView({ onOpenImage }: Props) {
               gridTemplateColumns: `repeat(auto-fill, minmax(${thumbnailSize}px, 1fr))`,
             }}
           >
-            {images.map((img) => (
+            {displayedImages.map((img) => (
               <ThumbnailCard
                 key={img.id}
                 imgid={img.id}
@@ -59,6 +73,7 @@ export default function LighttableView({ onOpenImage }: Props) {
                 rating={img.rating ?? 0}
                 colorLabels={img.color_labels ?? 0}
                 groupId={img.group_id ?? 0}
+                groupSize={groupSizes.get(img.group_id ?? img.id) ?? 1}
                 localCopy={img.local_copy ?? false}
                 altered={img.altered ?? false}
                 onSelect={(e) => handleSelect(img.id, e)}

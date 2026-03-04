@@ -918,18 +918,19 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
-.top-toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
 .top-toolbar-info {
   font-size: 0.7rem;
   color: var(--plugin-label-color);
   white-space: nowrap;
+  flex: 1;
+  text-align: center;
+}
+
+.top-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 /* Filter bar (embedded in top-toolbar) */
@@ -1225,6 +1226,10 @@ body {
   color: var(--plugin-label-color);
 }
 
+.toolbar-icon-btn[data-active="true"] {
+  color: var(--fg-color);
+}
+
 /* Sidebar */
 .sidebar {
   flex-shrink: 0;
@@ -1279,6 +1284,17 @@ body {
 .thumb-status-icon {
   color: var(--thumbnail-font-color);
   font-size: 10px;
+}
+
+.thumb-group-badge {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.thumb-group-count {
+  font-size: 8px;
+  line-height: 1;
 }
 
 .thumb-spinner {
