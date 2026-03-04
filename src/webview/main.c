@@ -18,8 +18,10 @@
 
 #include "bindings.h"
 #include "ipc.h"
+#include "splash.h"
 #include "titlebar.h"
 
+#include <errno.h>
 #include <glib.h>
 #include <signal.h>
 #include <stdio.h>
@@ -32,6 +34,16 @@
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+
+// data shared between main thread and startup thread
+typedef struct _startup_data_t
+{
+  dt_webview_ctx_t *ctx;
+  const char *server_bin;
+  char **core_args;
+  int core_argc;
+  char *frontend_url;
+} _startup_data_t;
 
 static void usage(const char *progname)
 {
@@ -53,9 +65,34 @@ static void usage(const char *progname)
     progname);
 }
 
-// Spawn darktable-server and read SOCKET= from its stdout.
-// core_args is a NULL-terminated array of darktable options (passed after --core).
-// Returns PID on success, -1 on error. socket_path is filled in.
+// resolve path to the directory containing this binary
+static char *_get_binary_dir(void)
+{
+  char self[PATH_MAX];
+
+#ifdef __APPLE__
+  uint32_t bufsize = sizeof(self);
+  if(_NSGetExecutablePath(self, &bufsize) == 0)
+  {
+    char resolved[PATH_MAX];
+    if(realpath(self, resolved))
+      return g_path_get_dirname(resolved);
+  }
+#else
+  ssize_t len = readlink("/proc/self/exe", self, sizeof(self) - 1);
+  if(len > 0)
+  {
+    self[len] = '\0';
+    return g_path_get_dirname(self);
+  }
+#endif
+
+  return NULL;
+}
+
+// spawn darktable-server and read SOCKET= from its stdout
+// core_args is a NULL-terminated array of darktable options (passed after --core)
+// returns PID on success, -1 on error; socket_path is filled in
 static pid_t spawn_server(const char *server_bin, char **core_args, int core_argc,
                           char *socket_path, size_t path_size)
 {
@@ -77,13 +114,12 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
 
   if(pid == 0)
   {
-    // Child: redirect stdout to pipe, exec server
+    // child: redirect stdout to pipe, exec server
     close(pipefd[0]);
     dup2(pipefd[1], STDOUT_FILENO);
     close(pipefd[1]);
 
-    // Build argv: server_bin [--core core_args...] NULL
-    // Max args: 1 (server_bin) + 1 (--core) + core_argc + 1 (NULL)
+    // build argv: server_bin [--core core_args...] NULL
     char **exec_argv = g_new0(char *, 1 + 1 + core_argc + 1);
     int n = 0;
     exec_argv[n++] = (char *)server_bin;
@@ -105,7 +141,7 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
     _exit(1);
   }
 
-  // Parent: read from pipe until SOCKET= line
+  // parent: read from pipe until SOCKET= line
   close(pipefd[1]);
 
   FILE *fp = fdopen(pipefd[0], "r");
@@ -122,7 +158,6 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
   gboolean found = FALSE;
   while(fgets(line, sizeof(line), fp))
   {
-    // Strip trailing newline
     size_t len = strlen(line);
     if(len > 0 && line[len - 1] == '\n') line[len - 1] = '\0';
 
@@ -132,7 +167,7 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
       found = TRUE;
       break;
     }
-    // Forward non-SOCKET lines to stderr
+    // forward non-SOCKET lines to stderr
     fprintf(stderr, "[server] %s\n", line);
   }
   fclose(fp);
@@ -149,13 +184,73 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
   return pid;
 }
 
+// called on main thread when server is ready
+static void _on_server_ready(webview_t w, void *arg)
+{
+  _startup_data_t *data = arg;
+
+  dt_webview_register_bindings(data->ctx);
+
+  fprintf(stderr, "[webview] navigating to %s\n", data->frontend_url);
+  webview_navigate(w, data->frontend_url);
+}
+
+// called on main thread when startup fails
+static void _on_startup_error(webview_t w, void *arg)
+{
+  char *msg = arg;
+  char *js = g_strdup_printf(
+      "document.getElementById('splash-status').textContent='error: %s';"
+      "document.getElementById('splash-status').style.color='#e55';",
+      msg);
+  webview_eval(w, js);
+  g_free(js);
+  g_free(msg);
+}
+
+// background thread: spawn server, connect, then dispatch to main thread
+static void *_startup_thread(void *arg)
+{
+  _startup_data_t *data = arg;
+  dt_webview_ctx_t *ctx = data->ctx;
+
+  dt_splash_update(ctx->webview, "starting server...");
+
+  fprintf(stderr, "[webview] starting server: %s\n", data->server_bin);
+  ctx->server_pid = spawn_server(data->server_bin, data->core_args, data->core_argc,
+                                 ctx->socket_path, sizeof(ctx->socket_path));
+  if(ctx->server_pid < 0)
+  {
+    webview_dispatch(ctx->webview, _on_startup_error,
+                     g_strdup("failed to start darktable-server"));
+    return NULL;
+  }
+
+  dt_splash_update(ctx->webview, "connecting...");
+
+  ctx->socket_fd = dt_ipc_connect(ctx->socket_path);
+  if(ctx->socket_fd < 0)
+  {
+    kill(ctx->server_pid, SIGTERM);
+    waitpid(ctx->server_pid, NULL, 0);
+    ctx->server_pid = -1;
+    webview_dispatch(ctx->webview, _on_startup_error,
+                     g_strdup("failed to connect to server"));
+    return NULL;
+  }
+
+  dt_splash_update(ctx->webview, "loading interface...");
+  webview_dispatch(ctx->webview, _on_server_ready, data);
+  return NULL;
+}
+
 int main(int argc, char *argv[])
 {
   int dev_mode = 0;
   const char *frontend_dir = NULL;
   const char *server_bin = NULL;
 
-  // Everything after --core is passed through to darktable-server
+  // everything after --core is passed through to darktable-server
   char **core_args = NULL;
   int core_argc = 0;
 
@@ -163,7 +258,6 @@ int main(int argc, char *argv[])
   {
     if(!strcmp(argv[i], "--core"))
     {
-      // All remaining args go to darktable-server
       core_args = &argv[i + 1];
       core_argc = argc - (i + 1);
       break;
@@ -181,113 +275,35 @@ int main(int argc, char *argv[])
     }
   }
 
-  // Defaults
+  // resolve binary directory (for finding server binary and splash assets)
+  char *binary_dir = _get_binary_dir();
+
+  // resolve server binary path
   if(!server_bin)
     server_bin = g_getenv("DT_SERVER_BIN");
-  if(!server_bin)
+  if(!server_bin && binary_dir)
   {
-    // Look relative to this binary for darktable-server
-    char self[PATH_MAX];
-    gboolean found_self = FALSE;
-
-#ifdef __APPLE__
-    uint32_t bufsize = sizeof(self);
-    if(_NSGetExecutablePath(self, &bufsize) == 0)
-    {
-      // Resolve symlinks to get canonical path
-      char resolved[PATH_MAX];
-      if(realpath(self, resolved))
-      {
-        g_strlcpy(self, resolved, sizeof(self));
-        found_self = TRUE;
-      }
-    }
-#else
-    ssize_t len = readlink("/proc/self/exe", self, sizeof(self) - 1);
-    if(len > 0)
-    {
-      self[len] = '\0';
-      found_self = TRUE;
-    }
-#endif
-
-    if(found_self)
-    {
-      char *dir = g_path_get_dirname(self);
-      char *candidate = g_build_filename(dir, "darktable-server", NULL);
-      if(g_file_test(candidate, G_FILE_TEST_IS_EXECUTABLE))
-        server_bin = candidate;
-      else
-        server_bin = "darktable-server";
-      g_free(dir);
-      // Note: candidate may leak if used, but that's fine for startup
-    }
+    char *candidate = g_build_filename(binary_dir, "darktable-server", NULL);
+    if(g_file_test(candidate, G_FILE_TEST_IS_EXECUTABLE))
+      server_bin = candidate;
     else
-    {
-      server_bin = "darktable-server";
-    }
+      g_free(candidate);
   }
+  if(!server_bin)
+    server_bin = "darktable-server";
 
+  // resolve frontend directory and URL
   if(!frontend_dir && !dev_mode)
   {
-    // Default: look for ui/dist relative to binary
     frontend_dir = g_getenv("DT_FRONTEND_DIR");
     if(!frontend_dir)
       frontend_dir = "ui/dist";
   }
 
-  // Spawn server
-  dt_webview_ctx_t ctx;
-  memset(&ctx, 0, sizeof(ctx));
-  pthread_mutex_init(&ctx.ipc_mutex, NULL);
-  pthread_mutex_init(&ctx.session_mutex, NULL);
-  ctx.socket_fd = -1;
-
-  fprintf(stderr, "[webview] starting server: %s\n", server_bin);
-
-  ctx.server_pid = spawn_server(server_bin, core_args, core_argc,
-                                ctx.socket_path, sizeof(ctx.socket_path));
-  if(ctx.server_pid < 0)
-  {
-    fprintf(stderr, "ERROR: failed to start darktable-server\n");
-    return 1;
-  }
-
-  // Connect IPC
-  ctx.socket_fd = dt_ipc_connect(ctx.socket_path);
-  if(ctx.socket_fd < 0)
-  {
-    fprintf(stderr, "ERROR: failed to connect to server\n");
-    kill(ctx.server_pid, SIGTERM);
-    waitpid(ctx.server_pid, NULL, 0);
-    return 1;
-  }
-
-  // Create webview
-  ctx.webview = webview_create(1, NULL);
-  if(!ctx.webview)
-  {
-    fprintf(stderr, "ERROR: failed to create webview\n");
-    close(ctx.socket_fd);
-    kill(ctx.server_pid, SIGTERM);
-    waitpid(ctx.server_pid, NULL, 0);
-    return 1;
-  }
-
-  webview_set_title(ctx.webview, "darktable");
-  webview_set_size(ctx.webview, 1400, 900, WEBVIEW_HINT_NONE);
-
-  // remove native titlebar, keep native window controls
-  dt_titlebar_init(ctx.webview);
-
-  // Register JS bindings
-  dt_webview_register_bindings(&ctx);
-
-  // Navigate to frontend
+  char *frontend_url = NULL;
   if(dev_mode)
   {
-    fprintf(stderr, "[webview] dev mode: navigating to http://localhost:5173\n");
-    webview_navigate(ctx.webview, "http://localhost:5173");
+    frontend_url = g_strdup("http://localhost:5173");
   }
   else
   {
@@ -297,42 +313,80 @@ int main(int argc, char *argv[])
       fprintf(stderr, "ERROR: frontend not found at %s\n", index_path);
       fprintf(stderr, "Run 'cd ui && npm run build' first, or use --dev flag\n");
       g_free(index_path);
-      webview_destroy(ctx.webview);
-      close(ctx.socket_fd);
-      kill(ctx.server_pid, SIGTERM);
-      waitpid(ctx.server_pid, NULL, 0);
+      g_free(binary_dir);
       return 1;
     }
-    // Resolve to absolute path for file:// URL
     char resolved[PATH_MAX];
     if(!realpath(index_path, resolved))
     {
       fprintf(stderr, "ERROR: cannot resolve path %s: %s\n", index_path, strerror(errno));
       g_free(index_path);
-      webview_destroy(ctx.webview);
-      close(ctx.socket_fd);
-      kill(ctx.server_pid, SIGTERM);
-      waitpid(ctx.server_pid, NULL, 0);
+      g_free(binary_dir);
       return 1;
     }
     g_free(index_path);
-    char *url = g_strdup_printf("file://%s", resolved);
-    fprintf(stderr, "[webview] navigating to %s\n", url);
-    webview_navigate(ctx.webview, url);
-    g_free(url);
+    frontend_url = g_strdup_printf("file://%s", resolved);
   }
 
-  // Run event loop (blocks until window is closed)
+  // init context
+  dt_webview_ctx_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  pthread_mutex_init(&ctx.ipc_mutex, NULL);
+  pthread_mutex_init(&ctx.session_mutex, NULL);
+  ctx.socket_fd = -1;
+
+  // create webview first so we can show the splash during server startup
+  ctx.webview = webview_create(1, NULL);
+  if(!ctx.webview)
+  {
+    fprintf(stderr, "ERROR: failed to create webview\n");
+    g_free(frontend_url);
+    g_free(binary_dir);
+    return 1;
+  }
+
+  webview_set_title(ctx.webview, "darktable");
+  webview_set_size(ctx.webview, 1400, 900, WEBVIEW_HINT_NONE);
+
+  // remove native titlebar, keep native window controls
+  dt_titlebar_init(ctx.webview);
+
+  // register window drag/zoom bindings early so splash is draggable
+  dt_webview_register_window_bindings(&ctx);
+
+  // show splash screen while server starts
+  dt_splash_show(ctx.webview, binary_dir);
+  g_free(binary_dir);
+
+  // spawn server and connect in a background thread
+  _startup_data_t startup = {
+    .ctx = &ctx,
+    .server_bin = server_bin,
+    .core_args = core_args,
+    .core_argc = core_argc,
+    .frontend_url = frontend_url,
+  };
+
+  pthread_t startup_thread;
+  pthread_create(&startup_thread, NULL, _startup_thread, &startup);
+
+  // run event loop (blocks until window is closed)
   webview_run(ctx.webview);
 
-  // Cleanup
+  // shutdown: kill server to unblock startup thread if it's still waiting
+  if(ctx.server_pid > 0)
+    kill(ctx.server_pid, SIGTERM);
+
+  pthread_join(startup_thread, NULL);
+
+  // cleanup
   fprintf(stderr, "[webview] shutting down...\n");
   webview_destroy(ctx.webview);
 
   if(ctx.socket_fd >= 0)
     close(ctx.socket_fd);
 
-  // Close any open SHM handles
+  // close any open SHM handles
   for(int i = 0; i < DT_WEBVIEW_MAX_SESSIONS; i++)
   {
     if(ctx.sessions[i].active)
@@ -345,7 +399,7 @@ int main(int argc, char *argv[])
     }
   }
 
-  // Stop server
+  // stop server
   if(ctx.server_pid > 0)
   {
     kill(ctx.server_pid, SIGTERM);
@@ -356,6 +410,7 @@ int main(int argc, char *argv[])
 
   pthread_mutex_destroy(&ctx.ipc_mutex);
   pthread_mutex_destroy(&ctx.session_mutex);
+  g_free(frontend_url);
 
   fprintf(stderr, "[webview] done\n");
   return 0;

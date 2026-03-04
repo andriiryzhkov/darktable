@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #3d3d3d;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #e0e0e0;
+}
+
+.splash { text-align: center; padding: 48px 64px; }
+
+.splash-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.splash-logo { width: 72px; height: 72px; }
+.splash-title { height: 40px; width: auto; }
+.splash-title-text { font-size: 48px; font-weight: 300; letter-spacing: 2px; }
+.splash-subtitle { font-size: 14px; color: #aaa; margin-bottom: 24px; }
+.splash-version { font-size: 12px; color: #777; margin-bottom: 32px; }
+
+.splash-status {
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 20px;
+  padding: 8px 32px;
+  font-size: 13px;
+  color: #999;
+  min-width: 200px;
+}
+
+/* invisible drag region covering the entire window */
+.splash-dragbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 40px;
+  z-index: 100;
+  cursor: default;
+}
+</style>
+</head>
+<body>
+<div class="splash-dragbar" id="splash-dragbar"></div>
+<div class="splash">
+  <div class="splash-brand">{{LOGO}}{{TITLE}}</div>
+  <div class="splash-subtitle">Photography workflow application and RAW developer</div>
+  <div class="splash-version">V5.5.0 &emsp; &copy; 2009–2026</div>
+  <div class="splash-status" id="splash-status">starting...</div>
+</div>
+<script>
+  const bar = document.getElementById('splash-dragbar');
+  bar.addEventListener('mousedown', function(e) {
+    if (e.button === 0) window.windowStartDrag();
+  });
+  bar.addEventListener('dblclick', function() {
+    window.windowZoom();
+  });
+</script>
+</body>
+</html>

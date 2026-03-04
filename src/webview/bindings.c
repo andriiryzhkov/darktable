@@ -1275,6 +1275,10 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "catalogGetCollectionValues", on_catalog_get_collection_values, ctx);
   webview_bind(ctx->webview, "catalogGetFilmrolls", on_catalog_get_filmrolls, ctx);
   webview_bind(ctx->webview, "catalogGetTags", on_catalog_get_tags, ctx);
+}
+
+void dt_webview_register_window_bindings(dt_webview_ctx_t *ctx)
+{
   webview_bind(ctx->webview, "windowStartDrag", on_window_start_drag, ctx);
   webview_bind(ctx->webview, "windowZoom", on_window_zoom, ctx);
 }

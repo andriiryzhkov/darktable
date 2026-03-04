@@ -48,5 +48,8 @@ typedef struct dt_webview_ctx_t
   pthread_mutex_t session_mutex;
 } dt_webview_ctx_t;
 
-// Register all JS bindings on the webview
+// register window drag/zoom bindings (no server needed, safe for splash)
+void dt_webview_register_window_bindings(dt_webview_ctx_t *ctx);
+
+// register all JS bindings on the webview (requires server connection)
 void dt_webview_register_bindings(dt_webview_ctx_t *ctx);

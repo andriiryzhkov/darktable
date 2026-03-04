@@ -58,6 +58,7 @@ set(WEBVIEW_HOST_SOURCES
   main.c
   ipc.c
   bindings.c
+  splash.c
   ../server/server_protocol.c
 )
 
