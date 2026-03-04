@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { catalogGetThumbnail } from "../../api/commands";
 import StarRating from "./StarRating";
 import ColorLabels from "./ColorLabels";
-import { Ban, Copy, Layers } from "lucide-react";
+import { Ban, Copy, Group, Pencil } from "lucide-react";
 
 function RejectIcon({ rejected }: { rejected: boolean }) {
   return (
@@ -99,7 +99,7 @@ export default function ThumbnailCard({
         <div className="thumb-top-right">
           {altered && (
             <span className="thumb-status-icon">
-              <Layers size={10} />
+              <Pencil size={10} />
             </span>
           )}
           {localCopy && (
@@ -109,7 +109,7 @@ export default function ThumbnailCard({
           )}
           {groupSize > 1 && (
             <span className="thumb-status-icon thumb-group-badge">
-              <Copy size={10} />
+              <Group size={10} />
               <span className="thumb-group-count">{groupSize}</span>
             </span>
           )}
