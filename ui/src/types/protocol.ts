@@ -2,7 +2,7 @@ export interface ImageInfo {
   id: number;
   film_id: number;
   filename: string;
-  datetime_taken: number;
+  datetime_taken: string;
   flags: number;
   width: number;
   height: number;
@@ -12,12 +12,35 @@ export interface ImageInfo {
   iso: number;
   focal_length: number;
   folder: string;
-  // Extended fields (may be absent from older server responses)
+  // Extended fields
   rating?: number;        // 0-5, 6 = rejected
   color_labels?: number;  // bitmask: bit0=red, bit1=yellow, bit2=green, bit3=blue, bit4=purple
   group_id?: number;
   altered?: boolean;
   local_copy?: boolean;
+  maker?: string;
+  model?: string;
+  lens?: string;
+  focus_distance?: number;
+  exposure_bias?: number;
+  longitude?: number;
+  latitude?: number;
+  altitude?: number;
+  version?: number;
+  max_version?: number;
+  output_width?: number;
+  output_height?: number;
+  import_timestamp?: number;
+  change_timestamp?: number;
+  export_timestamp?: number;
+  print_timestamp?: number;
+  whitebalance?: string;
+  flash?: string;
+  exposure_program?: string;
+  metering_mode?: string;
+  crop?: number;
+  orientation?: number;
+  file_size?: number;
 }
 
 export interface CatalogQueryResult {

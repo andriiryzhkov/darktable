@@ -2226,6 +2226,135 @@ body {
   color: var(--plugin-label-color);
 }
 
+/* ── Image info module (sidebar) ── */
+.exif-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.exif-filename {
+  font-size: 0.7rem;
+  color: var(--plugin-fg-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exif-datetime {
+  font-size: 0.65rem;
+  color: var(--plugin-label-color);
+  opacity: 0.7;
+}
+
+.exif-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  margin-bottom: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.exif-row {
+  display: grid;
+  gap: 2px;
+}
+
+.exif-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 2px 0;
+}
+
+.exif-shooting {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.exif-shooting .exif-cell-value {
+  font-weight: 700;
+}
+
+.exif-shooting-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--fg-color);
+  padding: 3px 4px;
+}
+
+.exif-row-1 { grid-template-columns: 1fr; }
+.exif-row-2 { grid-template-columns: 1fr 1fr; }
+.exif-row-3 { grid-template-columns: 1fr 1fr 1fr; }
+.exif-row-5 { grid-template-columns: 1fr 1fr 1fr 1fr 1fr; }
+
+.exif-row-camera {
+  grid-template-columns: 1fr auto auto;
+}
+
+.exif-row-camera .exif-cell:first-child {
+  align-items: flex-start;
+}
+
+.exif-row-camera .exif-cell:not(:first-child) {
+  align-items: flex-end;
+}
+
+.exif-row-camera .exif-cell:first-child .exif-cell-value {
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.exif-row-lens .exif-cell {
+  align-items: flex-start;
+}
+
+.exif-row-info .exif-cell:first-child {
+  align-items: flex-start;
+}
+
+.exif-row-info .exif-cell:last-child {
+  align-items: flex-end;
+}
+
+.exif-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3px 4px;
+  min-width: 0;
+}
+
+.exif-cell-value {
+  font-size: 0.7rem;
+  color: var(--fg-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.exif-cell-label {
+  font-size: 0.55rem;
+  color: var(--disabled-fg-color);
+  text-transform: uppercase;
+}
+
+.exif-type-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--bg-color);
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 /* ── Scope widget (histogram / waveform) ───── */
 .scope-widget {
   position: relative;

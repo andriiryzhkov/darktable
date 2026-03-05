@@ -278,16 +278,34 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
 
   // Build query dynamically based on filters
   GString *query = g_string_new(
-    "SELECT i.id, i.film_id, i.filename, i.datetime_taken,"
-    "       i.flags, i.width, i.height, i.aspect_ratio,"
-    "       i.exposure, i.aperture, i.iso, i.focal_length,"
-    "       f.folder,"
-    "       i.group_id,"
-    "       CASE WHEN i.history_end > 0 THEN 1 ELSE 0 END,"
+    "SELECT i.id, i.film_id, i.filename,"                                        /*  0- 2 */
+    "       datetime(i.datetime_taken/1000000"
+    "                + unixepoch('0001-01-01 00:00:00'), 'unixepoch'),"           /*  3    */
+    "       i.flags, i.width, i.height, i.aspect_ratio,"                         /*  4- 7 */
+    "       i.exposure, i.aperture, i.iso, i.focal_length,"                      /*  8-11 */
+    "       f.folder,"                                                            /* 12    */
+    "       i.group_id,"                                                          /* 13    */
+    "       CASE WHEN i.history_end > 0 THEN 1 ELSE 0 END,"                     /* 14    */
     "       COALESCE((SELECT SUM(1 << cl.color) FROM main.color_labels AS cl"
-    "                 WHERE cl.imgid = i.id), 0)"
+    "                 WHERE cl.imgid = i.id), 0),"                               /* 15    */
+    "       mk.name, md.name, ln.name,"                                          /* 16-18 */
+    "       i.focus_distance, i.exposure_bias,"                                  /* 19-20 */
+    "       i.longitude, i.latitude, i.altitude,"                                /* 21-23 */
+    "       i.version, i.max_version,"                                           /* 24-25 */
+    "       i.output_width, i.output_height,"                                    /* 26-27 */
+    "       i.import_timestamp, i.change_timestamp,"
+    "       i.export_timestamp, i.print_timestamp,"                              /* 28-31 */
+    "       wb.name, fl.name, ep.name, mm.name,"                                /* 32-35 */
+    "       i.crop, i.orientation"                                               /* 36-37 */
     " FROM main.images AS i"
-    " LEFT JOIN main.film_rolls AS f ON i.film_id = f.id");
+    " LEFT JOIN main.film_rolls AS f ON i.film_id = f.id"
+    " LEFT JOIN main.makers AS mk ON i.maker_id = mk.id"
+    " LEFT JOIN main.models AS md ON i.model_id = md.id"
+    " LEFT JOIN main.lens AS ln ON i.lens_id = ln.id"
+    " LEFT JOIN main.whitebalance AS wb ON i.whitebalance_id = wb.id"
+    " LEFT JOIN main.flash AS fl ON i.flash_id = fl.id"
+    " LEFT JOIN main.exposure_program AS ep ON i.exposure_program_id = ep.id"
+    " LEFT JOIN main.metering_mode AS mm ON i.metering_mode_id = mm.id");
 
   if(!rules_where && filter_tag_id >= 0)
     g_string_append(query,
@@ -421,7 +439,8 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
     json_builder_add_string_value(b, fname ? fname : "");
 
     json_builder_set_member_name(b, "datetime_taken");
-    json_builder_add_int_value(b, sqlite3_column_int64(stmt, 3));
+    const char *dt_taken = (const char *)sqlite3_column_text(stmt, 3);
+    json_builder_add_string_value(b, dt_taken ? dt_taken : "");
 
     json_builder_set_member_name(b, "flags");
     json_builder_add_int_value(b, sqlite3_column_int(stmt, 4));
@@ -465,6 +484,102 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
 
     json_builder_set_member_name(b, "color_labels");
     json_builder_add_int_value(b, sqlite3_column_int(stmt, 15));
+
+    // Lookup table names (maker, model, lens)
+    const char *maker = (const char *)sqlite3_column_text(stmt, 16);
+    json_builder_set_member_name(b, "maker");
+    json_builder_add_string_value(b, maker ? maker : "");
+
+    const char *model = (const char *)sqlite3_column_text(stmt, 17);
+    json_builder_set_member_name(b, "model");
+    json_builder_add_string_value(b, model ? model : "");
+
+    const char *lens = (const char *)sqlite3_column_text(stmt, 18);
+    json_builder_set_member_name(b, "lens");
+    json_builder_add_string_value(b, lens ? lens : "");
+
+    // Additional EXIF
+    json_builder_set_member_name(b, "focus_distance");
+    json_builder_add_double_value(b, sqlite3_column_double(stmt, 19));
+
+    json_builder_set_member_name(b, "exposure_bias");
+    json_builder_add_double_value(b, sqlite3_column_double(stmt, 20));
+
+    // Geolocation
+    json_builder_set_member_name(b, "longitude");
+    json_builder_add_double_value(b, sqlite3_column_double(stmt, 21));
+
+    json_builder_set_member_name(b, "latitude");
+    json_builder_add_double_value(b, sqlite3_column_double(stmt, 22));
+
+    json_builder_set_member_name(b, "altitude");
+    json_builder_add_double_value(b, sqlite3_column_double(stmt, 23));
+
+    // Version
+    json_builder_set_member_name(b, "version");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 24));
+
+    json_builder_set_member_name(b, "max_version");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 25));
+
+    // Output dimensions
+    json_builder_set_member_name(b, "output_width");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 26));
+
+    json_builder_set_member_name(b, "output_height");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 27));
+
+    // Timestamps (microseconds since 0001-01-01)
+    json_builder_set_member_name(b, "import_timestamp");
+    json_builder_add_int_value(b, sqlite3_column_int64(stmt, 28));
+
+    json_builder_set_member_name(b, "change_timestamp");
+    json_builder_add_int_value(b, sqlite3_column_int64(stmt, 29));
+
+    json_builder_set_member_name(b, "export_timestamp");
+    json_builder_add_int_value(b, sqlite3_column_int64(stmt, 30));
+
+    json_builder_set_member_name(b, "print_timestamp");
+    json_builder_add_int_value(b, sqlite3_column_int64(stmt, 31));
+
+    // Lookup table names (whitebalance, flash, exposure_program, metering_mode)
+    const char *wb = (const char *)sqlite3_column_text(stmt, 32);
+    json_builder_set_member_name(b, "whitebalance");
+    json_builder_add_string_value(b, wb ? wb : "");
+
+    const char *flash_name = (const char *)sqlite3_column_text(stmt, 33);
+    json_builder_set_member_name(b, "flash");
+    json_builder_add_string_value(b, flash_name ? flash_name : "");
+
+    const char *exp_prog = (const char *)sqlite3_column_text(stmt, 34);
+    json_builder_set_member_name(b, "exposure_program");
+    json_builder_add_string_value(b, exp_prog ? exp_prog : "");
+
+    const char *meter = (const char *)sqlite3_column_text(stmt, 35);
+    json_builder_set_member_name(b, "metering_mode");
+    json_builder_add_string_value(b, meter ? meter : "");
+
+    // Crop factor and orientation
+    json_builder_set_member_name(b, "crop");
+    json_builder_add_double_value(b, sqlite3_column_double(stmt, 36));
+
+    json_builder_set_member_name(b, "orientation");
+    json_builder_add_int_value(b, sqlite3_column_int(stmt, 37));
+
+    // File size from disk
+    json_builder_set_member_name(b, "file_size");
+    if(folder && fname)
+    {
+      gchar *fullpath = g_build_filename(folder, fname, NULL);
+      GStatBuf st;
+      if(g_stat(fullpath, &st) == 0)
+        json_builder_add_int_value(b, (gint64)st.st_size);
+      else
+        json_builder_add_int_value(b, -1);
+      g_free(fullpath);
+    }
+    else
+      json_builder_add_int_value(b, -1);
 
     json_builder_end_object(b);
   }
