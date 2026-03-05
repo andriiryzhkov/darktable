@@ -9,6 +9,7 @@ import {
   type ModuleGroupPreset,
 } from "./moduleGroupPresets";
 import ProcessingModuleCard from "../modules/ProcessingModuleCard";
+import ScopeWidget from "./ScopeWidget";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 
 function getPreset(name: string): ModuleGroupPreset {
@@ -100,6 +101,9 @@ export default function DarkroomRightSidebar() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Histogram / Waveform scope */}
+      <ScopeWidget />
+
       {/* Module group tabs */}
       <div className="darkroom-group-tabs">
         {groupTabs.map((group) => (

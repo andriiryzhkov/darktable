@@ -2224,6 +2224,96 @@ body {
   color: var(--plugin-label-color);
 }
 
+/* ── Scope widget (histogram / waveform) ───── */
+.scope-widget {
+  position: relative;
+  margin: 4px;
+}
+
+.scope-display {
+  position: relative;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.scope-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.scope-placeholder {
+  position: absolute;
+  font-size: 0.7rem;
+  color: var(--disabled-fg-color);
+}
+
+.scope-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.scope-display:hover .scope-toolbar {
+  opacity: 1;
+}
+
+.scope-toolbar-left,
+.scope-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.scope-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  border: none;
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.65);
+  color: var(--plugin-label-color);
+  cursor: pointer;
+}
+
+.scope-btn:hover {
+  color: var(--fg-color);
+  background-color: var(--field-bg);
+}
+
+.scope-btn[data-active="true"] {
+  color: var(--fg-color);
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.scope-ch-r::after, .scope-ch-g::after, .scope-ch-b::after {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.scope-ch-r::after { background-color: #f44; }
+.scope-ch-g::after { background-color: #4d4; }
+.scope-ch-b::after { background-color: #55f; }
+.scope-ch-r[data-active="false"]::after { background-color: #633; }
+.scope-ch-g[data-active="false"]::after { background-color: #343; }
+.scope-ch-b[data-active="false"]::after { background-color: #336; }
+
 /* ── Darkroom module group tabs ────────────── */
 .darkroom-group-tabs {
   display: flex;
