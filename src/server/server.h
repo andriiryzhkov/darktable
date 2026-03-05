@@ -58,6 +58,11 @@ typedef struct dt_server_session_t
   int preview_width;
   int preview_height;
   gboolean dirty;
+
+  // Async pipeline processing (event-driven preview)
+  uint64_t pipeline_seq;              // bumped on every set_params
+  gboolean pipeline_busy;             // TRUE while worker thread is processing
+  pthread_mutex_t pipeline_mutex;
 } dt_server_session_t;
 
 struct dt_server_t
@@ -111,6 +116,7 @@ char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request
 char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_delete_history(dt_server_t *server, const dt_server_request_t *req);
 

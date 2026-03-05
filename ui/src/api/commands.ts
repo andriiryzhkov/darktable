@@ -21,12 +21,13 @@ declare global {
     catalogGetThumbnail: (imgid: number) => Promise<ThumbnailResult>;
     developOpen: (imgid: number, width: number, height: number) => Promise<SessionInfo>;
     developClose: (sessionId: string) => Promise<unknown>;
-    developSetParams: (sessionId: string, op: string, params: Record<string, unknown>) => Promise<unknown>;
+    developSetParams: (sessionId: string, op: string, params: Record<string, unknown>, previewOnly?: boolean) => Promise<unknown>;
+    developCommitParams: (sessionId: string, op: string) => Promise<unknown>;
     developGetParams: (sessionId: string, op: string) => Promise<{ op: string; enabled: boolean; params: Record<string, unknown> }>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
     developGetHistory: (sessionId: string) => Promise<HistoryResult>;
     developDeleteHistory: (sessionId: string) => Promise<unknown>;
-    getPreviewFrame: (sessionId: string, frontBuffer: number) => Promise<PreviewFrameResult>;
+    getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     pickFolder: () => Promise<string | null>;
     listFolders: (path: string) => Promise<FolderEntry[]>;
     listFiles: (path: string, recursive: boolean, ignoreNonRaw: boolean) => Promise<FileEntry[]>;
@@ -63,7 +64,11 @@ export const developSetParams = (
   sessionId: string,
   op: string,
   params: Record<string, unknown>,
-) => window.developSetParams(sessionId, op, params);
+  previewOnly?: boolean,
+) => window.developSetParams(sessionId, op, params, previewOnly);
+
+export const developCommitParams = (sessionId: string, op: string) =>
+  window.developCommitParams(sessionId, op);
 
 export const developGetParams = (sessionId: string, op: string) =>
   window.developGetParams(sessionId, op);
@@ -77,8 +82,8 @@ export const developGetHistory = (sessionId: string) =>
 export const developDeleteHistory = (sessionId: string) =>
   window.developDeleteHistory(sessionId);
 
-export const getPreviewFrame = (sessionId: string, frontBuffer: number) =>
-  window.getPreviewFrame(sessionId, frontBuffer);
+export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
+  window.getPreviewFrame(sessionId, frontBuffer, format);
 
 export const pickFolder = () => window.pickFolder();
 

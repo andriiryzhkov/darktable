@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useDevelopStore, ZOOM_LEVELS } from "../../stores/developStore";
+import WebGLPreview from "./WebGLPreview";
 
 export default function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -110,6 +111,11 @@ export default function PreviewCanvas() {
         )}
       </div>
     );
+  }
+
+  // WebGL path for raw BGRA pixels — no JPEG encode/decode overhead
+  if (frameData && frameData.length > 0) {
+    return <WebGLPreview />;
   }
 
   const content = previewSrc ? (

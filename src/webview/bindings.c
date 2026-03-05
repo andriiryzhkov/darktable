@@ -34,6 +34,9 @@
 #include <string.h>
 #ifndef _WIN32
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #endif
 #include <unistd.h>
 
@@ -102,6 +105,45 @@ static JsonArray *_parse_args(const char *req, JsonParser **out_parser)
   return json_node_get_array(root);
 }
 
+/* ── Server event bridge ──────────────────────────────────────── */
+
+typedef struct _event_dispatch_t
+{
+  dt_webview_ctx_t *ctx;
+  char *event_name;
+  char *data_json;
+} _event_dispatch_t;
+
+static void _event_dispatch_main(webview_t w, void *arg)
+{
+  (void)w;
+  _event_dispatch_t *ed = arg;
+
+  // Build JS call: window.__dt_event('event_name', {data})
+  char *js = g_strdup_printf(
+    "window.__dt_event && window.__dt_event('%s', %s);",
+    ed->event_name, ed->data_json);
+  webview_eval(ed->ctx->webview, js);
+  g_free(js);
+
+  g_free(ed->event_name);
+  g_free(ed->data_json);
+  g_free(ed);
+}
+
+// Called from IPC reader thread — must dispatch to webview's main thread
+static void _on_server_event(const char *event_name, const char *data_json, void *user_data)
+{
+  dt_webview_ctx_t *ctx = user_data;
+  fprintf(stderr, "[webview] event received: %s\n", event_name);
+
+  _event_dispatch_t *ed = g_new0(_event_dispatch_t, 1);
+  ed->ctx = ctx;
+  ed->event_name = g_strdup(event_name);
+  ed->data_json = g_strdup(data_json);
+  webview_dispatch(ctx->webview, _event_dispatch_main, ed);
+}
+
 /* IPC passthrough: send method+params via IPC, return result to JS */
 typedef struct ipc_passthrough_t
 {
@@ -116,8 +158,15 @@ static void *_ipc_passthrough_worker(void *arg)
   ipc_passthrough_t *pt = arg;
   char *error = NULL;
   fprintf(stderr, "[webview] IPC request: %s(%s)\n", pt->method, pt->params_json);
-  char *result = dt_ipc_request(pt->ctx->socket_fd, &pt->ctx->ipc_mutex,
-                                pt->method, pt->params_json, &error);
+
+  // Use event-aware IPC context if available, otherwise fall back to legacy
+  char *result;
+  if(pt->ctx->ipc_ctx)
+    result = dt_ipc_request2(pt->ctx->ipc_ctx, pt->method, pt->params_json, &error);
+  else
+    result = dt_ipc_request(pt->ctx->socket_fd, &pt->ctx->ipc_mutex,
+                            pt->method, pt->params_json, &error);
+
   if(result)
   {
     // Log truncated result for debugging
@@ -283,8 +332,12 @@ static void *_develop_open_worker(void *arg)
                                   ",\"width\":%" G_GINT64_FORMAT
                                   ",\"height\":%" G_GINT64_FORMAT "}", imgid, width, height);
   char *error = NULL;
-  char *result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                                "develop.open", params, &error);
+  char *result;
+  if(ctx->ipc_ctx)
+    result = dt_ipc_request2(ctx->ipc_ctx, "develop.open", params, &error);
+  else
+    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
+                            "develop.open", params, &error);
   g_free(params);
 
   if(!result)
@@ -422,8 +475,12 @@ static void *_develop_close_worker(void *arg)
   g_object_unref(parser);
 
   char *error = NULL;
-  char *result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                                "develop.close", params, &error);
+  char *result;
+  if(ctx->ipc_ctx)
+    result = dt_ipc_request2(ctx->ipc_ctx, "develop.close", params, &error);
+  else
+    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
+                            "develop.close", params, &error);
   g_free(params);
 
   if(result)
@@ -472,12 +529,45 @@ static void on_develop_set_params(const char *id, const char *req, void *arg)
   char *params_str = json_generator_to_data(gen, NULL);
   g_object_unref(gen);
 
-  char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"params\":%s}",
-                                     session_id, op, params_str);
+  // Optional 4th arg: previewOnly (boolean) — skip history write during drag
+  gboolean preview_only = FALSE;
+  if(json_array_get_length(args) >= 4)
+    preview_only = json_array_get_boolean_element(args, 3);
+
+  char *ipc_params;
+  if(preview_only)
+    ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"params\":%s,\"preview_only\":true}",
+                                 session_id, op, params_str);
+  else
+    ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"params\":%s}",
+                                 session_id, op, params_str);
   g_free(params_str);
   g_object_unref(parser);
 
   _ipc_passthrough(ctx, id, "develop.set_params", ipc_params);
+  g_free(ipc_params);
+}
+
+static void on_develop_commit_params(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developCommitParams requires (sessionId, op)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  const char *session_id = json_array_get_string_element(args, 0);
+  const char *op = json_array_get_string_element(args, 1);
+
+  char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
+                                     session_id, op);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, "develop.commit_params", ipc_params);
   g_free(ipc_params);
 }
 
@@ -636,6 +726,339 @@ static int _jpeg_compress_rgba(const uint8_t *in, uint8_t *out,
   return (int)out_size;
 }
 
+/* ── Local HTTP frame server ─────────────────────────────────────
+ * Serves JPEG frames directly from SHM over HTTP, avoiding
+ * base64 encoding.  The browser loads frames via:
+ *   <img src="http://localhost:PORT/frame?s=SESSION&b=BUF">
+ * ─────────────────────────────────────────────────────────────── */
+
+struct dt_frame_server_t
+{
+  int listen_fd;
+  int port;
+  dt_webview_ctx_t *ctx;
+  gboolean running;
+  pthread_t thread;
+};
+
+/* Parse a query param value: find "key=" in qs, copy value up to '&' or ' ' or end */
+static int _qs_param(const char *qs, const char *key, char *out, size_t out_size)
+{
+  char needle[64];
+  snprintf(needle, sizeof(needle), "%s=", key);
+  const char *p = strstr(qs, needle);
+  if(!p) return 0;
+  p += strlen(needle);
+  size_t i = 0;
+  while(*p && *p != '&' && *p != ' ' && *p != '\r' && i < out_size - 1)
+    out[i++] = *p++;
+  out[i] = '\0';
+  return 1;
+}
+
+static void _send_http_response(int fd, int code, const char *status,
+                                const char *content_type,
+                                const void *body, size_t body_len)
+{
+  char hdr[512];
+  int hlen = snprintf(hdr, sizeof(hdr),
+    "HTTP/1.1 %d %s\r\n"
+    "Content-Type: %s\r\n"
+    "Content-Length: %zu\r\n"
+    "Cache-Control: no-store\r\n"
+    "Access-Control-Allow-Origin: *\r\n"
+    "Connection: close\r\n"
+    "\r\n",
+    code, status, content_type, body_len);
+  write(fd, hdr, hlen);
+  if(body && body_len > 0)
+  {
+    size_t written = 0;
+    while(written < body_len)
+    {
+      ssize_t n = write(fd, (const char *)body + written, body_len - written);
+      if(n <= 0) break;
+      written += n;
+    }
+  }
+}
+
+static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
+                                  const char *session_id, int buffer_idx)
+{
+  pthread_mutex_lock(&ctx->session_mutex);
+  dt_webview_shm_t *session = NULL;
+  for(int i = 0; i < DT_WEBVIEW_MAX_SESSIONS; i++)
+  {
+    if(ctx->sessions[i].active && !strcmp(ctx->sessions[i].session_id, session_id))
+    {
+      session = &ctx->sessions[i];
+      break;
+    }
+  }
+
+  if(!session)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 404, "Not Found", "text/plain", "session not found", 17);
+    return;
+  }
+
+  int buf_idx = (buffer_idx == 0) ? 0 : 1;
+  void *ptr = session->shm_ptr[buf_idx];
+  if(!ptr)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 404, "Not Found", "text/plain", "buffer not mapped", 17);
+    return;
+  }
+
+  dt_shm_header_t *header = (dt_shm_header_t *)ptr;
+  if(header->magic != DT_SHM_MAGIC || header->version != DT_SHM_VERSION)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 500, "Error", "text/plain", "bad SHM header", 14);
+    return;
+  }
+
+  uint32_t ready = __atomic_load_n(&header->ready, __ATOMIC_ACQUIRE);
+  if(ready != 1)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 503, "Not Ready", "text/plain", "frame not ready", 15);
+    return;
+  }
+
+  uint32_t w = header->width;
+  uint32_t h = header->height;
+  uint32_t stride = header->stride;
+  size_t pixel_size = (size_t)stride * (size_t)h;
+  uint8_t *pixels = (uint8_t *)ptr + DT_SHM_HEADER_SIZE;
+
+  /* BGRA → RGBA */
+  uint8_t *rgba = g_malloc(pixel_size);
+  for(size_t i = 0; i < pixel_size; i += 4)
+  {
+    rgba[i + 0] = pixels[i + 2];
+    rgba[i + 1] = pixels[i + 1];
+    rgba[i + 2] = pixels[i + 0];
+    rgba[i + 3] = pixels[i + 3];
+  }
+  pthread_mutex_unlock(&ctx->session_mutex);
+
+  /* JPEG encode */
+  size_t jpeg_buf_size = pixel_size + 1024;
+  uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
+  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+  g_free(rgba);
+
+  if(jpeg_size > 0)
+    _send_http_response(client_fd, 200, "OK", "image/jpeg", jpeg_buf, jpeg_size);
+  else
+    _send_http_response(client_fd, 500, "Error", "text/plain", "JPEG encode failed", 18);
+
+  g_free(jpeg_buf);
+}
+
+/** Serve raw BGRA pixels from SHM — zero conversion, zero encoding.
+ *  Width/height sent as custom headers so JS can size the WebGL canvas. */
+static void _handle_raw_request(int client_fd, dt_webview_ctx_t *ctx,
+                                const char *session_id, int buffer_idx)
+{
+  const gint64 t0 = g_get_monotonic_time();
+  pthread_mutex_lock(&ctx->session_mutex);
+  dt_webview_shm_t *session = NULL;
+  for(int i = 0; i < DT_WEBVIEW_MAX_SESSIONS; i++)
+  {
+    if(ctx->sessions[i].active && !strcmp(ctx->sessions[i].session_id, session_id))
+    {
+      session = &ctx->sessions[i];
+      break;
+    }
+  }
+  if(!session)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 404, "Not Found", "text/plain", "session not found", 17);
+    return;
+  }
+
+  int buf_idx = (buffer_idx == 0) ? 0 : 1;
+  void *ptr = session->shm_ptr[buf_idx];
+  if(!ptr)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 404, "Not Found", "text/plain", "buffer not mapped", 17);
+    return;
+  }
+
+  dt_shm_header_t *header = (dt_shm_header_t *)ptr;
+  if(header->magic != DT_SHM_MAGIC || header->version != DT_SHM_VERSION)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 500, "Error", "text/plain", "bad SHM header", 14);
+    return;
+  }
+
+  uint32_t ready = __atomic_load_n(&header->ready, __ATOMIC_ACQUIRE);
+  if(ready != 1)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    _send_http_response(client_fd, 503, "Not Ready", "text/plain", "frame not ready", 15);
+    return;
+  }
+
+  uint32_t w = header->width;
+  uint32_t h = header->height;
+  uint32_t stride = header->stride;
+  size_t pixel_size = (size_t)stride * (size_t)h;
+  uint8_t *pixels = (uint8_t *)ptr + DT_SHM_HEADER_SIZE;
+
+  /* Send raw BGRA pixels directly — WebGL shader handles B↔R swap */
+  char hdr[512];
+  int hlen = snprintf(hdr, sizeof(hdr),
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: application/octet-stream\r\n"
+    "Content-Length: %zu\r\n"
+    "X-Width: %u\r\n"
+    "X-Height: %u\r\n"
+    "Cache-Control: no-store\r\n"
+    "Access-Control-Allow-Origin: *\r\n"
+    "Access-Control-Expose-Headers: X-Width, X-Height\r\n"
+    "Connection: close\r\n"
+    "\r\n",
+    pixel_size, w, h);
+  write(client_fd, hdr, hlen);
+
+  /* Stream directly from SHM — no copy, no conversion */
+  size_t written = 0;
+  while(written < pixel_size)
+  {
+    ssize_t n = write(client_fd, pixels + written, pixel_size - written);
+    if(n <= 0) break;
+    written += n;
+  }
+  pthread_mutex_unlock(&ctx->session_mutex);
+
+  fprintf(stderr, "[perf] raw_serve: %.1f ms (%ux%u, %zu bytes)\n",
+          (g_get_monotonic_time() - t0) / 1000.0, w, h, pixel_size);
+}
+
+static void *_frame_server_loop(void *arg)
+{
+  dt_frame_server_t *fs = arg;
+
+  while(fs->running)
+  {
+    int client = accept(fs->listen_fd, NULL, NULL);
+    if(client < 0)
+    {
+      if(fs->running) perror("[frame-server] accept");
+      break;
+    }
+
+    /* Read the HTTP request (we only need the first line) */
+    char buf[2048];
+    ssize_t n = read(client, buf, sizeof(buf) - 1);
+    if(n > 0)
+    {
+      buf[n] = '\0';
+
+      /* Route: GET /raw?... or GET /frame?... */
+      char *query = strchr(buf, '?');
+      gboolean is_raw = (strstr(buf, "GET /raw") == buf);
+      if(query)
+      {
+        char sid[128] = {0};
+        char bidx_str[16] = {0};
+        if(_qs_param(query, "s", sid, sizeof(sid))
+           && _qs_param(query, "b", bidx_str, sizeof(bidx_str)))
+        {
+          if(is_raw)
+            _handle_raw_request(client, fs->ctx, sid, atoi(bidx_str));
+          else
+            _handle_frame_request(client, fs->ctx, sid, atoi(bidx_str));
+        }
+        else
+        {
+          _send_http_response(client, 400, "Bad Request", "text/plain", "missing params", 14);
+        }
+      }
+      else
+      {
+        _send_http_response(client, 400, "Bad Request", "text/plain", "no query string", 15);
+      }
+    }
+    close(client);
+  }
+  return NULL;
+}
+
+static dt_frame_server_t *_frame_server_start(dt_webview_ctx_t *ctx)
+{
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if(fd < 0)
+  {
+    perror("[frame-server] socket");
+    return NULL;
+  }
+
+  int opt = 1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof(addr));
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0; /* OS picks a free port */
+
+  if(bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+  {
+    perror("[frame-server] bind");
+    close(fd);
+    return NULL;
+  }
+
+  if(listen(fd, 4) < 0)
+  {
+    perror("[frame-server] listen");
+    close(fd);
+    return NULL;
+  }
+
+  struct sockaddr_in bound;
+  socklen_t len = sizeof(bound);
+  getsockname(fd, (struct sockaddr *)&bound, &len);
+
+  dt_frame_server_t *fs = g_new0(dt_frame_server_t, 1);
+  fs->listen_fd = fd;
+  fs->port = ntohs(bound.sin_port);
+  fs->ctx = ctx;
+  fs->running = TRUE;
+
+  pthread_t thread;
+  if(pthread_create(&thread, NULL, _frame_server_loop, fs) != 0)
+  {
+    perror("[frame-server] pthread_create");
+    close(fd);
+    g_free(fs);
+    return NULL;
+  }
+  pthread_detach(thread);
+  fs->thread = thread;
+
+  fprintf(stderr, "[frame-server] listening on localhost:%d\n", fs->port);
+  return fs;
+}
+
+void dt_frame_server_stop(dt_frame_server_t *fs)
+{
+  if(!fs) return;
+  fs->running = FALSE;
+  close(fs->listen_fd);
+  g_free(fs);
+}
+
 static void *_get_preview_frame_worker(void *arg)
 {
   async_req_t *ar = arg;
@@ -653,6 +1076,7 @@ static void *_get_preview_frame_worker(void *arg)
 
   char *session_id = g_strdup(json_array_get_string_element(args, 0));
   gint64 front_buffer = json_array_get_int_element(args, 1);
+
   g_object_unref(parser);
 
   // Find session
@@ -724,21 +1148,20 @@ static void *_get_preview_frame_worker(void *arg)
   size_t pixel_size = (size_t)stride * (size_t)h;
   uint8_t *pixels = (uint8_t *)ptr + DT_SHM_HEADER_SIZE;
 
-  // Convert BGRA → RGBA for JPEG compression (which expects RGBA input)
+  /* BGRA → RGBA */
   uint8_t *rgba = g_malloc(pixel_size);
   for(size_t i = 0; i < pixel_size; i += 4)
   {
-    rgba[i + 0] = pixels[i + 2]; // R ← B
-    rgba[i + 1] = pixels[i + 1]; // G ← G
-    rgba[i + 2] = pixels[i + 0]; // B ← R
-    rgba[i + 3] = pixels[i + 3]; // A ← A
+    rgba[i + 0] = pixels[i + 2];
+    rgba[i + 1] = pixels[i + 1];
+    rgba[i + 2] = pixels[i + 0];
+    rgba[i + 3] = pixels[i + 3];
   }
   pthread_mutex_unlock(&ctx->session_mutex);
 
-  // JPEG compress (quality 90 — fast transfer, good quality)
   size_t jpeg_buf_size = pixel_size + 1024;
   uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
-  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 90);
+  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
   g_free(rgba);
 
   gchar *b64;
@@ -751,10 +1174,11 @@ static void *_get_preview_frame_worker(void *arg)
   }
   else
   {
-    // Fallback: raw base64 if JPEG fails
-    b64 = g_base64_encode(pixels, pixel_size);
-    result = g_strdup_printf("{\"width\":%u,\"height\":%u,\"format\":\"raw\",\"data\":\"%s\"}", w, h, b64);
-    g_free(b64);
+    _return_error(ctx, ar->id, "JPEG encode failed");
+    g_free(jpeg_buf);
+    g_free(session_id);
+    _async_req_free(ar);
+    return NULL;
   }
   g_free(jpeg_buf);
 
@@ -1012,8 +1436,12 @@ static GHashTable *_check_imported_paths(dt_webview_ctx_t *ctx, JsonArray *files
   g_object_unref(pb);
 
   char *error = NULL;
-  char *result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                                "catalog.check_imported", params_json, &error);
+  char *result;
+  if(ctx->ipc_ctx)
+    result = dt_ipc_request2(ctx->ipc_ctx, "catalog.check_imported", params_json, &error);
+  else
+    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
+                            "catalog.check_imported", params_json, &error);
   g_free(params_json);
 
   if(result)
@@ -1253,8 +1681,12 @@ static void *_import_images_worker(void *arg)
   g_object_unref(pb);
 
   char *error = NULL;
-  char *result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                                "catalog.import", params_json, &error);
+  char *result;
+  if(ctx->ipc_ctx)
+    result = dt_ipc_request2(ctx->ipc_ctx, "catalog.import", params_json, &error);
+  else
+    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
+                            "catalog.import", params_json, &error);
   g_free(params_json);
 
   if(result)
@@ -1328,8 +1760,12 @@ static void *_copy_import_images_worker(void *arg)
   g_object_unref(pb);
 
   char *error = NULL;
-  char *result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                                "catalog.copy_import", params_json, &error);
+  char *result;
+  if(ctx->ipc_ctx)
+    result = dt_ipc_request2(ctx->ipc_ctx, "catalog.copy_import", params_json, &error);
+  else
+    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
+                            "catalog.copy_import", params_json, &error);
   g_free(params_json);
 
   if(result)
@@ -1452,12 +1888,27 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   /* Initialize NFD once */
   NFD_Init();
 
+  /* Create event-aware IPC context with reader thread */
+  ctx->ipc_ctx = dt_ipc_context_new(ctx->socket_fd, _on_server_event, ctx);
+  if(!ctx->ipc_ctx)
+    fprintf(stderr, "[webview] WARNING: failed to create IPC context, falling back to legacy IPC\n");
+
+  /* Start local HTTP server for zero-copy JPEG frame delivery */
+  ctx->frame_server = _frame_server_start(ctx);
+  if(ctx->frame_server)
+  {
+    char js[128];
+    snprintf(js, sizeof(js), "window.__dt_frame_port = %d;", ctx->frame_server->port);
+    webview_eval(ctx->webview, js);
+  }
+
   webview_bind(ctx->webview, "ping", on_ping, ctx);
   webview_bind(ctx->webview, "catalogQuery", on_catalog_query, ctx);
   webview_bind(ctx->webview, "catalogGetThumbnail", on_catalog_get_thumbnail, ctx);
   webview_bind(ctx->webview, "developOpen", on_develop_open, ctx);
   webview_bind(ctx->webview, "developClose", on_develop_close, ctx);
   webview_bind(ctx->webview, "developSetParams", on_develop_set_params, ctx);
+  webview_bind(ctx->webview, "developCommitParams", on_develop_commit_params, ctx);
   webview_bind(ctx->webview, "developGetParams", on_develop_get_params, ctx);
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
   webview_bind(ctx->webview, "developGetHistory", on_develop_get_history, ctx);

@@ -383,6 +383,12 @@ int main(int argc, char *argv[])
   fprintf(stderr, "[webview] shutting down...\n");
   webview_destroy(ctx.webview);
 
+  // Shut down frame server and IPC reader thread before closing the socket
+  if(ctx.frame_server)
+    dt_frame_server_stop(ctx.frame_server);
+  if(ctx.ipc_ctx)
+    dt_ipc_context_free(ctx.ipc_ctx);
+
   if(ctx.socket_fd >= 0)
     close(ctx.socket_fd);
 

@@ -32,3 +32,24 @@ int dt_ipc_connect(const char *socket_path);
 char *dt_ipc_request(int fd, pthread_mutex_t *mutex,
                      const char *method, const char *params_json,
                      char **out_error);
+
+// --- Event-aware IPC context (Phase 1A) ---
+
+// Callback for server-pushed events.  Called from the reader thread.
+typedef void (*dt_ipc_event_cb_t)(const char *event_name, const char *data_json, void *user_data);
+
+typedef struct dt_ipc_context_t dt_ipc_context_t;
+
+// Create an event-aware IPC context with a dedicated reader thread.
+// The reader thread routes RPC responses to waiting callers and dispatches
+// server-pushed events via event_cb.
+dt_ipc_context_t *dt_ipc_context_new(int fd, dt_ipc_event_cb_t event_cb, void *event_user_data);
+
+// Shut down the reader thread and free all resources.
+void dt_ipc_context_free(dt_ipc_context_t *ctx);
+
+// Send a JSON-RPC request and wait for the matching response (thread-safe).
+// Same return semantics as dt_ipc_request().
+char *dt_ipc_request2(dt_ipc_context_t *ctx,
+                      const char *method, const char *params_json,
+                      char **out_error);

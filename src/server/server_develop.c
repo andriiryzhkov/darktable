@@ -91,6 +91,7 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
       fprintf(stderr, "[server] develop.open: auto-closing session %s\n", old->session_id);
       dt_shm_destroy(&old->shm_buffers[0]);
       dt_shm_destroy(&old->shm_buffers[1]);
+      pthread_mutex_destroy(&old->pipeline_mutex);
       dt_dev_cleanup(&old->dev);
       g_free(old);
       server->sessions[i] = NULL;
@@ -109,14 +110,19 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
   session->preview_height = preview_height;
   session->frame_sequence = 0;
   session->dirty = TRUE;
+  session->pipeline_seq = 0;
+  session->pipeline_busy = FALSE;
+  pthread_mutex_init(&session->pipeline_mutex, NULL);
 
   // Initialize develop context following dt_dev_image() pattern (develop.c:3847)
   dt_dev_init(&session->dev, TRUE);
   session->dev.gui_attached = FALSE;
 
-  // Configure the full pipeline for image processing mode
+  // The full pipe is already DT_DEV_PIXELPIPE_FULL from dt_dev_pixelpipe_init().
+  // Do NOT set DT_DEV_PIXELPIPE_IMAGE — that flag disables the intermediate
+  // cache (pipe->nocache=TRUE), which prevents reuse of upstream module outputs
+  // when only one module's params change.
   dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
-  pipe->type |= DT_DEV_PIXELPIPE_IMAGE;
 
   // Load image: instantiates modules, loads history from DB
   dt_dev_load_image(&session->dev, imgid);
@@ -221,6 +227,9 @@ char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *re
   // Destroy SHM buffers
   dt_shm_destroy(&session->shm_buffers[0]);
   dt_shm_destroy(&session->shm_buffers[1]);
+
+  // Cleanup pipeline mutex
+  pthread_mutex_destroy(&session->pipeline_mutex);
 
   // Cleanup develop context
   dt_dev_cleanup(&session->dev);
@@ -503,6 +512,147 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   return resp;
 }
 
+// --- Async pipeline worker (event-driven preview) ---
+
+typedef struct _pipeline_job_t
+{
+  dt_server_t *server;
+  dt_server_session_t *session;
+} _pipeline_job_t;
+
+static void *_preview_pipeline_worker(void *arg)
+{
+  _pipeline_job_t *job = arg;
+  dt_server_session_t *session = job->session;
+  dt_server_t *server = job->server;
+  g_free(job);
+
+  while(TRUE)
+  {
+    // Snapshot the current seq before processing
+    pthread_mutex_lock(&session->pipeline_mutex);
+    const uint64_t start_seq = session->pipeline_seq;
+    pthread_mutex_unlock(&session->pipeline_mutex);
+
+    // Process the pipeline
+    const gint64 t_pipe_start = g_get_monotonic_time();
+    dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+    dt_dev_process_image_job(&session->dev, &session->dev.full, pipe, -1, DT_DEVICE_CPU);
+    const gint64 t_pipe_end = g_get_monotonic_time();
+    fprintf(stderr, "[perf] pipeline: %.1f ms\n",
+            (t_pipe_end - t_pipe_start) / 1000.0);
+
+    // Check if new params arrived while we were processing
+    pthread_mutex_lock(&session->pipeline_mutex);
+    if(session->pipeline_seq != start_seq)
+    {
+      // New params arrived — loop and reprocess with latest values
+      pthread_mutex_unlock(&session->pipeline_mutex);
+      fprintf(stderr, "[perf] pipeline: stale, reprocessing\n");
+      continue;
+    }
+    pthread_mutex_unlock(&session->pipeline_mutex);
+
+    // Pipeline is current — write to SHM and send event
+    dt_pthread_mutex_lock(&pipe->backbuf_mutex);
+
+    if(!pipe->backbuf || pipe->backbuf_width <= 0 || pipe->backbuf_height <= 0)
+    {
+      dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
+      fprintf(stderr, "[server] async pipeline: no output\n");
+      break;
+    }
+
+    const int rendered_width = pipe->backbuf_width;
+    const int rendered_height = pipe->backbuf_height;
+
+    const int back = 1 - session->front_buffer;
+    dt_shm_buffer_t *shm = &session->shm_buffers[back];
+
+    session->frame_sequence++;
+
+    dt_shm_write_header(shm, rendered_width, rendered_height,
+                         DT_SHM_FORMAT_BGRA8, session->frame_sequence);
+
+    uint8_t *dst = dt_shm_pixel_data(shm);
+    const size_t copy_size = (size_t)rendered_width * rendered_height * 4;
+    memcpy(dst, pipe->backbuf, copy_size);
+
+    dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
+
+    __atomic_store_n(&shm->mapped->ready, 1, __ATOMIC_RELEASE);
+    session->front_buffer = back;
+    session->dirty = FALSE;
+
+    // Queue preview_ready event
+    {
+      JsonBuilder *eb = json_builder_new();
+      json_builder_begin_object(eb);
+      json_builder_set_member_name(eb, "session_id");
+      json_builder_add_string_value(eb, session->session_id);
+      json_builder_set_member_name(eb, "front_buffer");
+      json_builder_add_int_value(eb, session->front_buffer);
+      json_builder_set_member_name(eb, "width");
+      json_builder_add_int_value(eb, rendered_width);
+      json_builder_set_member_name(eb, "height");
+      json_builder_add_int_value(eb, rendered_height);
+      json_builder_set_member_name(eb, "sequence");
+      json_builder_add_int_value(eb, session->frame_sequence);
+      json_builder_end_object(eb);
+
+      JsonNode *event_data = json_builder_get_root(eb);
+      dt_server_queue_event(server, "develop.preview_ready", event_data);
+      json_node_unref(event_data);
+      g_object_unref(eb);
+    }
+
+    {
+      const gint64 t_event = g_get_monotonic_time();
+      fprintf(stderr, "[perf] shm_write+event: %.1f ms  total_since_pipe_start: %.1f ms  %dx%d seq=%llu\n",
+              (t_event - t_pipe_end) / 1000.0,
+              (t_event - t_pipe_start) / 1000.0,
+              rendered_width, rendered_height, (unsigned long long)session->frame_sequence);
+    }
+    break;
+  }
+
+  // Mark pipeline as no longer busy
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_busy = FALSE;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+
+  return NULL;
+}
+
+static void _maybe_start_pipeline(dt_server_t *server, dt_server_session_t *session)
+{
+  pthread_mutex_lock(&session->pipeline_mutex);
+  if(session->pipeline_busy)
+  {
+    // Worker is already running — it will see the bumped pipeline_seq and reprocess
+    pthread_mutex_unlock(&session->pipeline_mutex);
+    return;
+  }
+  session->pipeline_busy = TRUE;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+
+  _pipeline_job_t *job = g_new0(_pipeline_job_t, 1);
+  job->server = server;
+  job->session = session;
+
+  pthread_t thread;
+  if(dt_pthread_create(&thread, _preview_pipeline_worker, job) != 0)
+  {
+    fprintf(stderr, "[server] failed to create pipeline worker thread\n");
+    g_free(job);
+    pthread_mutex_lock(&session->pipeline_mutex);
+    session->pipeline_busy = FALSE;
+    pthread_mutex_unlock(&session->pipeline_mutex);
+    return;
+  }
+  pthread_detach(thread);
+}
+
 char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_t *req)
 {
   if(!req->params || !json_object_has_member(req->params, "session_id")
@@ -540,6 +690,10 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   if(!target)
     return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
 
+  // Check for preview_only mode (skip history during drag)
+  const gboolean preview_only = json_object_has_member(req->params, "preview_only")
+    && json_object_get_boolean_member(req->params, "preview_only");
+
   // Apply module-specific parameter updates
   if(!strcmp(op, "exposure"))
   {
@@ -570,21 +724,53 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   if(json_object_has_member(req->params, "enabled"))
     target->enabled = json_object_get_boolean_member(req->params, "enabled");
 
-  // Record the change to history.
-  // Use _ext variant which bypasses the GUI check in dt_dev_add_history_item()
-  // (the wrapper bails early when darktable.gui is NULL, i.e. headless/server mode).
-  // no_image=TRUE avoids GUI widget operations that crash without a GUI.
-  dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
+  if(preview_only)
+  {
+    // Preview-only: commit params directly to the pipe piece, bypassing history.
+    // DT_DEV_PIPE_TOP_CHANGED triggers synch_top() which reads dev->history —
+    // since we skipped history write, that would revert our changes.
+    // Instead, commit to the pipe piece directly and invalidate its cache.
+    dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+    for(GList *nodes = pipe->nodes; nodes; nodes = g_list_next(nodes))
+    {
+      dt_dev_pixelpipe_iop_t *piece = nodes->data;
+      if(piece->module == target)
+      {
+        piece->enabled = target->enabled;
+        dt_iop_commit_params(target, target->params,
+                             target->blend_params ? target->blend_params
+                               : target->default_blendop_params,
+                             pipe, piece);
+        // Invalidate cache from this module onwards
+        dt_dev_pixelpipe_cache_invalidate_later(pipe, target->iop_order);
+        break;
+      }
+    }
+  }
+  else
+  {
+    // Record the change to history.
+    // Use _ext variant which bypasses the GUI check in dt_dev_add_history_item()
+    // (the wrapper bails early when darktable.gui is NULL, i.e. headless/server mode).
+    // no_image=TRUE avoids GUI widget operations that crash without a GUI.
+    dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
 
-  // Mark pipeline dirty — no_image=TRUE above skips pipe->changed, so set manually
-  session->dev.full.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
-  if(session->dev.preview_pipe)
-    session->dev.preview_pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
-  if(session->dev.preview2.pipe)
-    session->dev.preview2.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+    // Mark pipeline dirty — no_image=TRUE above skips pipe->changed, so set manually
+    session->dev.full.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+    if(session->dev.preview_pipe)
+      session->dev.preview_pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+    if(session->dev.preview2.pipe)
+      session->dev.preview2.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  }
 
   dt_dev_invalidate_all(&session->dev);
   session->dirty = TRUE;
+
+  // Bump pipeline sequence and trigger async processing
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
 
   fprintf(stderr, "[server] develop.set_params: session=%s op=%s enabled=%d history_end=%d\n",
           session_id, op, target->enabled, session->dev.history_end);
@@ -713,6 +899,58 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   json_builder_set_member_name(b, "front_buffer");
   json_builder_add_int_value(b, session->front_buffer);
 
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op"))
+  {
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or op");
+  }
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  if(!session_id || !op)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id and op must be strings");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  // Find the module
+  dt_iop_module_t *target = NULL;
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op))
+    {
+      target = mod;
+      break;
+    }
+  }
+
+  if(!target)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  // Write current params to history (the params were already applied by preview_only set_params calls)
+  dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
+
+  fprintf(stderr, "[server] develop.commit_params: session=%s op=%s history_end=%d\n",
+          session_id, op, session->dev.history_end);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
   json_builder_end_object(b);
 
   JsonNode *result = json_builder_get_root(b);

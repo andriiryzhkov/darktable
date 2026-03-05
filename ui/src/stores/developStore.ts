@@ -3,12 +3,14 @@ import {
   developOpen,
   developClose,
   developSetParams,
+  developCommitParams,
   developGetParams,
   developRequestPreview,
   developGetHistory,
   developDeleteHistory,
   getPreviewFrame,
 } from "../api/commands";
+import { onServerEvent } from "../api/events";
 import type { ExposureParams, ModuleInfo, HistoryItem } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
@@ -31,8 +33,8 @@ interface DevelopState {
   imgid: number | null;
   previewWidth: number;
   previewHeight: number;
-  previewSrc: string | null; // data URL for <img> (JPEG) or null
-  frameData: Uint8Array | null; // raw BGRA fallback
+  previewSrc: string | null; // URL for <img> fallback path
+  frameData: Uint8Array | null; // raw BGRA pixels for WebGL rendering
   frontBuffer: number;
   sequence: number;
   exposureParams: ExposureParams | null;
@@ -52,6 +54,11 @@ interface DevelopState {
   requestPreview: () => Promise<void>;
   fetchFrame: () => Promise<void>;
   fetchModuleParams: (op: string) => Promise<void>;
+  /** Lightweight: setParams (preview_only) + render. Use during drag — skips history write. */
+  applyParam: (op: string, params: Record<string, unknown>) => Promise<void>;
+  /** Commit current module params to history after a preview_only drag. */
+  commitParam: (op: string) => Promise<void>;
+  /** Full: setParams + render + frame + history + params refetch. Use on drag end. */
   setModuleParam: (op: string, params: Record<string, unknown>) => Promise<void>;
   enableModule: (op: string, enabled: boolean) => Promise<void>;
   fetchHistory: () => Promise<void>;
@@ -60,8 +67,12 @@ interface DevelopState {
   setPan: (x: number, y: number) => void;
 }
 
-const PREVIEW_WIDTH = 1920;
-const PREVIEW_HEIGHT = 1280;
+/** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
+function getPreviewDimensions() {
+  const w = Math.min(Math.round(window.innerWidth * 0.7), 1920);
+  const h = Math.min(window.innerHeight, 1200);
+  return { width: Math.max(w, 640), height: Math.max(h, 480) };
+}
 
 // Generation counter to detect stale async operations
 let sessionGeneration = 0;
@@ -85,8 +96,8 @@ export function getEnabledOps(historyItems: HistoryItem[]): Set<string> {
 export const useDevelopStore = create<DevelopState>((set, get) => ({
   sessionId: null,
   imgid: null,
-  previewWidth: PREVIEW_WIDTH,
-  previewHeight: PREVIEW_HEIGHT,
+  previewWidth: 0,
+  previewHeight: 0,
   previewSrc: null,
   frameData: null,
   frontBuffer: 0,
@@ -117,7 +128,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     set({ loading: true, imgid, previewError: null, sessionId: null, previewSrc: null, frameData: null, zoom: "fit" as ZoomLevel, panX: 0.5, panY: 0.5 });
 
     try {
-      const result = await developOpen(imgid, PREVIEW_WIDTH, PREVIEW_HEIGHT);
+      const { width: pw, height: ph } = getPreviewDimensions();
+      const result = await developOpen(imgid, pw, ph);
       if (gen !== sessionGeneration) {
         // Orphaned session — close it so server frees SHM buffers
         developClose(result.session_id).catch(() => {});
@@ -141,32 +153,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         previewHeight: preview.height,
       });
 
-      // Read the frame from SHM
-      const frame = await getPreviewFrame(result.session_id, preview.front_buffer);
-      if (gen !== sessionGeneration) return;
-
-      if (frame.format === "jpeg") {
-        set({
-          previewSrc: `data:image/jpeg;base64,${frame.data}`,
-          frameData: null,
-          previewWidth: frame.width,
-          previewHeight: frame.height,
-          previewError: null,
-        });
-      } else {
-        const binaryStr = atob(frame.data);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
-        }
-        set({
-          previewSrc: null,
-          frameData: bytes,
-          previewWidth: frame.width,
-          previewHeight: frame.height,
-          previewError: null,
-        });
-      }
+      // Fetch the rendered frame
+      await get().fetchFrame();
 
       // Fetch history stack and module params after first preview
       await get().fetchHistory();
@@ -219,27 +207,39 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   },
 
   fetchFrame: async () => {
-    const { sessionId, frontBuffer } = get();
+    const { sessionId, frontBuffer, sequence } = get();
     if (!sessionId) return;
-    const result = await getPreviewFrame(sessionId, frontBuffer);
-
-    if (result.format === "jpeg") {
+    const port = (window as unknown as Record<string, number>).__dt_frame_port;
+    if (port) {
+      try {
+        // Fetch raw BGRA pixels over HTTP — no JPEG encoding, no base64
+        const t0 = performance.now();
+        const resp = await fetch(
+          `http://localhost:${port}/raw?s=${sessionId}&b=${frontBuffer}&seq=${sequence}`
+        );
+        if (!resp.ok) throw new Error(`frame server: ${resp.status}`);
+        const t1 = performance.now();
+        const w = parseInt(resp.headers.get("X-Width") || "0");
+        const h = parseInt(resp.headers.get("X-Height") || "0");
+        const buf = await resp.arrayBuffer();
+        const t2 = performance.now();
+        set({
+          previewSrc: null,
+          frameData: new Uint8Array(buf),
+          previewWidth: w,
+          previewHeight: h,
+          previewError: null,
+        });
+        console.log(`[perf] fetchFrame: fetch=${(t1-t0).toFixed(1)}ms read=${(t2-t1).toFixed(1)}ms total=${(t2-t0).toFixed(1)}ms ${w}x${h}`);
+      } catch (e) {
+        console.error("[fetchFrame] raw fetch failed:", e);
+      }
+    } else {
+      // Fallback: IPC + base64 JPEG
+      const result = await getPreviewFrame(sessionId, frontBuffer);
       set({
         previewSrc: `data:image/jpeg;base64,${result.data}`,
         frameData: null,
-        previewWidth: result.width,
-        previewHeight: result.height,
-        previewError: null,
-      });
-    } else {
-      const binaryStr = atob(result.data);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        bytes[i] = binaryStr.charCodeAt(i);
-      }
-      set({
-        previewSrc: null,
-        frameData: bytes,
         previewWidth: result.width,
         previewHeight: result.height,
         previewError: null,
@@ -284,6 +284,28 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     }
   },
 
+  applyParam: async (op: string, params: Record<string, unknown>) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      const t0 = performance.now();
+      await developSetParams(sessionId, op, params, true);
+      console.log(`[perf] applyParam IPC: ${(performance.now() - t0).toFixed(1)}ms`);
+    } catch (e) {
+      console.error(`apply ${op} param failed:`, e);
+    }
+  },
+
+  commitParam: async (op: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developCommitParams(sessionId, op);
+    } catch (e) {
+      console.error(`commit ${op} params failed:`, e);
+    }
+  },
+
   setModuleParam: async (op: string, params: Record<string, unknown>) => {
     const { sessionId } = get();
     if (!sessionId) return;
@@ -316,3 +338,42 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     }
   },
 }));
+
+// --- Event-driven preview update ---
+// Subscribe to server-pushed "develop.preview_ready" events.
+// When the async pipeline finishes, the server writes SHM and pushes this event.
+// We update the store's buffer info and fetch the frame.
+
+interface PreviewReadyEvent {
+  session_id: string;
+  front_buffer: number;
+  width: number;
+  height: number;
+  sequence: number;
+}
+
+onServerEvent("develop.preview_ready", (raw: unknown) => {
+  const tEvent = performance.now();
+  const data = raw as PreviewReadyEvent;
+  const state = useDevelopStore.getState();
+
+  // Ignore events for other sessions
+  if (data.session_id !== state.sessionId) return;
+
+  // Ignore stale events (sequence must advance)
+  if (data.sequence <= state.sequence) return;
+
+  console.log(`[perf] preview_ready event: seq=${data.sequence} ${data.width}x${data.height}`);
+
+  useDevelopStore.setState({
+    frontBuffer: data.front_buffer,
+    sequence: data.sequence,
+    previewWidth: data.width,
+    previewHeight: data.height,
+  });
+
+  // Fetch the frame pixels from SHM
+  state.fetchFrame().then(() => {
+    console.log(`[perf] event→render: ${(performance.now() - tEvent).toFixed(1)}ms`);
+  });
+});

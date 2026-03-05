@@ -90,7 +90,7 @@ export interface ExposureParams {
 export interface PreviewFrameResult {
   width: number;
   height: number;
-  format: "jpeg" | "raw"; // jpeg = JPEG compressed, raw = BGRA8 pixels
+  format: "jpeg" | "raw" | "raw_bgra"; // jpeg = JPEG compressed, raw/raw_bgra = BGRA8 pixels
   data: string; // base64-encoded
 }
 
