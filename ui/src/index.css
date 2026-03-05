@@ -183,7 +183,6 @@ body {
 }
 
 .module-chevron {
-  transition: transform 150ms;
   flex-shrink: 0;
 }
 
@@ -801,22 +800,6 @@ body {
   color: var(--fg-color);
 }
 
-.bauhaus-combo-indicator {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-}
-
-.bauhaus-combo-indicator svg {
-  fill: var(--plugin-label-color);
-  width: 8px;
-  height: 5px;
-}
-
-.bauhaus-combo:hover .bauhaus-combo-indicator svg {
-  fill: var(--fg-color);
-}
-
 .bauhaus-combo-action {
   display: flex;
   align-items: center;
@@ -851,7 +834,7 @@ body {
 .bauhaus-combo-popup-row {
   display: flex;
   align-items: baseline;
-  padding: 1px 6px;
+  padding: 1px 28px 1px 6px;
   gap: 4px;
 }
 
@@ -862,7 +845,7 @@ body {
 }
 
 .bauhaus-combo-option {
-  padding: 1px 6px;
+  padding: 1px 28px 1px 6px;
   font-size: 0.75rem;
   color: var(--plugin-label-color);
   cursor: pointer;

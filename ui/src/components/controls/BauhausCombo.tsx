@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { ChevronDown } from "lucide-react";
 
 export interface ComboGroup {
   label: string;
@@ -109,18 +110,11 @@ export default function BauhausCombo({
         <div className="bauhaus-combo-header">
           {label && !hideLabel && <span className="bauhaus-combo-label">{label}</span>}
           <span className="bauhaus-combo-value">{selected}</span>
-          <span className="bauhaus-combo-indicator">
-            <svg viewBox="0 0 10 6" xmlns="http://www.w3.org/2000/svg">
-              <path d="M0 0l5 6 5-6z" />
-            </svg>
-          </span>
         </div>
       </div>
-      {actionIcon && (
-        <div className="bauhaus-combo-action" onClick={onAction}>
-          {actionIcon}
-        </div>
-      )}
+      <div className="bauhaus-combo-action" onClick={actionIcon ? onAction : handleToggle}>
+        {actionIcon ?? <ChevronDown size={14} />}
+      </div>
       {open && createPortal(
         <div
           ref={popupRef}
