@@ -117,6 +117,33 @@ export interface SigmoidParams {
   purity: number;
 }
 
+export interface ColorProfileEntry {
+  type: number;
+  name: string;
+  filename: string;
+}
+
+export interface ColorinParams {
+  type: number;
+  filename: string;
+  intent: number;
+  normalize: number;
+  type_work: number;
+  filename_work: string;
+  input_profile_name: string;
+  work_profile_name: string;
+  input_profiles: ColorProfileEntry[];
+  work_profiles: ColorProfileEntry[];
+}
+
+export interface ColoroutParams {
+  type: number;
+  filename: string;
+  intent: number;
+  output_profile_name: string;
+  output_profiles: ColorProfileEntry[];
+}
+
 export interface RawprepareParams {
   raw_black_level_separate: [number, number, number, number];
   raw_white_point: number;

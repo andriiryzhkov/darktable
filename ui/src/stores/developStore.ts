@@ -12,7 +12,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -42,6 +42,8 @@ interface DevelopState {
   sigmoidParams: SigmoidParams | null;
   demosaicParams: DemosaicParams | null;
   rawprepareParams: RawprepareParams | null;
+  colorinParams: ColorinParams | null;
+  coloroutParams: ColoroutParams | null;
   modules: ModuleInfo[];
   historyItems: HistoryItem[];
   historyEnd: number;
@@ -111,6 +113,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   sigmoidParams: null,
   demosaicParams: null,
   rawprepareParams: null,
+  colorinParams: null,
+  coloroutParams: null,
   modules: [],
   historyItems: [],
   historyEnd: 0,
@@ -181,6 +185,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().fetchModuleParams("sigmoid");
       await get().fetchModuleParams("demosaic");
       await get().fetchModuleParams("rawprepare");
+      await get().fetchModuleParams("colorin");
+      await get().fetchModuleParams("colorout");
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -308,6 +314,10 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         set({ demosaicParams: result.params as unknown as DemosaicParams });
       } else if (op === "rawprepare") {
         set({ rawprepareParams: result.params as unknown as RawprepareParams });
+      } else if (op === "colorin") {
+        set({ colorinParams: result.params as unknown as ColorinParams });
+      } else if (op === "colorout") {
+        set({ coloroutParams: result.params as unknown as ColoroutParams });
       }
     } catch (e) {
       console.error(`fetch ${op} params failed:`, e);

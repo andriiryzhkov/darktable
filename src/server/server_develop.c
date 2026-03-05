@@ -17,6 +17,7 @@
 */
 
 #include "server/server.h"
+#include "common/colorspaces.h"
 #include "common/history.h"
 #include "common/image.h"
 #include "common/image_cache.h"
@@ -91,6 +92,39 @@ typedef struct _server_rawprepare_params_t
   uint16_t raw_white_point;
   _server_rawprepare_flat_field_t flat_field;
 } _server_rawprepare_params_t;
+
+// Mirror of dt_iop_colorin_params_t from iop/colorin.c
+// Must match the struct layout exactly (introspection version 7).
+#define _SERVER_IOP_COLOR_ICC_LEN 512
+
+typedef enum _server_color_normalize_t
+{
+  _NORMALIZE_OFF = 0,
+  _NORMALIZE_SRGB = 1,
+  _NORMALIZE_ADOBE_RGB = 2,
+  _NORMALIZE_LINEAR_REC709_RGB = 3,
+  _NORMALIZE_LINEAR_REC2020_RGB = 4
+} _server_color_normalize_t;
+
+typedef struct _server_colorin_params_t
+{
+  dt_colorspaces_color_profile_type_t type;
+  char filename[_SERVER_IOP_COLOR_ICC_LEN];
+  dt_iop_color_intent_t intent;
+  _server_color_normalize_t normalize;
+  gboolean blue_mapping;
+  dt_colorspaces_color_profile_type_t type_work;
+  char filename_work[_SERVER_IOP_COLOR_ICC_LEN];
+} _server_colorin_params_t;
+
+// Mirror of dt_iop_colorout_params_t from iop/colorout.c
+// Must match the struct layout exactly (introspection version 5).
+typedef struct _server_colorout_params_t
+{
+  dt_colorspaces_color_profile_type_t type;
+  char filename[_SERVER_IOP_COLOR_ICC_LEN];
+  dt_iop_color_intent_t intent;
+} _server_colorout_params_t;
 
 // Mirror of dt_iop_demosaic_params_t from iop/demosaic.c
 // Must match the struct layout exactly (introspection version 5).
@@ -696,6 +730,105 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
     json_builder_set_member_name(b, "bottom");
     json_builder_add_int_value(b, p->bottom);
   }
+  else if(!strcmp(op, "colorin"))
+  {
+    const _server_colorin_params_t *p = (const _server_colorin_params_t *)target->params;
+
+    // Current params
+    json_builder_set_member_name(b, "type");
+    json_builder_add_int_value(b, (int)p->type);
+    json_builder_set_member_name(b, "filename");
+    json_builder_add_string_value(b, p->filename);
+    json_builder_set_member_name(b, "intent");
+    json_builder_add_int_value(b, (int)p->intent);
+    json_builder_set_member_name(b, "normalize");
+    json_builder_add_int_value(b, (int)p->normalize);
+    json_builder_set_member_name(b, "type_work");
+    json_builder_add_int_value(b, (int)p->type_work);
+    json_builder_set_member_name(b, "filename_work");
+    json_builder_add_string_value(b, p->filename_work);
+
+    // Current profile display names
+    json_builder_set_member_name(b, "input_profile_name");
+    json_builder_add_string_value(b, dt_colorspaces_get_name(p->type, p->filename));
+    json_builder_set_member_name(b, "work_profile_name");
+    json_builder_add_string_value(b, dt_colorspaces_get_name(p->type_work, p->filename_work));
+
+    // Build available input profiles list (system profiles with in_pos)
+    json_builder_set_member_name(b, "input_profiles");
+    json_builder_begin_array(b);
+    for(GList *l = darktable.color_profiles->profiles; l; l = g_list_next(l))
+    {
+      dt_colorspaces_color_profile_t *prof = l->data;
+      if(prof->in_pos > -1)
+      {
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "type");
+        json_builder_add_int_value(b, (int)prof->type);
+        json_builder_set_member_name(b, "name");
+        json_builder_add_string_value(b, prof->name);
+        json_builder_set_member_name(b, "filename");
+        json_builder_add_string_value(b, prof->filename);
+        json_builder_end_object(b);
+      }
+    }
+    json_builder_end_array(b);
+
+    // Build available working profiles list
+    json_builder_set_member_name(b, "work_profiles");
+    json_builder_begin_array(b);
+    for(GList *l = darktable.color_profiles->profiles; l; l = g_list_next(l))
+    {
+      dt_colorspaces_color_profile_t *prof = l->data;
+      if(prof->work_pos > -1)
+      {
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "type");
+        json_builder_add_int_value(b, (int)prof->type);
+        json_builder_set_member_name(b, "name");
+        json_builder_add_string_value(b, prof->name);
+        json_builder_set_member_name(b, "filename");
+        json_builder_add_string_value(b, prof->filename);
+        json_builder_end_object(b);
+      }
+    }
+    json_builder_end_array(b);
+  }
+  else if(!strcmp(op, "colorout"))
+  {
+    const _server_colorout_params_t *p = (const _server_colorout_params_t *)target->params;
+
+    json_builder_set_member_name(b, "type");
+    json_builder_add_int_value(b, (int)p->type);
+    json_builder_set_member_name(b, "filename");
+    json_builder_add_string_value(b, p->filename);
+    json_builder_set_member_name(b, "intent");
+    json_builder_add_int_value(b, (int)p->intent);
+
+    // Current profile display name
+    json_builder_set_member_name(b, "output_profile_name");
+    json_builder_add_string_value(b, dt_colorspaces_get_name(p->type, p->filename));
+
+    // Available output profiles
+    json_builder_set_member_name(b, "output_profiles");
+    json_builder_begin_array(b);
+    for(GList *l = darktable.color_profiles->profiles; l; l = g_list_next(l))
+    {
+      dt_colorspaces_color_profile_t *prof = l->data;
+      if(prof->out_pos > -1)
+      {
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "type");
+        json_builder_add_int_value(b, (int)prof->type);
+        json_builder_set_member_name(b, "name");
+        json_builder_add_string_value(b, prof->name);
+        json_builder_set_member_name(b, "filename");
+        json_builder_add_string_value(b, prof->filename);
+        json_builder_end_object(b);
+      }
+    }
+    json_builder_end_array(b);
+  }
   else if(!strcmp(op, "demosaic"))
   {
     const _server_demosaic_params_t *p = (const _server_demosaic_params_t *)target->params;
@@ -1010,6 +1143,34 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
       p->right = (int32_t)json_object_get_int_member(new_params, "right");
     if(json_object_has_member(new_params, "bottom"))
       p->bottom = (int32_t)json_object_get_int_member(new_params, "bottom");
+  }
+  else if(!strcmp(op, "colorin"))
+  {
+    _server_colorin_params_t *p = (_server_colorin_params_t *)target->params;
+
+    if(json_object_has_member(new_params, "type"))
+      p->type = (dt_colorspaces_color_profile_type_t)json_object_get_int_member(new_params, "type");
+    if(json_object_has_member(new_params, "filename"))
+      g_strlcpy(p->filename, json_object_get_string_member(new_params, "filename"), _SERVER_IOP_COLOR_ICC_LEN);
+    if(json_object_has_member(new_params, "intent"))
+      p->intent = (dt_iop_color_intent_t)json_object_get_int_member(new_params, "intent");
+    if(json_object_has_member(new_params, "normalize"))
+      p->normalize = (_server_color_normalize_t)json_object_get_int_member(new_params, "normalize");
+    if(json_object_has_member(new_params, "type_work"))
+      p->type_work = (dt_colorspaces_color_profile_type_t)json_object_get_int_member(new_params, "type_work");
+    if(json_object_has_member(new_params, "filename_work"))
+      g_strlcpy(p->filename_work, json_object_get_string_member(new_params, "filename_work"), _SERVER_IOP_COLOR_ICC_LEN);
+  }
+  else if(!strcmp(op, "colorout"))
+  {
+    _server_colorout_params_t *p = (_server_colorout_params_t *)target->params;
+
+    if(json_object_has_member(new_params, "type"))
+      p->type = (dt_colorspaces_color_profile_type_t)json_object_get_int_member(new_params, "type");
+    if(json_object_has_member(new_params, "filename"))
+      g_strlcpy(p->filename, json_object_get_string_member(new_params, "filename"), _SERVER_IOP_COLOR_ICC_LEN);
+    if(json_object_has_member(new_params, "intent"))
+      p->intent = (dt_iop_color_intent_t)json_object_get_int_member(new_params, "intent");
   }
   else if(!strcmp(op, "demosaic"))
   {
