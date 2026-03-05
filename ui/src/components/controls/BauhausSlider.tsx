@@ -105,12 +105,11 @@ export default function BauhausSlider({
         <div
           ref={trackRef}
           className="bauhaus-slider-track"
-          style={gradient ? { background: gradient } : undefined}
         >
-          {color && (
+          {(gradient || color) && (
             <div
               className="bauhaus-slider-color"
-              style={{ backgroundColor: color }}
+              style={gradient ? { background: gradient } : { backgroundColor: color }}
             />
           )}
           <div
