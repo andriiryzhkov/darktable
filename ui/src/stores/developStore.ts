@@ -12,7 +12,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { ExposureParams, SigmoidParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { ExposureParams, SigmoidParams, DemosaicParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -40,6 +40,7 @@ interface DevelopState {
   sequence: number;
   exposureParams: ExposureParams | null;
   sigmoidParams: SigmoidParams | null;
+  demosaicParams: DemosaicParams | null;
   modules: ModuleInfo[];
   historyItems: HistoryItem[];
   historyEnd: number;
@@ -107,6 +108,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   sequence: 0,
   exposureParams: null,
   sigmoidParams: null,
+  demosaicParams: null,
   modules: [],
   historyItems: [],
   historyEnd: 0,
@@ -175,6 +177,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().fetchHistory();
       await get().fetchModuleParams("exposure");
       await get().fetchModuleParams("sigmoid");
+      await get().fetchModuleParams("demosaic");
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -200,6 +203,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       frameData: null,
       exposureParams: null,
       sigmoidParams: null,
+      demosaicParams: null,
       modules: [],
       historyItems: [],
       historyEnd: 0,
@@ -297,6 +301,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         set({ exposureParams: result.params as unknown as ExposureParams });
       } else if (op === "sigmoid") {
         set({ sigmoidParams: result.params as unknown as SigmoidParams });
+      } else if (op === "demosaic") {
+        set({ demosaicParams: result.params as unknown as DemosaicParams });
       }
     } catch (e) {
       console.error(`fetch ${op} params failed:`, e);

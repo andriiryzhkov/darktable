@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useDevelopStore } from "../../stores/developStore";
-import { useCatalogStore } from "../../stores/catalogStore";
 import PreviewCanvas from "./PreviewCanvas";
 import ImageInfo from "./ImageInfo";
 import TopToolbar from "../Lighttable/TopToolbar";

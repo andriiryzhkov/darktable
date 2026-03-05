@@ -73,6 +73,75 @@ typedef struct _server_sigmoid_params_t
   int base_primaries;
 } _server_sigmoid_params_t;
 
+// Mirror of dt_iop_demosaic_params_t from iop/demosaic.c
+// Must match the struct layout exactly (introspection version 5).
+#define _SERVER_DEMOSAIC_XTRANS 1024
+#define _SERVER_DEMOSAIC_DUAL   2048
+
+typedef enum _server_demosaic_greeneq_t
+{
+  _DEMOSAIC_GREEN_EQ_NO = 0,
+  _DEMOSAIC_GREEN_EQ_LOCAL = 1,
+  _DEMOSAIC_GREEN_EQ_FULL = 2,
+  _DEMOSAIC_GREEN_EQ_BOTH = 3
+} _server_demosaic_greeneq_t;
+
+typedef enum _server_demosaic_smooth_t
+{
+  _DEMOSAIC_SMOOTH_OFF = 0,
+  _DEMOSAIC_SMOOTH_1 = 1,
+  _DEMOSAIC_SMOOTH_2 = 2,
+  _DEMOSAIC_SMOOTH_3 = 3,
+  _DEMOSAIC_SMOOTH_4 = 4,
+  _DEMOSAIC_SMOOTH_5 = 5
+} _server_demosaic_smooth_t;
+
+typedef enum _server_demosaic_method_t
+{
+  _DEMOSAIC_PPG = 0,
+  _DEMOSAIC_AMAZE = 1,
+  _DEMOSAIC_VNG4 = 2,
+  _DEMOSAIC_PASSTHROUGH_MONOCHROME = 3,
+  _DEMOSAIC_PASSTHROUGH_COLOR = 4,
+  _DEMOSAIC_RCD = 5,
+  _DEMOSAIC_LMMSE = 6,
+  _DEMOSAIC_MONO = 7,
+  _DEMOSAIC_RCD_DUAL = _SERVER_DEMOSAIC_DUAL | 5,
+  _DEMOSAIC_AMAZE_DUAL = _SERVER_DEMOSAIC_DUAL | 1,
+  _DEMOSAIC_VNG = _SERVER_DEMOSAIC_XTRANS | 0,
+  _DEMOSAIC_MARKESTEIJN = _SERVER_DEMOSAIC_XTRANS | 1,
+  _DEMOSAIC_MARKESTEIJN_3 = _SERVER_DEMOSAIC_XTRANS | 2,
+  _DEMOSAIC_PASSTHR_MONOX = _SERVER_DEMOSAIC_XTRANS | 3,
+  _DEMOSAIC_FDC = _SERVER_DEMOSAIC_XTRANS | 4,
+  _DEMOSAIC_PASSTHR_COLORX = _SERVER_DEMOSAIC_XTRANS | 5,
+  _DEMOSAIC_MARKEST3_DUAL = _SERVER_DEMOSAIC_DUAL | _SERVER_DEMOSAIC_XTRANS | 2
+} _server_demosaic_method_t;
+
+typedef enum _server_demosaic_lmmse_t
+{
+  _DEMOSAIC_LMMSE_REFINE_0 = 0,
+  _DEMOSAIC_LMMSE_REFINE_1 = 1,
+  _DEMOSAIC_LMMSE_REFINE_2 = 2,
+  _DEMOSAIC_LMMSE_REFINE_3 = 3,
+  _DEMOSAIC_LMMSE_REFINE_4 = 4
+} _server_demosaic_lmmse_t;
+
+typedef struct _server_demosaic_params_t
+{
+  _server_demosaic_greeneq_t green_eq;
+  float median_thrs;
+  _server_demosaic_smooth_t color_smoothing;
+  _server_demosaic_method_t demosaicing_method;
+  _server_demosaic_lmmse_t lmmse_refine;
+  float dual_thrs;
+  float cs_radius;
+  float cs_thrs;
+  float cs_boost;
+  int cs_iter;
+  float cs_center;
+  gboolean cs_enabled;
+} _server_demosaic_params_t;
+
 // Mirror of dt_iop_exposure_data_t — committed pipe data (after process)
 typedef struct _server_exposure_data_t
 {
@@ -587,6 +656,43 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
       dt_pthread_mutex_unlock(&pipe->busy_mutex);
     }
   }
+  else if(!strcmp(op, "demosaic"))
+  {
+    const _server_demosaic_params_t *p = (const _server_demosaic_params_t *)target->params;
+    json_builder_set_member_name(b, "demosaicing_method");
+    json_builder_add_int_value(b, (int)p->demosaicing_method);
+    json_builder_set_member_name(b, "green_eq");
+    json_builder_add_int_value(b, (int)p->green_eq);
+    json_builder_set_member_name(b, "median_thrs");
+    json_builder_add_double_value(b, p->median_thrs);
+    json_builder_set_member_name(b, "color_smoothing");
+    json_builder_add_int_value(b, (int)p->color_smoothing);
+    json_builder_set_member_name(b, "lmmse_refine");
+    json_builder_add_int_value(b, (int)p->lmmse_refine);
+    json_builder_set_member_name(b, "dual_thrs");
+    json_builder_add_double_value(b, p->dual_thrs);
+    json_builder_set_member_name(b, "cs_enabled");
+    json_builder_add_boolean_value(b, p->cs_enabled);
+    json_builder_set_member_name(b, "cs_radius");
+    json_builder_add_double_value(b, p->cs_radius);
+    json_builder_set_member_name(b, "cs_thrs");
+    json_builder_add_double_value(b, p->cs_thrs);
+    json_builder_set_member_name(b, "cs_boost");
+    json_builder_add_double_value(b, p->cs_boost);
+    json_builder_set_member_name(b, "cs_iter");
+    json_builder_add_int_value(b, p->cs_iter);
+    json_builder_set_member_name(b, "cs_center");
+    json_builder_add_double_value(b, p->cs_center);
+
+    // Include sensor type so UI can show appropriate method options
+    const dt_image_t *img = &session->dev.image_storage;
+    const gboolean is_xtrans = img->buf_dsc.filters == 9u;
+    const gboolean is_bayer4 = img->flags & DT_IMAGE_4BAYER;
+    const gboolean is_mono = dt_image_is_monochrome(img);
+    const char *sensor_type = is_mono ? "mono" : is_xtrans ? "xtrans" : is_bayer4 ? "bayer4" : "bayer";
+    json_builder_set_member_name(b, "sensor_type");
+    json_builder_add_string_value(b, sensor_type);
+  }
   else if(!strcmp(op, "sigmoid"))
   {
     const _server_sigmoid_params_t *p = (const _server_sigmoid_params_t *)target->params;
@@ -841,6 +947,35 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
       p->deflicker_percentile = (float)json_object_get_double_member(new_params, "deflicker_percentile");
     if(json_object_has_member(new_params, "deflicker_target_level"))
       p->deflicker_target_level = (float)json_object_get_double_member(new_params, "deflicker_target_level");
+  }
+  else if(!strcmp(op, "demosaic"))
+  {
+    _server_demosaic_params_t *p = (_server_demosaic_params_t *)target->params;
+
+    if(json_object_has_member(new_params, "demosaicing_method"))
+      p->demosaicing_method = (_server_demosaic_method_t)json_object_get_int_member(new_params, "demosaicing_method");
+    if(json_object_has_member(new_params, "green_eq"))
+      p->green_eq = (_server_demosaic_greeneq_t)json_object_get_int_member(new_params, "green_eq");
+    if(json_object_has_member(new_params, "median_thrs"))
+      p->median_thrs = (float)json_object_get_double_member(new_params, "median_thrs");
+    if(json_object_has_member(new_params, "color_smoothing"))
+      p->color_smoothing = (_server_demosaic_smooth_t)json_object_get_int_member(new_params, "color_smoothing");
+    if(json_object_has_member(new_params, "lmmse_refine"))
+      p->lmmse_refine = (_server_demosaic_lmmse_t)json_object_get_int_member(new_params, "lmmse_refine");
+    if(json_object_has_member(new_params, "dual_thrs"))
+      p->dual_thrs = (float)json_object_get_double_member(new_params, "dual_thrs");
+    if(json_object_has_member(new_params, "cs_enabled"))
+      p->cs_enabled = json_object_get_boolean_member(new_params, "cs_enabled");
+    if(json_object_has_member(new_params, "cs_radius"))
+      p->cs_radius = (float)json_object_get_double_member(new_params, "cs_radius");
+    if(json_object_has_member(new_params, "cs_thrs"))
+      p->cs_thrs = (float)json_object_get_double_member(new_params, "cs_thrs");
+    if(json_object_has_member(new_params, "cs_boost"))
+      p->cs_boost = (float)json_object_get_double_member(new_params, "cs_boost");
+    if(json_object_has_member(new_params, "cs_iter"))
+      p->cs_iter = (int)json_object_get_int_member(new_params, "cs_iter");
+    if(json_object_has_member(new_params, "cs_center"))
+      p->cs_center = (float)json_object_get_double_member(new_params, "cs_center");
   }
   else if(!strcmp(op, "sigmoid"))
   {

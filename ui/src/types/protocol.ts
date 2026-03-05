@@ -117,6 +117,22 @@ export interface SigmoidParams {
   purity: number;
 }
 
+export interface DemosaicParams {
+  demosaicing_method: number;
+  green_eq: number;
+  median_thrs: number;
+  color_smoothing: number;
+  lmmse_refine: number;
+  dual_thrs: number;
+  cs_enabled: boolean;
+  cs_radius: number;
+  cs_thrs: number;
+  cs_boost: number;
+  cs_iter: number;
+  cs_center: number;
+  sensor_type: "bayer" | "xtrans" | "bayer4" | "mono";
+}
+
 export interface PixelSampleResult {
   mean_r: number;
   mean_g: number;

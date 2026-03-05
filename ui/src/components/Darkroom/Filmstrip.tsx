@@ -52,11 +52,6 @@ export default function Filmstrip({ onSelectImage }: Props) {
     }
   }, []);
 
-  const activeId = selectedIds.size > 0 ? [...selectedIds][0] : null;
-  const activeImage = activeId
-    ? images.find((i) => i.id === activeId)
-    : null;
-
   return (
     <div className="filmstrip" style={{ height: FILMSTRIP_HEIGHT }}>
       <div ref={scrollRef} className="filmstrip-scroll" onWheel={handleWheel}>
