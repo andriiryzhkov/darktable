@@ -18,9 +18,11 @@ export default function Filmstrip({ onSelectImage }: Props) {
   const darkroomImgId = useUIStore((s) => s.darkroomImgId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to selected image on mount
+  // Scroll to selected image on mount only
+  const didInitScroll = useRef(false);
   useEffect(() => {
-    if (!scrollRef.current || selectedIds.size === 0) return;
+    if (didInitScroll.current || !scrollRef.current || selectedIds.size === 0) return;
+    didInitScroll.current = true;
     const activeId = [...selectedIds][0];
     const idx = images.findIndex((img) => img.id === activeId);
     if (idx >= 0) {
