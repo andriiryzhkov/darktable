@@ -7,7 +7,7 @@ const LABEL_TO_ZOOM = Object.fromEntries(
   ZOOM_LEVELS.map((l) => [ZOOM_LABELS[l], l]),
 ) as Record<string, ZoomLevel>;
 
-const NAV_MAX_HEIGHT = 180;
+const NAV_MAX_HEIGHT = 150;
 
 export default function NavigationModule() {
   const previewSrc = useDevelopStore((s) => s.previewSrc);

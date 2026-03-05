@@ -90,7 +90,7 @@ export default function ScopeWidget() {
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0].contentRect.width;
-      if (w > 0) setSize({ w: Math.round(w), h: Math.round(w * 0.7) });
+      if (w > 0) setSize({ w: Math.round(w), h: Math.min(150, Math.round(w * 0.7)) });
     });
     ro.observe(el);
     return () => ro.disconnect();
