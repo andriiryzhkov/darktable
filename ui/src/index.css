@@ -2211,15 +2211,17 @@ body {
   border-color: var(--thumbnail-hover-bg-color);
 }
 
-.filmstrip-info {
+/* ── Image info bar (below darkroom preview) ── */
+.image-info {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 18px;
+  height: 22px;
   flex-shrink: 0;
+  background-color: var(--plugin-bg-color);
 }
 
-.filmstrip-exif {
+.image-info-exif {
   font-size: 0.7rem;
   color: var(--plugin-label-color);
 }

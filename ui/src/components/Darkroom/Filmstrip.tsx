@@ -71,13 +71,6 @@ export default function Filmstrip({ onSelectImage }: Props) {
           />
         ))}
       </div>
-      {activeImage && (
-        <div className="filmstrip-info">
-          <span className="filmstrip-exif">
-            {formatExifSummary(activeImage)}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -131,17 +124,3 @@ function FilmstripThumb({
   );
 }
 
-function formatExposure(exposure: number): string {
-  if (exposure >= 1) return `${exposure.toFixed(1)}s`;
-  return `1/${Math.round(1 / exposure)}`;
-}
-
-function formatExifSummary(img: ImageInfo): string {
-  const parts: string[] = [];
-  if (img.exposure > 0) parts.push(formatExposure(img.exposure));
-  if (img.aperture > 0) parts.push(`f/${img.aperture.toFixed(1)}`);
-  if (img.focal_length > 0)
-    parts.push(`${img.focal_length.toFixed(1)} mm`);
-  if (img.iso > 0) parts.push(`ISO ${img.iso}`);
-  return parts.join(" \u2022 ");
-}
