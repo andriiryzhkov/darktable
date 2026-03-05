@@ -2228,19 +2228,17 @@ body {
 .darkroom-group-tabs {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 2px;
-  padding: 6px 4px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 1px;
+  padding: 4px;
 }
 
 .darkroom-group-tab {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  flex: 1;
+  height: 26px;
+  border-radius: 4px;
   border: none;
   color: var(--plugin-label-color);
   background: transparent;
@@ -2256,6 +2254,53 @@ body {
 .darkroom-group-tab[data-active="true"] {
   background-color: var(--bauhaus-fill);
   color: var(--grey-25);
+}
+
+.darkroom-group-presets {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: none;
+  color: var(--plugin-label-color);
+  background: transparent;
+  cursor: pointer;
+  margin-left: 2px;
+}
+
+.darkroom-group-presets:hover,
+.darkroom-group-presets[data-active="true"] {
+  background-color: var(--bg-color);
+  color: var(--fg-color);
+}
+
+.preset-option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.preset-option:hover {
+  color: var(--fg-color);
+}
+
+.preset-option[data-selected="true"] {
+  color: var(--fg-color);
+}
+
+.preset-check {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 /* ── Darkroom search ───────────────────────── */

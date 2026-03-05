@@ -1,46 +1,89 @@
-import { useState, useMemo, Suspense } from "react";
-import { Search } from "lucide-react";
+import { useState, useMemo, useRef, useEffect, useCallback, Suspense } from "react";
+import { createPortal } from "react-dom";
+import { Search, Menu } from "lucide-react";
+import { IOP_MODULES, type IopModuleDef } from "../modules/registry";
+import { buildGroupTabs } from "./darkroomModules";
 import {
-  IOP_MODULES,
-  IOP_GROUP_BASIC,
-  IOP_GROUP_TONE,
-  IOP_GROUP_COLOR,
-  IOP_GROUP_CORRECT,
-  IOP_GROUP_EFFECT,
-  type IopModuleDef,
-} from "../modules/registry";
-import {
-  DARKROOM_MODULE_GROUPS,
-  type ModuleGroup,
-} from "./darkroomModules";
+  MODULE_GROUP_PRESETS,
+  DEFAULT_PRESET_NAME,
+  type ModuleGroupPreset,
+} from "./moduleGroupPresets";
 import ProcessingModuleCard from "../modules/ProcessingModuleCard";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 
-// Map UI group id to IOP_GROUP bitmask
-const GROUP_MAP: Record<string, number> = {
-  basic: IOP_GROUP_BASIC,
-  tone: IOP_GROUP_TONE,
-  color: IOP_GROUP_COLOR,
-  correct: IOP_GROUP_CORRECT,
-  effect: IOP_GROUP_EFFECT,
-};
+function getPreset(name: string): ModuleGroupPreset {
+  return MODULE_GROUP_PRESETS.find((p) => p.name === name) ?? MODULE_GROUP_PRESETS[0];
+}
 
 export default function DarkroomRightSidebar() {
-  const [activeGroup, setActiveGroup] = useState<ModuleGroup>("active");
+  const [presetName, setPresetName] = useState(DEFAULT_PRESET_NAME);
+  const preset = useMemo(() => getPreset(presetName), [presetName]);
+  const groupTabs = useMemo(() => buildGroupTabs(preset.groups), [preset]);
+
+  const [activeTab, setActiveTab] = useState("active");
   const [searchQuery, setSearchQuery] = useState("");
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [popupPos, setPopupPos] = useState({ top: 0, left: 0, minWidth: 0 });
   const historyItems = useDevelopStore((s) => s.historyItems);
+
+  // Close popup on outside click or Escape
+  useEffect(() => {
+    if (!presetsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        btnRef.current && !btnRef.current.contains(target) &&
+        popupRef.current && !popupRef.current.contains(target)
+      ) {
+        setPresetsOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPresetsOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [presetsOpen]);
+
+  const togglePresets = useCallback(() => {
+    setPresetsOpen((prev) => {
+      if (!prev && btnRef.current) {
+        const rect = btnRef.current.getBoundingClientRect();
+        setPopupPos({ top: rect.bottom + 2, left: rect.right, minWidth: 200 });
+      }
+      return !prev;
+    });
+  }, []);
+
+  const selectPreset = useCallback((name: string) => {
+    setPresetName(name);
+    setPresetsOpen(false);
+    setActiveTab("active");
+  }, []);
+
+  // Find the active preset group's module list
+  const activePresetGroup = useMemo(
+    () => preset.groups.find((g) => g.id === activeTab),
+    [preset, activeTab],
+  );
 
   const filteredModules = useMemo(() => {
     let modules: IopModuleDef[] = IOP_MODULES;
 
-    if (activeGroup === "active") {
+    if (activeTab === "quick") {
+      return [];
+    } else if (activeTab === "active") {
       const enabledOps = getEnabledOps(historyItems);
       modules = modules.filter((m) => enabledOps.has(m.op));
-    } else if (activeGroup !== "favorites") {
-      const mask = GROUP_MAP[activeGroup];
-      if (mask) {
-        modules = modules.filter((m) => (m.defaultGroup & mask) !== 0);
-      }
+    } else if (activePresetGroup) {
+      const opSet = new Set(activePresetGroup.modules);
+      modules = modules.filter((m) => opSet.has(m.op));
     }
 
     if (searchQuery.trim()) {
@@ -53,23 +96,52 @@ export default function DarkroomRightSidebar() {
     }
 
     return modules;
-  }, [activeGroup, searchQuery, historyItems]);
+  }, [activeTab, activePresetGroup, searchQuery, historyItems]);
 
   return (
     <div className="flex flex-col h-full">
       {/* Module group tabs */}
       <div className="darkroom-group-tabs">
-        {DARKROOM_MODULE_GROUPS.map((group) => (
+        {groupTabs.map((group) => (
           <button
             key={group.id}
             className="darkroom-group-tab"
-            data-active={activeGroup === group.id}
+            data-active={activeTab === group.id}
             title={group.label}
-            onClick={() => setActiveGroup(group.id)}
+            onClick={() => setActiveTab(group.id)}
           >
             {group.icon}
           </button>
         ))}
+        <button
+          ref={btnRef}
+          className="darkroom-group-presets"
+          title="presets"
+          data-active={presetsOpen}
+          onClick={togglePresets}
+        >
+          <Menu size={14} />
+        </button>
+        {presetsOpen && createPortal(
+          <div
+            ref={popupRef}
+            className="bauhaus-combo-popup"
+            style={{ top: popupPos.top, left: popupPos.left, minWidth: popupPos.minWidth, transform: "translateX(-100%)" }}
+          >
+            {MODULE_GROUP_PRESETS.map((p) => (
+              <div
+                key={p.name}
+                className="preset-option"
+                data-selected={p.name === presetName}
+                onClick={() => selectPreset(p.name)}
+              >
+                <span className="preset-check">{p.name === presetName ? "✓" : ""}</span>
+                {p.name}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
       </div>
 
       {/* Search bar */}
@@ -94,7 +166,7 @@ export default function DarkroomRightSidebar() {
             />
           ))}
         </Suspense>
-        {filteredModules.length === 0 && (
+        {filteredModules.length === 0 && activeTab !== "quick" && (
           <p
             className="text-xs text-center py-4"
             style={{ color: "var(--disabled-fg-color)" }}
