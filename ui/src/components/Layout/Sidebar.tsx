@@ -85,7 +85,7 @@ export default function Sidebar({
             className="sidebar-scroll"
             style={{ direction: side === "left" ? "rtl" : "ltr" }}
           >
-            <div style={{ direction: "ltr" }}>{children}</div>
+            <div style={{ direction: "ltr", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>{children}</div>
           </div>
           <div
             className="sidebar-resize-handle"

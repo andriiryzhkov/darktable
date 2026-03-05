@@ -1329,7 +1329,8 @@ body {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
-  overflow-y: scroll;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .sidebar-resize-handle {

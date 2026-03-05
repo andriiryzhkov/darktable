@@ -100,7 +100,7 @@ export default function DarkroomRightSidebar() {
   }, [activeTab, activePresetGroup, searchQuery, historyItems]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Histogram / Waveform scope */}
       <ScopeWidget />
 
