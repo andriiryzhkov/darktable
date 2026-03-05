@@ -66,6 +66,22 @@ const PREVIEW_HEIGHT = 1280;
 // Generation counter to detect stale async operations
 let sessionGeneration = 0;
 
+/**
+ * Derive enabled module ops from history items.
+ * For each op, the last history entry determines if it's enabled.
+ */
+export function getEnabledOps(historyItems: HistoryItem[]): Set<string> {
+  const last = new Map<string, boolean>();
+  for (const item of historyItems) {
+    last.set(item.op, item.enabled);
+  }
+  const enabled = new Set<string>();
+  for (const [op, on] of last) {
+    if (on) enabled.add(op);
+  }
+  return enabled;
+}
+
 export const useDevelopStore = create<DevelopState>((set, get) => ({
   sessionId: null,
   imgid: null,

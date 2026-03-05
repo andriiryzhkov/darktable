@@ -14,6 +14,7 @@ import {
   type ModuleGroup,
 } from "./darkroomModules";
 import ProcessingModuleCard from "../modules/ProcessingModuleCard";
+import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 
 // Map UI group id to IOP_GROUP bitmask
 const GROUP_MAP: Record<string, number> = {
@@ -27,13 +28,14 @@ const GROUP_MAP: Record<string, number> = {
 export default function DarkroomRightSidebar() {
   const [activeGroup, setActiveGroup] = useState<ModuleGroup>("active");
   const [searchQuery, setSearchQuery] = useState("");
+  const historyItems = useDevelopStore((s) => s.historyItems);
 
   const filteredModules = useMemo(() => {
     let modules: IopModuleDef[] = IOP_MODULES;
 
     if (activeGroup === "active") {
-      // TODO: filter by actually enabled modules from develop store
-      modules = [...modules];
+      const enabledOps = getEnabledOps(historyItems);
+      modules = modules.filter((m) => enabledOps.has(m.op));
     } else if (activeGroup !== "favorites") {
       const mask = GROUP_MAP[activeGroup];
       if (mask) {
@@ -51,7 +53,7 @@ export default function DarkroomRightSidebar() {
     }
 
     return modules;
-  }, [activeGroup, searchQuery]);
+  }, [activeGroup, searchQuery, historyItems]);
 
   return (
     <div className="flex flex-col h-full">
@@ -89,7 +91,6 @@ export default function DarkroomRightSidebar() {
             <ProcessingModuleCard
               key={mod.op}
               module={mod}
-              enabled={true}
             />
           ))}
         </Suspense>

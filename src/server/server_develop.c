@@ -121,6 +121,14 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
   // Load image: instantiates modules, loads history from DB
   dt_dev_load_image(&session->dev, imgid);
 
+  // Apply history to module structs (params + enabled state).
+  // dt_dev_load_image() reads history items but does not sync them to modules.
+  // Without this, module->enabled stays at default_enabled and module->params
+  // stay at default_params, causing set_params to create disabled history items.
+  dt_pthread_mutex_lock(&session->dev.history_mutex);
+  dt_dev_pop_history_items_ext(&session->dev, session->dev.history_end);
+  dt_pthread_mutex_unlock(&session->dev.history_mutex);
+
   // Validate the image was loaded successfully
   if(!dt_is_valid_imgid(session->dev.image_storage.id))
   {
@@ -500,8 +508,10 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   if(!req->params || !json_object_has_member(req->params, "session_id")
      || !json_object_has_member(req->params, "op")
      || !json_object_has_member(req->params, "params"))
+  {
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
                                  "Missing session_id, op, or params");
+  }
 
   const char *session_id = json_object_get_string_member(req->params, "session_id");
   const char *op = json_object_get_string_member(req->params, "op");
@@ -560,12 +570,24 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   if(json_object_has_member(req->params, "enabled"))
     target->enabled = json_object_get_boolean_member(req->params, "enabled");
 
-  // Record the change to history and mark pipeline dirty
-  dt_dev_add_history_item(&session->dev, target, target->enabled);
+  // Record the change to history.
+  // Use _ext variant which bypasses the GUI check in dt_dev_add_history_item()
+  // (the wrapper bails early when darktable.gui is NULL, i.e. headless/server mode).
+  // no_image=TRUE avoids GUI widget operations that crash without a GUI.
+  dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
+
+  // Mark pipeline dirty — no_image=TRUE above skips pipe->changed, so set manually
+  session->dev.full.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview_pipe)
+    session->dev.preview_pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview2.pipe)
+    session->dev.preview2.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+
+  dt_dev_invalidate_all(&session->dev);
   session->dirty = TRUE;
 
-  fprintf(stderr, "[server] develop.set_params: session=%s op=%s\n",
-          session_id, op);
+  fprintf(stderr, "[server] develop.set_params: session=%s op=%s enabled=%d history_end=%d\n",
+          session_id, op, target->enabled, session->dev.history_end);
 
   // Build response
   JsonBuilder *b = json_builder_new();

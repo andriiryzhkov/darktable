@@ -7,6 +7,7 @@ import BauhausCombo from "../../controls/BauhausCombo";
 export default function ExposureModule() {
   const exposureParams = useDevelopStore((s) => s.exposureParams);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
+  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
 
   const [localExposure, setLocalExposure] = useState(0);
   const [localBlack, setLocalBlack] = useState(0);
@@ -14,6 +15,13 @@ export default function ExposureModule() {
   const [localTarget, setLocalTarget] = useState(-4);
   const dragging = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch params on mount if not already loaded
+  useEffect(() => {
+    if (!exposureParams) {
+      fetchModuleParams("exposure");
+    }
+  }, [exposureParams, fetchModuleParams]);
 
   // Sync local slider state from store when not dragging
   useEffect(() => {
@@ -25,7 +33,13 @@ export default function ExposureModule() {
     }
   }, [exposureParams]);
 
-  if (!exposureParams) return null;
+  if (!exposureParams) {
+    return (
+      <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
+        loading exposure params…
+      </p>
+    );
+  }
 
   const isManual = exposureParams.mode === 0;
 

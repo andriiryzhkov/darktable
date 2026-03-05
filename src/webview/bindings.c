@@ -495,10 +495,11 @@ static void on_develop_get_params(const char *id, const char *req, void *arg)
 
   const char *session_id = json_array_get_string_element(args, 0);
   const char *op = json_array_get_string_element(args, 1);
-  g_object_unref(parser);
 
   char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
                                      session_id, op);
+  g_object_unref(parser);
+
   _ipc_passthrough(ctx, id, "develop.get_params", ipc_params);
   g_free(ipc_params);
 }

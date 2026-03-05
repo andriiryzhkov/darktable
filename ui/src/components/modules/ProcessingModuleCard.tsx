@@ -2,23 +2,26 @@ import { useState, useCallback, Suspense } from "react";
 import { RotateCcw, Menu, Copy, Power } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import BauhausButton from "../controls/BauhausButton";
+import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 
 interface Props {
   module: IopModuleDef;
-  enabled: boolean;
   defaultOpen?: boolean;
 }
 
-export default function ProcessingModuleCard({ module, enabled: initialEnabled, defaultOpen }: Props) {
+export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
   const [open, setOpen] = useState(defaultOpen ?? false);
-  const [enabled, setEnabled] = useState(initialEnabled);
+  const historyItems = useDevelopStore((s) => s.historyItems);
+  const enableModule = useDevelopStore((s) => s.enableModule);
+
+  const enabled = getEnabledOps(historyItems).has(module.op);
 
   const toggleEnabled = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      setEnabled((prev) => !prev);
+      enableModule(module.op, !enabled);
     },
-    [],
+    [module.op, enabled, enableModule],
   );
 
   const Component = module.component;
