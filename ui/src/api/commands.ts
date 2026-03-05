@@ -5,6 +5,7 @@ import type {
   SessionInfo,
   PreviewResult,
   PreviewFrameResult,
+  PixelSampleResult,
   HistoryResult,
   FilmRoll,
   Tag,
@@ -27,6 +28,7 @@ declare global {
     developCommitParams: (sessionId: string, op: string) => Promise<unknown>;
     developGetParams: (sessionId: string, op: string) => Promise<{ op: string; enabled: boolean; params: Record<string, unknown> }>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
+    developSamplePixels: (sessionId: string, x: number, y: number, w: number, h: number) => Promise<PixelSampleResult>;
     developGetHistory: (sessionId: string) => Promise<HistoryResult>;
     developDeleteHistory: (sessionId: string) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
@@ -80,6 +82,9 @@ export const developGetParams = (sessionId: string, op: string) =>
 
 export const developRequestPreview = (sessionId: string) =>
   window.developRequestPreview(sessionId);
+
+export const developSamplePixels = (sessionId: string, x: number, y: number, w: number, h: number) =>
+  window.developSamplePixels(sessionId, x, y, w, h);
 
 export const developGetHistory = (sessionId: string) =>
   window.developGetHistory(sessionId);

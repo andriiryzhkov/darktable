@@ -6,12 +6,13 @@ import {
   developCommitParams,
   developGetParams,
   developRequestPreview,
+  developSamplePixels,
   developGetHistory,
   developDeleteHistory,
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { ExposureParams, ModuleInfo, HistoryItem } from "../types/protocol";
+import type { ExposureParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -63,6 +64,7 @@ interface DevelopState {
   enableModule: (op: string, enabled: boolean) => Promise<void>;
   fetchHistory: () => Promise<void>;
   deleteHistory: () => Promise<void>;
+  samplePixels: (x: number, y: number, w: number, h: number) => Promise<PixelSampleResult | null>;
   setZoom: (zoom: ZoomLevel) => void;
   setPan: (x: number, y: number) => void;
 }
@@ -111,6 +113,17 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   zoom: "fit" as ZoomLevel,
   panX: 0.5,
   panY: 0.5,
+
+  samplePixels: async (x: number, y: number, w: number, h: number) => {
+    const { sessionId } = get();
+    if (!sessionId) return null;
+    try {
+      return await developSamplePixels(sessionId, x, y, w, h);
+    } catch (e) {
+      console.error("[develop] sample_pixels failed:", e);
+      return null;
+    }
+  },
 
   setZoom: (zoom: ZoomLevel) => set({ zoom, panX: 0.5, panY: 0.5 }),
   setPan: (panX: number, panY: number) => set({ panX, panY }),

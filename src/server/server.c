@@ -98,6 +98,7 @@ static const dt_server_route_t _routes[] = {
   { "develop.set_params",         dt_server_develop_set_params },
   { "develop.commit_params",      dt_server_develop_commit_params },
   { "develop.request_preview",    dt_server_develop_request_preview },
+  { "develop.sample_pixels",      dt_server_develop_sample_pixels },
   { "develop.delete_history",     dt_server_develop_delete_history },
   { "export.image",               dt_server_export_image },
   { NULL, NULL }

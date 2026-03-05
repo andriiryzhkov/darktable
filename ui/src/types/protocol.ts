@@ -97,6 +97,13 @@ export interface ExposureParams {
   deflicker_target_level: number;
   exposure_bias_ev: number;
   highlight_bias_ev: number;
+  deflicker_computed_exposure?: number;
+}
+
+export interface PixelSampleResult {
+  mean_r: number;
+  mean_g: number;
+  mean_b: number;
 }
 
 export interface PreviewFrameResult {

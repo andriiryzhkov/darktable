@@ -1,9 +1,11 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useDevelopStore, ZOOM_LEVELS } from "../../stores/developStore";
 import WebGLPreview from "./WebGLPreview";
+import PickerOverlay from "./PickerOverlay";
 
 export default function PreviewCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { previewSrc, frameData, previewWidth, previewHeight, previewError, loading } = useDevelopStore();
   const zoom = useDevelopStore((s) => s.zoom);
@@ -120,6 +122,7 @@ export default function PreviewCanvas() {
 
   const content = previewSrc ? (
     <img
+      ref={imgRef}
       src={previewSrc}
       width={previewWidth}
       height={previewHeight}
@@ -148,6 +151,7 @@ export default function PreviewCanvas() {
       style={{ cursor: isZoomed ? "grab" : "default" }}
     >
       {content}
+      <PickerOverlay targetRef={previewSrc ? imgRef : canvasRef} />
     </div>
   );
 }

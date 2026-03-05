@@ -33,7 +33,7 @@ export default function BauhausCheckbox({
   );
 
   return (
-    <div className="bauhaus-checkbox" onClick={handleClick}>
+    <div className="bauhaus-checkbox" data-align={align} onClick={handleClick}>
       {align === "left" && box}
       <span className="bauhaus-checkbox-label">{label}</span>
       {align === "right" && box}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useDevelopStore, ZOOM_LEVELS } from "../../stores/developStore";
+import PickerOverlay from "./PickerOverlay";
 
 const VERTEX_SRC = `#version 300 es
 in vec2 a_position;
@@ -232,6 +233,7 @@ export default function WebGLPreview() {
         className="max-w-full max-h-full object-contain"
         style={transformStyle}
       />
+      <PickerOverlay targetRef={canvasRef} />
     </div>
   );
 }

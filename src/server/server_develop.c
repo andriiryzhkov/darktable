@@ -25,6 +25,7 @@
 #include "develop/imageop.h"
 #include "develop/pixelpipe.h"
 
+#include <float.h>
 #include <string.h>
 
 // Mirror of dt_iop_exposure_params_t from iop/exposure.c
@@ -45,6 +46,17 @@ typedef struct _server_exposure_params_t
   gboolean compensate_exposure_bias;
   gboolean compensate_hilite_pres;
 } _server_exposure_params_t;
+
+// Mirror of dt_iop_exposure_data_t — committed pipe data (after process)
+typedef struct _server_exposure_data_t
+{
+  _server_exposure_params_t params;
+  gboolean deflicker;
+  float black;
+  float scale;
+  uint32_t *deflicker_histogram;
+  dt_dev_histogram_stats_t deflicker_histogram_stats;
+} _server_exposure_data_t;
 
 static dt_server_session_t *_find_free_session_slot(dt_server_t *server)
 {
@@ -414,6 +426,41 @@ char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request
   return resp;
 }
 
+// Exposure applied by the last deflicker run. Same computation as
+// _compute_deflicker_correction() in iop/exposure.c, using the raw histogram
+// the module caches in its pipe data.
+static float _deflicker_applied_exposure(const dt_dev_pixelpipe_t *pipe,
+                                         const _server_exposure_data_t *ed)
+{
+  const _server_exposure_params_t *p = &ed->params;
+  const uint32_t *histogram = ed->deflicker_histogram;
+  const dt_dev_histogram_stats_t *stats = &ed->deflicker_histogram_stats;
+
+  // without a histogram the module keeps the manual exposure
+  if(!histogram) return p->exposure;
+
+  const double thr = CLAMP((double)stats->pixels * (double)p->deflicker_percentile / 100.0,
+                           0.0, (double)stats->pixels);
+  size_t n = 0;
+  uint32_t raw = 0;
+  for(size_t i = 0; i < stats->bins_count; i++)
+  {
+    n += histogram[i];
+    if((double)n >= thr)
+    {
+      raw = i;
+      break;
+    }
+  }
+
+  const uint32_t black_level = (uint32_t)pipe->dsc.rawprepare.raw_black_level;
+  const uint32_t raw_max = pipe->dsc.rawprepare.raw_white_point - black_level;
+  const int64_t raw_val = MAX((int64_t)raw - (int64_t)black_level, 1);
+  const double ev = -log2(raw_max) + log2(raw_val);
+
+  return p->deflicker_target_level - ev;
+}
+
 char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_t *req)
 {
   if(!req->params || !json_object_has_member(req->params, "session_id")
@@ -490,6 +537,29 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
       highlight_bias = CLAMPF(session->dev.image_storage.exif_highlight_preservation, -1.0f, 4.0f);
     json_builder_set_member_name(b, "highlight_bias_ev");
     json_builder_add_double_value(b, highlight_bias);
+
+    // Deflicker computed exposure from last pipeline run. Pipe nodes and their
+    // data are only safe to walk under busy_mutex; trylock like
+    // preview_data.c does, a busy pipe just skips the readout this time.
+    dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+    if(p->mode == _EXPOSURE_MODE_DEFLICKER && !dt_pthread_mutex_trylock(&pipe->busy_mutex))
+    {
+      for(GList *nodes = pipe->nodes; nodes; nodes = g_list_next(nodes))
+      {
+        dt_dev_pixelpipe_iop_t *piece = nodes->data;
+        if(piece->module == target && piece->data)
+        {
+          const _server_exposure_data_t *ed = (const _server_exposure_data_t *)piece->data;
+          if(ed->deflicker)
+          {
+            json_builder_set_member_name(b, "deflicker_computed_exposure");
+            json_builder_add_double_value(b, _deflicker_applied_exposure(pipe, ed));
+          }
+          break;
+        }
+      }
+      dt_pthread_mutex_unlock(&pipe->busy_mutex);
+    }
   }
   else
   {
@@ -899,6 +969,96 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   json_builder_set_member_name(b, "front_buffer");
   json_builder_add_int_value(b, session->front_buffer);
 
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_sample_pixels(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "x")
+     || !json_object_has_member(req->params, "y")
+     || !json_object_has_member(req->params, "w")
+     || !json_object_has_member(req->params, "h"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, x, y, w, h");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+
+  const double nx = json_object_get_double_member(req->params, "x");
+  const double ny = json_object_get_double_member(req->params, "y");
+  const double nw = json_object_get_double_member(req->params, "w");
+  const double nh = json_object_get_double_member(req->params, "h");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+
+  dt_pthread_mutex_lock(&pipe->backbuf_mutex);
+
+  if(!pipe->backbuf || pipe->backbuf_width <= 0 || pipe->backbuf_height <= 0)
+  {
+    dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "No backbuf available");
+  }
+
+  const int bw = pipe->backbuf_width;
+  const int bh = pipe->backbuf_height;
+  const uint8_t *buf = pipe->backbuf;
+
+  // Convert normalized coords to pixel coords, clamped
+  int px = (int)(nx * bw);
+  int py = (int)(ny * bh);
+  int pw = (int)(nw * bw);
+  int ph = (int)(nh * bh);
+  if(px < 0) px = 0;
+  if(py < 0) py = 0;
+  if(px + pw > bw) pw = bw - px;
+  if(py + ph > bh) ph = bh - py;
+
+  double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
+  int count = 0;
+
+  for(int y = py; y < py + ph; y++)
+  {
+    const uint8_t *row = buf + (size_t)y * bw * 4 + (size_t)px * 4;
+    for(int x = 0; x < pw; x++)
+    {
+      // BGRA8 format
+      sum_b += row[0];
+      sum_g += row[1];
+      sum_r += row[2];
+      row += 4;
+      count++;
+    }
+  }
+
+  dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
+
+  if(count == 0)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Empty sample area");
+
+  const double mean_r = sum_r / count / 255.0;
+  const double mean_g = sum_g / count / 255.0;
+  const double mean_b = sum_b / count / 255.0;
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "mean_r");
+  json_builder_add_double_value(b, mean_r);
+  json_builder_set_member_name(b, "mean_g");
+  json_builder_add_double_value(b, mean_g);
+  json_builder_set_member_name(b, "mean_b");
+  json_builder_add_double_value(b, mean_b);
   json_builder_end_object(b);
 
   JsonNode *result = json_builder_get_root(b);

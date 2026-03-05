@@ -105,6 +105,15 @@ static JsonArray *_parse_args(const char *req, JsonParser **out_parser)
   return json_node_get_array(root);
 }
 
+// Helper: get an owned copy of a string argument from a parsed JSON array.
+// Returns a g_strdup'd string that the caller must g_free.
+// Safe to use after g_object_unref(parser).
+static char *_get_string_arg(JsonArray *args, guint index)
+{
+  const char *s = json_array_get_string_element(args, index);
+  return s ? g_strdup(s) : NULL;
+}
+
 /* ── Server event bridge ──────────────────────────────────────── */
 
 typedef struct _event_dispatch_t
@@ -491,7 +500,8 @@ static void *_develop_close_worker(void *arg)
     return NULL;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
+  char *session_id = _get_string_arg(args, 0);
+  g_object_unref(parser);
 
   // Close SHM handles
   pthread_mutex_lock(&ctx->session_mutex);
@@ -515,7 +525,7 @@ static void *_develop_close_worker(void *arg)
 
   // IPC close
   char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
-  g_object_unref(parser);
+  g_free(session_id);
 
   char *error = NULL;
   char *result;
@@ -562,8 +572,8 @@ static void on_develop_set_params(const char *id, const char *req, void *arg)
     return;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
-  const char *op = json_array_get_string_element(args, 1);
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
 
   // Serialize the params object back to JSON string
   JsonNode *params_node = json_array_get_element(args, 2);
@@ -577,6 +587,8 @@ static void on_develop_set_params(const char *id, const char *req, void *arg)
   if(json_array_get_length(args) >= 4)
     preview_only = json_array_get_boolean_element(args, 3);
 
+  g_object_unref(parser);
+
   char *ipc_params;
   if(preview_only)
     ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"params\":%s,\"preview_only\":true}",
@@ -585,7 +597,8 @@ static void on_develop_set_params(const char *id, const char *req, void *arg)
     ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"params\":%s}",
                                  session_id, op, params_str);
   g_free(params_str);
-  g_object_unref(parser);
+  g_free(session_id);
+  g_free(op);
 
   _ipc_passthrough(ctx, id, "develop.set_params", ipc_params);
   g_free(ipc_params);
@@ -603,12 +616,14 @@ static void on_develop_commit_params(const char *id, const char *req, void *arg)
     return;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
-  const char *op = json_array_get_string_element(args, 1);
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  g_object_unref(parser);
 
   char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
                                      session_id, op);
-  g_object_unref(parser);
+  g_free(session_id);
+  g_free(op);
 
   _ipc_passthrough(ctx, id, "develop.commit_params", ipc_params);
   g_free(ipc_params);
@@ -626,12 +641,14 @@ static void on_develop_get_params(const char *id, const char *req, void *arg)
     return;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
-  const char *op = json_array_get_string_element(args, 1);
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  g_object_unref(parser);
 
   char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
                                      session_id, op);
-  g_object_unref(parser);
+  g_free(session_id);
+  g_free(op);
 
   _ipc_passthrough(ctx, id, "develop.get_params", ipc_params);
   g_free(ipc_params);
@@ -649,12 +666,42 @@ static void on_develop_request_preview(const char *id, const char *req, void *ar
     return;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
-  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  char *session_id = _get_string_arg(args, 0);
   g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_free(session_id);
 
   _ipc_passthrough(ctx, id, "develop.request_preview", params);
   g_free(params);
+}
+
+static void on_develop_sample_pixels(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 5)
+  {
+    _return_error(ctx, id, "developSamplePixels requires (sessionId, x, y, w, h)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  double x = json_array_get_double_element(args, 1);
+  double y = json_array_get_double_element(args, 2);
+  double w = json_array_get_double_element(args, 3);
+  double h = json_array_get_double_element(args, 4);
+  g_object_unref(parser);
+
+  char *ipc_params = g_strdup_printf(
+    "{\"session_id\":\"%s\",\"x\":%f,\"y\":%f,\"w\":%f,\"h\":%f}",
+    session_id, x, y, w, h);
+  g_free(session_id);
+
+  _ipc_passthrough(ctx, id, "develop.sample_pixels", ipc_params);
+  g_free(ipc_params);
 }
 
 static void on_develop_get_history(const char *id, const char *req, void *arg)
@@ -669,9 +716,11 @@ static void on_develop_get_history(const char *id, const char *req, void *arg)
     return;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
-  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  char *session_id = _get_string_arg(args, 0);
   g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_free(session_id);
 
   _ipc_passthrough(ctx, id, "develop.get_history", params);
   g_free(params);
@@ -689,9 +738,11 @@ static void on_develop_delete_history(const char *id, const char *req, void *arg
     return;
   }
 
-  const char *session_id = json_array_get_string_element(args, 0);
-  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  char *session_id = _get_string_arg(args, 0);
   g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_free(session_id);
 
   _ipc_passthrough(ctx, id, "develop.delete_history", params);
   g_free(params);
@@ -1955,6 +2006,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developCommitParams", on_develop_commit_params, ctx);
   webview_bind(ctx->webview, "developGetParams", on_develop_get_params, ctx);
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
+  webview_bind(ctx->webview, "developSamplePixels", on_develop_sample_pixels, ctx);
   webview_bind(ctx->webview, "developGetHistory", on_develop_get_history, ctx);
   webview_bind(ctx->webview, "developDeleteHistory", on_develop_delete_history, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);

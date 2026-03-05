@@ -119,6 +119,7 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
 char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_sample_pixels(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_delete_history(dt_server_t *server, const dt_server_request_t *req);
 
 // Export handlers (dt_server_export.c)
