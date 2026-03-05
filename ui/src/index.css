@@ -149,7 +149,7 @@ body {
 
 /* Module panels */
 .module-wrapper {
-  margin: 1px 4px;
+  margin: 2px 4px;
 }
 
 .module-wrapper[data-open="true"] {
