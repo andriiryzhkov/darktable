@@ -195,6 +195,175 @@ typedef struct _server_demosaic_params_t
   gboolean cs_enabled;
 } _server_demosaic_params_t;
 
+// Mirror of dt_iop_temperature_params_t from iop/temperature.c
+// Must match the struct layout exactly (introspection version 4).
+typedef struct _server_temperature_params_t
+{
+  float red;
+  float green;
+  float blue;
+  float various;
+  int preset;
+} _server_temperature_params_t;
+
+// --- Spectral conversion copied from iop/temperature.c (exact same logic) ---
+
+#include "external/cie_colorimetric_tables.c"
+
+#define INITIALBLACKBODYTEMPERATURE 4000
+#define DT_IOP_LOWEST_TEMPERATURE 1901
+#define DT_IOP_HIGHEST_TEMPERATURE 25000
+
+typedef double((*_server_spd)(unsigned long int wavelength, double TempK));
+
+static double _server_spd_blackbody(unsigned long int wavelength, double TempK)
+{
+  const long double lambda = (double)wavelength * 1e-9;
+#define c1 3.7417715246641281639549488324352159753e-16L
+#define c2 0.014387769599838156481252937624049081933L
+  return (double)(c1 / (powl(lambda, 5) * (expl(c2 / (lambda * TempK)) - 1.0L)));
+#undef c2
+#undef c1
+}
+
+static double _server_spd_daylight(unsigned long int wavelength, double TempK)
+{
+  cmsCIExyY WhitePoint = { D65xyY.x, D65xyY.y, 1.0 };
+  cmsWhitePointFromTemp(&WhitePoint, TempK);
+
+  const double M = (0.0241 + 0.2562 * WhitePoint.x - 0.7341 * WhitePoint.y),
+               m1 = (-1.3515 - 1.7703 * WhitePoint.x + 5.9114 * WhitePoint.y) / M,
+               m2 = (0.0300 - 31.4424 * WhitePoint.x + 30.0717 * WhitePoint.y) / M;
+
+  const unsigned long int j
+      = ((wavelength - cie_daylight_components[0].wavelength)
+         / (cie_daylight_components[1].wavelength
+            - cie_daylight_components[0].wavelength));
+
+  return (cie_daylight_components[j].S[0] + m1 * cie_daylight_components[j].S[1]
+          + m2 * cie_daylight_components[j].S[2]);
+}
+
+static cmsCIEXYZ _server_spectrum_to_XYZ(double TempK, _server_spd I)
+{
+  cmsCIEXYZ Source = {.X = 0.0, .Y = 0.0, .Z = 0.0 };
+
+  for(size_t i = 0; i < cie_1931_std_colorimetric_observer_count; i++)
+  {
+    const unsigned long int lambda =
+      cie_1931_std_colorimetric_observer[0].wavelength
+      + (cie_1931_std_colorimetric_observer[1].wavelength
+         - cie_1931_std_colorimetric_observer[0].wavelength) * i;
+
+    const double P = I(lambda, TempK);
+    Source.X += P * cie_1931_std_colorimetric_observer[i].xyz.X;
+    Source.Y += P * cie_1931_std_colorimetric_observer[i].xyz.Y;
+    Source.Z += P * cie_1931_std_colorimetric_observer[i].xyz.Z;
+  }
+
+  const double _max = fmax(fmax(Source.X, Source.Y), Source.Z);
+  if(_max > 0.0)
+  {
+    Source.X /= _max;
+    Source.Y /= _max;
+    Source.Z /= _max;
+  }
+  return Source;
+}
+
+static cmsCIEXYZ _server_temperature_to_XYZ(double TempK)
+{
+  if(TempK < DT_IOP_LOWEST_TEMPERATURE) TempK = DT_IOP_LOWEST_TEMPERATURE;
+  if(TempK > DT_IOP_HIGHEST_TEMPERATURE) TempK = DT_IOP_HIGHEST_TEMPERATURE;
+
+  if(TempK < INITIALBLACKBODYTEMPERATURE)
+    return _server_spectrum_to_XYZ(TempK, _server_spd_blackbody);
+  else
+    return _server_spectrum_to_XYZ(TempK, _server_spd_daylight);
+}
+
+#define DT_IOP_LOWEST_TINT 0.135
+#define DT_IOP_HIGHEST_TINT 2.326
+
+// Binary search inversion: XYZ → temperature + tint (exact copy from temperature.c)
+static void _server_XYZ_to_temperature(cmsCIEXYZ XYZ, float *TempK, float *tint)
+{
+  double maxtemp = DT_IOP_HIGHEST_TEMPERATURE, mintemp = DT_IOP_LOWEST_TEMPERATURE;
+  cmsCIEXYZ _xyz;
+
+  for(*TempK = (maxtemp + mintemp) / 2.0;
+      (maxtemp - mintemp) > 1.0;
+      *TempK = (maxtemp + mintemp) / 2.0)
+  {
+    _xyz = _server_temperature_to_XYZ(*TempK);
+    if(_xyz.Z / _xyz.X > XYZ.Z / XYZ.X)
+      maxtemp = *TempK;
+    else
+      mintemp = *TempK;
+  }
+
+  *tint = (_xyz.Y / _xyz.X) / (XYZ.Y / XYZ.X);
+
+  if(*TempK < DT_IOP_LOWEST_TEMPERATURE) *TempK = DT_IOP_LOWEST_TEMPERATURE;
+  if(*TempK > DT_IOP_HIGHEST_TEMPERATURE) *TempK = DT_IOP_HIGHEST_TEMPERATURE;
+  if(*tint < DT_IOP_LOWEST_TINT) *tint = DT_IOP_LOWEST_TINT;
+  if(*tint > DT_IOP_HIGHEST_TINT) *tint = DT_IOP_HIGHEST_TINT;
+}
+
+// Convert temperature (Kelvin) + tint to RGB channel multipliers.
+// Exact match of temperature.c's _temp2mul + _xyz2mul.
+static gboolean _server_temp_tint_to_mul(const dt_image_t *img,
+                                          double temp_k, double tint,
+                                          double mul[4])
+{
+  // Get camera color matrices
+  float d65_color_matrix[9];
+  memcpy(d65_color_matrix, img->d65_color_matrix, sizeof(d65_color_matrix));
+  double CAM_to_XYZ[3][4], XYZ_to_CAM[4][3];
+  if(!dt_colorspaces_conversion_matrices_xyz(
+       img->adobe_XYZ_to_CAM, d65_color_matrix,
+       XYZ_to_CAM, CAM_to_XYZ))
+    return FALSE;
+
+  // Clamp inputs
+  if(temp_k < DT_IOP_LOWEST_TEMPERATURE) temp_k = DT_IOP_LOWEST_TEMPERATURE;
+  if(temp_k > DT_IOP_HIGHEST_TEMPERATURE) temp_k = DT_IOP_HIGHEST_TEMPERATURE;
+  if(tint < 0.135) tint = 0.135;
+  if(tint > 2.326) tint = 2.326;
+
+  // Step 1: Temperature → XYZ via spectral integration (exact darktable method)
+  cmsCIEXYZ xyz = _server_temperature_to_XYZ(temp_k);
+
+  // Step 2: Apply tint (same as darktable)
+  xyz.Y /= tint;
+
+  // Step 3: XYZ → camera multipliers (same as darktable's _xyz2mul)
+  double XYZ[3] = { xyz.X, xyz.Y, xyz.Z };
+  double CAM[4];
+  for(int k = 0; k < 4; k++)
+  {
+    CAM[k] = 0.0;
+    for(int i = 0; i < 3; i++)
+      CAM[k] += XYZ_to_CAM[k][i] * XYZ[i];
+  }
+
+  for(int k = 0; k < 4; k++)
+    mul[k] = (fabs(CAM[k]) > 1e-10) ? 1.0 / CAM[k] : 0.0;
+
+  // Normalize so green (index 1) = 1
+  if(fabs(mul[1]) > 1e-10)
+  {
+    mul[0] /= mul[1];
+    mul[2] /= mul[1];
+    mul[3] /= mul[1];
+    mul[1] = 1.0;
+  }
+  else
+    return FALSE;
+
+  return TRUE;
+}
+
 // Mirror of dt_iop_exposure_data_t — committed pipe data (after process)
 typedef struct _server_exposure_data_t
 {
@@ -709,6 +878,56 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
       dt_pthread_mutex_unlock(&pipe->busy_mutex);
     }
   }
+  else if(!strcmp(op, "temperature"))
+  {
+    const _server_temperature_params_t *p = (const _server_temperature_params_t *)target->params;
+    json_builder_set_member_name(b, "red");
+    json_builder_add_double_value(b, p->red);
+    json_builder_set_member_name(b, "green");
+    json_builder_add_double_value(b, p->green);
+    json_builder_set_member_name(b, "blue");
+    json_builder_add_double_value(b, p->blue);
+    json_builder_set_member_name(b, "various");
+    json_builder_add_double_value(b, p->various);
+    json_builder_set_member_name(b, "preset");
+    json_builder_add_int_value(b, p->preset);
+
+    // Compute temperature and tint from coefficients using camera color matrix
+    // Uses exact same method as darktable's _mul2temp (coeffs → XYZ → binary search)
+    {
+      float d65_cm[9];
+      memcpy(d65_cm, session->dev.image_storage.d65_color_matrix, sizeof(d65_cm));
+      double CAM_to_XYZ[3][4], XYZ_to_CAM[4][3];
+      if(dt_colorspaces_conversion_matrices_xyz(
+          session->dev.image_storage.adobe_XYZ_to_CAM, d65_cm,
+          XYZ_to_CAM, CAM_to_XYZ))
+      {
+        // Invert coefficients: camera multipliers → XYZ (same as _mul2xyz)
+        double CAM[4] = {
+          p->red > 0.0f ? 1.0 / p->red : 0.0,
+          p->green > 0.0f ? 1.0 / p->green : 0.0,
+          p->blue > 0.0f ? 1.0 / p->blue : 0.0,
+          p->various > 0.0f ? 1.0 / p->various : 0.0
+        };
+        double XYZ[3] = { 0, 0, 0 };
+        for(int k = 0; k < 3; k++)
+          for(int i = 0; i < 4; i++)
+            XYZ[k] += CAM_to_XYZ[k][i] * CAM[i];
+
+        if(XYZ[0] > 0 && XYZ[1] > 0 && XYZ[2] > 0)
+        {
+          cmsCIEXYZ cmsXYZ = { XYZ[0], XYZ[1], XYZ[2] };
+          float temp_k, tint;
+          _server_XYZ_to_temperature(cmsXYZ, &temp_k, &tint);
+
+          json_builder_set_member_name(b, "temperature_k");
+          json_builder_add_double_value(b, temp_k);
+          json_builder_set_member_name(b, "tint");
+          json_builder_add_double_value(b, tint);
+        }
+      }
+    }
+  }
   else if(!strcmp(op, "rawprepare"))
   {
     const _server_rawprepare_params_t *p = (const _server_rawprepare_params_t *)target->params;
@@ -1120,6 +1339,109 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
       p->deflicker_percentile = (float)json_object_get_double_member(new_params, "deflicker_percentile");
     if(json_object_has_member(new_params, "deflicker_target_level"))
       p->deflicker_target_level = (float)json_object_get_double_member(new_params, "deflicker_target_level");
+  }
+  else if(!strcmp(op, "temperature"))
+  {
+    _server_temperature_params_t *p = (_server_temperature_params_t *)target->params;
+
+    if(json_object_has_member(new_params, "red"))
+      p->red = (float)json_object_get_double_member(new_params, "red");
+    if(json_object_has_member(new_params, "green"))
+      p->green = (float)json_object_get_double_member(new_params, "green");
+    if(json_object_has_member(new_params, "blue"))
+      p->blue = (float)json_object_get_double_member(new_params, "blue");
+    if(json_object_has_member(new_params, "various"))
+      p->various = (float)json_object_get_double_member(new_params, "various");
+    if(json_object_has_member(new_params, "preset"))
+    {
+      const int preset = (int)json_object_get_int_member(new_params, "preset");
+      p->preset = preset;
+
+      // When preset changes, load corresponding coefficients from dev->chroma
+      const dt_dev_chroma_t *chr = &session->dev.chroma;
+      switch(preset)
+      {
+        case 0: // DT_IOP_TEMP_AS_SHOT
+          p->red   = (float)(chr->as_shot[0] / chr->as_shot[1]);
+          p->green = 1.0f;
+          p->blue  = (float)(chr->as_shot[2] / chr->as_shot[1]);
+          break;
+        case 3: // DT_IOP_TEMP_D65 (camera reference)
+          p->red   = (float)(chr->D65coeffs[0] / chr->D65coeffs[1]);
+          p->green = 1.0f;
+          p->blue  = (float)(chr->D65coeffs[2] / chr->D65coeffs[1]);
+          break;
+        case 4: // DT_IOP_TEMP_D65_LATE (as shot to reference)
+          p->red   = (float)(chr->as_shot[0] / chr->as_shot[1]);
+          p->green = 1.0f;
+          p->blue  = (float)(chr->as_shot[2] / chr->as_shot[1]);
+          break;
+        default: // SPOT(1) or USER(2) — keep current coefficients
+          break;
+      }
+    }
+
+    // Handle temperature_k and/or tint: convert to RGB coefficients
+    if(json_object_has_member(new_params, "temperature_k") || json_object_has_member(new_params, "tint"))
+    {
+      // Recover current temp/tint from coefficients using binary search (same as get_params)
+      double cur_temp_k = 5000.0, cur_tint = 1.0;
+      {
+        float d65_cm[9];
+        memcpy(d65_cm, session->dev.image_storage.d65_color_matrix, sizeof(d65_cm));
+        double _CAM_to_XYZ[3][4], _XYZ_to_CAM[4][3];
+        if(dt_colorspaces_conversion_matrices_xyz(
+             session->dev.image_storage.adobe_XYZ_to_CAM, d65_cm,
+             _XYZ_to_CAM, _CAM_to_XYZ))
+        {
+          double CAM[4] = {
+            p->red > 0.0f ? 1.0 / p->red : 0.0,
+            p->green > 0.0f ? 1.0 / p->green : 0.0,
+            p->blue > 0.0f ? 1.0 / p->blue : 0.0,
+            p->various > 0.0f ? 1.0 / p->various : 0.0
+          };
+          double XYZ[3] = { 0, 0, 0 };
+          for(int k = 0; k < 3; k++)
+            for(int i = 0; i < 4; i++)
+              XYZ[k] += _CAM_to_XYZ[k][i] * CAM[i];
+
+          if(XYZ[0] > 0 && XYZ[1] > 0 && XYZ[2] > 0)
+          {
+            cmsCIEXYZ cmsXYZ = { XYZ[0], XYZ[1], XYZ[2] };
+            float ft, fti;
+            _server_XYZ_to_temperature(cmsXYZ, &ft, &fti);
+            cur_temp_k = ft;
+            cur_tint = fti;
+          }
+        }
+      }
+
+      double new_temp_k = json_object_has_member(new_params, "temperature_k")
+        ? json_object_get_double_member(new_params, "temperature_k") : cur_temp_k;
+      double new_tint = json_object_has_member(new_params, "tint")
+        ? json_object_get_double_member(new_params, "tint") : cur_tint;
+
+      double mul[4];
+      if(_server_temp_tint_to_mul(&session->dev.image_storage, new_temp_k, new_tint, mul)
+         && isfinite(mul[0]) && isfinite(mul[1]) && isfinite(mul[2])
+         && mul[0] > 0.0 && mul[1] > 0.0 && mul[2] > 0.0)
+      {
+        fprintf(stderr, "[server] temp_tint_to_mul: temp=%.0f tint=%.3f -> R=%.4f G=%.4f B=%.4f\n",
+                new_temp_k, new_tint, mul[0], mul[1], mul[2]);
+        p->red     = (float)mul[0];
+        p->green   = (float)mul[1];
+        p->blue    = (float)mul[2];
+        // Only update 4th channel if sensor uses it (non-zero original value)
+        if(p->various > 0.0f && isfinite(mul[3]) && mul[3] > 0.0)
+          p->various = (float)mul[3];
+        p->preset  = 2; // DT_IOP_TEMP_USER — user modified
+      }
+      else
+      {
+        fprintf(stderr, "[server] temp_tint_to_mul FAILED: temp=%.0f tint=%.3f\n",
+                new_temp_k, new_tint);
+      }
+    }
   }
   else if(!strcmp(op, "rawprepare"))
   {

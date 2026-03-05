@@ -37,6 +37,7 @@ export default function BauhausSlider({
   onAction,
 }: BauhausSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
+  const clampedValue = Math.max(min, Math.min(max, value));
 
   const valueFromX = useCallback(
     (clientX: number) => {
@@ -84,7 +85,7 @@ export default function BauhausSlider({
   const range = max - min;
   const orig = origin ?? min;
   const originPct = ((orig - min) / range) * 100;
-  const valuePct = ((value - min) / range) * 100;
+  const valuePct = ((clampedValue - min) / range) * 100;
   const fillLeft = Math.min(originPct, valuePct);
   const fillWidth = Math.abs(valuePct - originPct);
 
@@ -99,7 +100,7 @@ export default function BauhausSlider({
       >
         <div className="bauhaus-slider-header">
           <span className="bauhaus-slider-label">{label}</span>
-          <span className="bauhaus-slider-value">{format(value)}</span>
+          <span className="bauhaus-slider-value">{format(clampedValue)}</span>
         </div>
         <div
           ref={trackRef}

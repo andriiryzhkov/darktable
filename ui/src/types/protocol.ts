@@ -110,6 +110,16 @@ export interface HistoryResult {
   items: HistoryItem[];
 }
 
+export interface TemperatureParams {
+  red: number;
+  green: number;
+  blue: number;
+  various: number;
+  preset: number;
+  temperature_k?: number;
+  tint?: number;
+}
+
 export interface ExposureParams {
   mode: number;
   exposure: number;

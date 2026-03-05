@@ -12,7 +12,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { TemperatureParams, ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -38,6 +38,7 @@ interface DevelopState {
   frameData: Uint8Array | null; // raw BGRA pixels for WebGL rendering
   frontBuffer: number;
   sequence: number;
+  temperatureParams: TemperatureParams | null;
   exposureParams: ExposureParams | null;
   sigmoidParams: SigmoidParams | null;
   demosaicParams: DemosaicParams | null;
@@ -109,6 +110,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   frameData: null,
   frontBuffer: 0,
   sequence: 0,
+  temperatureParams: null,
   exposureParams: null,
   sigmoidParams: null,
   demosaicParams: null,
@@ -210,6 +212,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       imgid: null,
       previewSrc: null,
       frameData: null,
+      temperatureParams: null,
       exposureParams: null,
       sigmoidParams: null,
       demosaicParams: null,
@@ -306,7 +309,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     if (!sessionId) return;
     try {
       const result = await developGetParams(sessionId, op);
-      if (op === "exposure") {
+      if (op === "temperature") {
+        set({ temperatureParams: result.params as unknown as TemperatureParams });
+      } else if (op === "exposure") {
         set({ exposureParams: result.params as unknown as ExposureParams });
       } else if (op === "sigmoid") {
         set({ sigmoidParams: result.params as unknown as SigmoidParams });

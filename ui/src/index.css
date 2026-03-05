@@ -207,6 +207,29 @@ body {
   padding: 4px 8px 6px;
 }
 
+.module-warning {
+  font-size: 11px;
+  color: var(--disabled-fg-color);
+  margin: 0;
+  padding: 2px 0;
+}
+
+.module-trouble {
+  font-size: 11px;
+  color: #fff;
+  margin: 0 0 4px;
+  padding: 3px 6px;
+  background: #c03030;
+  border-radius: 2px;
+}
+
+.module-trouble-icon {
+  display: flex;
+  align-items: center;
+  color: #c03030;
+  flex-shrink: 0;
+}
+
 /* Info rows (read-only label: value display) */
 .info-rows {
   display: flex;
@@ -468,6 +491,8 @@ body {
 
 .bauhaus-button-row .bauhaus-button {
   flex: 1;
+  padding: 1px 4px;
+  aspect-ratio: unset;
 }
 
 .module-button-grid {
