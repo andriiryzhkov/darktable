@@ -82,6 +82,7 @@ static const dt_server_route_t _routes[] = {
   { "catalog.query",              dt_server_catalog_query },
   { "catalog.get_image",          dt_server_catalog_get_image },
   { "catalog.get_thumbnail",      dt_server_catalog_get_thumbnail },
+  { "catalog.get_thumbnails",     dt_server_catalog_get_thumbnails },
   { "catalog.get_tags",           dt_server_catalog_get_tags },
   { "catalog.get_filmrolls",      dt_server_catalog_get_filmrolls },
   { "catalog.check_imported",     dt_server_catalog_check_imported },

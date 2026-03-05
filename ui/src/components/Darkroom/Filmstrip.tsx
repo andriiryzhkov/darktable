@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useCatalogStore } from "../../stores/catalogStore";
 import { useUIStore } from "../../stores/uiStore";
-import { catalogGetThumbnail } from "../../api/commands";
+import { requestThumbnail } from "../../api/thumbnailBatch";
 import type { ImageInfo } from "../../types/protocol";
 
 const FILMSTRIP_HEIGHT = 100;
@@ -104,10 +104,8 @@ function FilmstripThumb({
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          catalogGetThumbnail(image.id)
-            .then((result) =>
-              setSrc(`data:image/jpeg;base64,${result.data}`),
-            )
+          requestThumbnail(image.id)
+            .then((dataUrl) => setSrc(dataUrl))
             .catch(() => {});
           observer.disconnect();
         }

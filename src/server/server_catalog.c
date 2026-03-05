@@ -666,6 +666,145 @@ char *dt_server_catalog_get_thumbnail(dt_server_t *server, const dt_server_reque
   return resp;
 }
 
+// Per-thumbnail result for parallel processing
+typedef struct _thumb_result_t
+{
+  dt_imgid_t imgid;
+  int width;
+  int height;
+  gchar *b64;       // base64 JPEG data (NULL on error)
+  const char *error; // error string (NULL on success)
+} _thumb_result_t;
+
+typedef struct _thumb_job_t
+{
+  dt_imgid_t imgid;
+  dt_mipmap_size_t mip;
+  int quality;
+  _thumb_result_t *result;
+} _thumb_job_t;
+
+static void _thumb_worker(gpointer data, gpointer user_data)
+{
+  (void)user_data;
+  _thumb_job_t *job = data;
+  _thumb_result_t *r = job->result;
+  r->imgid = job->imgid;
+  r->b64 = NULL;
+  r->error = NULL;
+
+  dt_mipmap_buffer_t buf;
+  dt_mipmap_cache_get(&buf, job->imgid, job->mip, DT_MIPMAP_BLOCKING, 'r');
+
+  if(!buf.buf || buf.width <= 0 || buf.height <= 0)
+  {
+    dt_mipmap_cache_release(&buf);
+    r->error = "not available";
+    return;
+  }
+
+  const size_t jpeg_max_size = (size_t)buf.width * buf.height * 4 + 1024;
+  uint8_t *jpeg_buf = g_malloc(jpeg_max_size);
+  const int jpeg_size = dt_imageio_jpeg_compress(buf.buf, jpeg_buf,
+                                                  buf.width, buf.height, job->quality);
+  r->width = buf.width;
+  r->height = buf.height;
+  dt_mipmap_cache_release(&buf);
+
+  if(jpeg_size <= 0)
+  {
+    g_free(jpeg_buf);
+    r->error = "compression failed";
+    return;
+  }
+
+  r->b64 = g_base64_encode(jpeg_buf, jpeg_size);
+  g_free(jpeg_buf);
+}
+
+char *dt_server_catalog_get_thumbnails(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+
+  if(!req->params || !json_object_has_member(req->params, "imgids"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  JsonArray *imgids_arr = json_object_get_array_member(req->params, "imgids");
+  const guint count = json_array_get_length(imgids_arr);
+  if(count == 0 || count > 200)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "imgids must have 1-200 entries");
+
+  int requested_size = 720;
+  if(json_object_has_member(req->params, "size"))
+    requested_size = (int)json_object_get_int_member(req->params, "size");
+  if(requested_size < 64) requested_size = 64;
+  if(requested_size > 1920) requested_size = 1920;
+
+  const dt_mipmap_size_t mip = dt_mipmap_cache_get_matching_size(requested_size, requested_size);
+
+  // Process thumbnails in parallel using a thread pool
+  _thumb_result_t *results = g_new0(_thumb_result_t, count);
+  _thumb_job_t *jobs = g_new0(_thumb_job_t, count);
+
+  GThreadPool *pool = g_thread_pool_new(_thumb_worker, NULL, MIN(count, 4), FALSE, NULL);
+
+  for(guint i = 0; i < count; i++)
+  {
+    jobs[i].imgid = (dt_imgid_t)json_array_get_int_element(imgids_arr, i);
+    jobs[i].mip = mip;
+    jobs[i].quality = 85;
+    jobs[i].result = &results[i];
+    g_thread_pool_push(pool, &jobs[i], NULL);
+  }
+
+  // Wait for all threads to finish
+  g_thread_pool_free(pool, FALSE, TRUE);
+
+  // Build JSON response from collected results
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "thumbnails");
+  json_builder_begin_array(b);
+
+  for(guint i = 0; i < count; i++)
+  {
+    _thumb_result_t *r = &results[i];
+    json_builder_begin_object(b);
+    json_builder_set_member_name(b, "imgid");
+    json_builder_add_int_value(b, r->imgid);
+
+    if(r->b64)
+    {
+      json_builder_set_member_name(b, "width");
+      json_builder_add_int_value(b, r->width);
+      json_builder_set_member_name(b, "height");
+      json_builder_add_int_value(b, r->height);
+      json_builder_set_member_name(b, "data");
+      json_builder_add_string_value(b, r->b64);
+      g_free(r->b64);
+    }
+    else
+    {
+      json_builder_set_member_name(b, "error");
+      json_builder_add_string_value(b, r->error ? r->error : "unknown error");
+    }
+    json_builder_end_object(b);
+  }
+
+  json_builder_end_array(b);
+  json_builder_end_object(b);
+
+  g_free(results);
+  g_free(jobs);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
 char *dt_server_catalog_get_tags(dt_server_t *server, const dt_server_request_t *req)
 {
   (void)server;

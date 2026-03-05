@@ -101,6 +101,7 @@ dt_server_session_t *dt_server_find_session(dt_server_t *server, const char *ses
 char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_image(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_thumbnail(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_get_thumbnails(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_tags(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_filmrolls(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_check_imported(dt_server_t *server, const dt_server_request_t *req);

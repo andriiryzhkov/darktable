@@ -36,6 +36,18 @@ export interface ThumbnailResult {
   data: string;
 }
 
+export interface BatchThumbnailItem {
+  imgid: number;
+  width?: number;
+  height?: number;
+  data?: string;
+  error?: string;
+}
+
+export interface BatchThumbnailResult {
+  thumbnails: BatchThumbnailItem[];
+}
+
 export interface SessionInfo {
   session_id: string;
   imgid: number;

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { catalogGetThumbnail } from "../../api/commands";
+import { requestThumbnail } from "../../api/thumbnailBatch";
 import StarRating from "./StarRating";
 import ColorLabels from "./ColorLabels";
 import { Ban, Copy, Group, Pencil } from "lucide-react";
@@ -70,11 +70,9 @@ export default function ThumbnailCard({
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    catalogGetThumbnail(imgid)
-      .then((result) => {
-        if (!cancelled) {
-          setSrc(`data:image/jpeg;base64,${result.data}`);
-        }
+    requestThumbnail(imgid)
+      .then((dataUrl) => {
+        if (!cancelled) setSrc(dataUrl);
       })
       .catch(() => {});
     return () => {

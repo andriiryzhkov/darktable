@@ -306,6 +306,49 @@ static void on_catalog_get_thumbnail(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+static void on_catalog_get_thumbnails(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "catalogGetThumbnails requires (imgids, [size])");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  // args[0] = array of imgids, args[1] = optional size
+  JsonArray *imgids = json_array_get_array_element(args, 0);
+  gint64 size = 720;
+  if(json_array_get_length(args) > 1
+     && json_node_get_node_type(json_array_get_element(args, 1)) == JSON_NODE_VALUE)
+    size = json_array_get_int_element(args, 1);
+  if(size <= 0) size = 720;
+
+  // Build params JSON: {"imgids":[...],"size":N}
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "imgids");
+  json_builder_begin_array(b);
+  for(guint i = 0; i < json_array_get_length(imgids); i++)
+    json_builder_add_int_value(b, json_array_get_int_element(imgids, i));
+  json_builder_end_array(b);
+  json_builder_set_member_name(b, "size");
+  json_builder_add_int_value(b, size);
+  json_builder_end_object(b);
+
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, json_builder_get_root(b));
+  char *params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  g_object_unref(b);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, "catalog.get_thumbnails", params);
+  g_free(params);
+}
+
 static void *_develop_open_worker(void *arg)
 {
   async_req_t *ar = arg;
@@ -1905,6 +1948,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "ping", on_ping, ctx);
   webview_bind(ctx->webview, "catalogQuery", on_catalog_query, ctx);
   webview_bind(ctx->webview, "catalogGetThumbnail", on_catalog_get_thumbnail, ctx);
+  webview_bind(ctx->webview, "catalogGetThumbnails", on_catalog_get_thumbnails, ctx);
   webview_bind(ctx->webview, "developOpen", on_develop_open, ctx);
   webview_bind(ctx->webview, "developClose", on_develop_close, ctx);
   webview_bind(ctx->webview, "developSetParams", on_develop_set_params, ctx);

@@ -1,6 +1,7 @@
 import type {
   CatalogQueryResult,
   ThumbnailResult,
+  BatchThumbnailResult,
   SessionInfo,
   PreviewResult,
   PreviewFrameResult,
@@ -19,6 +20,7 @@ declare global {
     ping: () => Promise<unknown>;
     catalogQuery: (offset: number, limit: number, rules?: CollectionRuleParam[], sort?: string, sortOrder?: string) => Promise<CatalogQueryResult>;
     catalogGetThumbnail: (imgid: number) => Promise<ThumbnailResult>;
+    catalogGetThumbnails: (imgids: number[], size?: number) => Promise<BatchThumbnailResult>;
     developOpen: (imgid: number, width: number, height: number) => Promise<SessionInfo>;
     developClose: (sessionId: string) => Promise<unknown>;
     developSetParams: (sessionId: string, op: string, params: Record<string, unknown>, previewOnly?: boolean) => Promise<unknown>;
@@ -53,6 +55,9 @@ export const catalogQuery = (offset: number, limit: number, rules?: CollectionRu
 
 export const catalogGetThumbnail = (imgid: number) =>
   window.catalogGetThumbnail(imgid);
+
+export const catalogGetThumbnails = (imgids: number[], size?: number) =>
+  window.catalogGetThumbnails(imgids, size);
 
 export const developOpen = (imgid: number, width: number, height: number) =>
   window.developOpen(imgid, width, height);
