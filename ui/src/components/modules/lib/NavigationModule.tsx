@@ -118,7 +118,7 @@ export default function NavigationModule() {
             />
           </>
         )}
-        <div className="nav-module-zoom">
+        <div className="nav-module-zoom" onPointerDown={(e) => e.stopPropagation()}>
           <BauhausCombo
             hideLabel
             options={[...ZOOM_OPTIONS]}
