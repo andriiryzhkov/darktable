@@ -167,6 +167,17 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         previewHeight: result.preview_height,
       });
 
+      // Start history + module params fetch in parallel with preview render
+      const metadataPromise = Promise.all([
+        get().fetchHistory(),
+        get().fetchModuleParams("exposure"),
+        get().fetchModuleParams("sigmoid"),
+        get().fetchModuleParams("demosaic"),
+        get().fetchModuleParams("rawprepare"),
+        get().fetchModuleParams("colorin"),
+        get().fetchModuleParams("colorout"),
+      ]);
+
       // Render preview (server processes synchronously, SHM is ready when this returns)
       const preview = await developRequestPreview(result.session_id);
       if (gen !== sessionGeneration) return;
@@ -178,17 +189,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         previewHeight: preview.height,
       });
 
-      // Fetch the rendered frame
-      await get().fetchFrame();
-
-      // Fetch history stack and module params after first preview
-      await get().fetchHistory();
-      await get().fetchModuleParams("exposure");
-      await get().fetchModuleParams("sigmoid");
-      await get().fetchModuleParams("demosaic");
-      await get().fetchModuleParams("rawprepare");
-      await get().fetchModuleParams("colorin");
-      await get().fetchModuleParams("colorout");
+      // Fetch the rendered frame + wait for metadata to finish
+      await Promise.all([get().fetchFrame(), metadataPromise]);
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
