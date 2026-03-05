@@ -2237,7 +2237,7 @@ body {
   align-items: center;
   justify-content: center;
   background-color: var(--bg-color);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -2507,13 +2507,13 @@ body {
 
 /* Navigation module */
 .nav-module {
-  margin: 4px 8px 8px;
+  margin: 1px 4px 8px;
 }
 
 .nav-module-preview {
   position: relative;
   background-color: var(--darkroom-bg-color);
-  border-radius: 4px;
+  border-radius: 8px;
   overflow: hidden;
   cursor: crosshair;
 }
