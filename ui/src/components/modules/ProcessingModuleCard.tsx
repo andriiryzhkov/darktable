@@ -1,5 +1,5 @@
 import { useState, useCallback, Suspense } from "react";
-import { RotateCcw, Menu, Copy, Power } from "lucide-react";
+import { RotateCcw, Menu, Copy, Power, CircleDot } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import BauhausButton from "../controls/BauhausButton";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
@@ -15,13 +15,15 @@ export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
   const enableModule = useDevelopStore((s) => s.enableModule);
 
   const enabled = getEnabledOps(historyItems).has(module.op);
+  const isMandatory = historyItems.some((h) => h.op === module.op && h.mandatory);
 
   const toggleEnabled = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
+      if (isMandatory) return;
       enableModule(module.op, !enabled);
     },
-    [module.op, enabled, enableModule],
+    [module.op, enabled, enableModule, isMandatory],
   );
 
   const Component = module.component;
@@ -34,7 +36,7 @@ export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
           data-enabled={enabled}
           onClick={toggleEnabled}
         >
-          <Power size={12} />
+          {isMandatory ? <CircleDot size={12} /> : <Power size={12} />}
         </span>
 
         <span className="flex-1">{module.name}</span>
