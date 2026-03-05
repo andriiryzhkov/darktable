@@ -12,7 +12,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { ExposureParams, SigmoidParams, DemosaicParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -41,6 +41,7 @@ interface DevelopState {
   exposureParams: ExposureParams | null;
   sigmoidParams: SigmoidParams | null;
   demosaicParams: DemosaicParams | null;
+  rawprepareParams: RawprepareParams | null;
   modules: ModuleInfo[];
   historyItems: HistoryItem[];
   historyEnd: number;
@@ -109,6 +110,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   exposureParams: null,
   sigmoidParams: null,
   demosaicParams: null,
+  rawprepareParams: null,
   modules: [],
   historyItems: [],
   historyEnd: 0,
@@ -178,6 +180,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().fetchModuleParams("exposure");
       await get().fetchModuleParams("sigmoid");
       await get().fetchModuleParams("demosaic");
+      await get().fetchModuleParams("rawprepare");
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -303,6 +306,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         set({ sigmoidParams: result.params as unknown as SigmoidParams });
       } else if (op === "demosaic") {
         set({ demosaicParams: result.params as unknown as DemosaicParams });
+      } else if (op === "rawprepare") {
+        set({ rawprepareParams: result.params as unknown as RawprepareParams });
       }
     } catch (e) {
       console.error(`fetch ${op} params failed:`, e);

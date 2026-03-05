@@ -117,6 +117,16 @@ export interface SigmoidParams {
   purity: number;
 }
 
+export interface RawprepareParams {
+  raw_black_level_separate: [number, number, number, number];
+  raw_white_point: number;
+  flat_field: number;
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export interface DemosaicParams {
   demosaicing_method: number;
   green_eq: number;

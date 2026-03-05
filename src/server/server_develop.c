@@ -73,6 +73,25 @@ typedef struct _server_sigmoid_params_t
   int base_primaries;
 } _server_sigmoid_params_t;
 
+// Mirror of dt_iop_rawprepare_params_t from iop/rawprepare.c
+// Must match the struct layout exactly (introspection version 2).
+typedef enum _server_rawprepare_flat_field_t
+{
+  _FLAT_FIELD_OFF = 0,
+  _FLAT_FIELD_EMBEDDED = 1
+} _server_rawprepare_flat_field_t;
+
+typedef struct _server_rawprepare_params_t
+{
+  int32_t left;
+  int32_t top;
+  int32_t right;
+  int32_t bottom;
+  uint16_t raw_black_level_separate[4];
+  uint16_t raw_white_point;
+  _server_rawprepare_flat_field_t flat_field;
+} _server_rawprepare_params_t;
+
 // Mirror of dt_iop_demosaic_params_t from iop/demosaic.c
 // Must match the struct layout exactly (introspection version 5).
 #define _SERVER_DEMOSAIC_XTRANS 1024
@@ -656,6 +675,27 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
       dt_pthread_mutex_unlock(&pipe->busy_mutex);
     }
   }
+  else if(!strcmp(op, "rawprepare"))
+  {
+    const _server_rawprepare_params_t *p = (const _server_rawprepare_params_t *)target->params;
+    json_builder_set_member_name(b, "raw_black_level_separate");
+    json_builder_begin_array(b);
+    for(int i = 0; i < 4; i++)
+      json_builder_add_int_value(b, p->raw_black_level_separate[i]);
+    json_builder_end_array(b);
+    json_builder_set_member_name(b, "raw_white_point");
+    json_builder_add_int_value(b, p->raw_white_point);
+    json_builder_set_member_name(b, "flat_field");
+    json_builder_add_int_value(b, (int)p->flat_field);
+    json_builder_set_member_name(b, "left");
+    json_builder_add_int_value(b, p->left);
+    json_builder_set_member_name(b, "top");
+    json_builder_add_int_value(b, p->top);
+    json_builder_set_member_name(b, "right");
+    json_builder_add_int_value(b, p->right);
+    json_builder_set_member_name(b, "bottom");
+    json_builder_add_int_value(b, p->bottom);
+  }
   else if(!strcmp(op, "demosaic"))
   {
     const _server_demosaic_params_t *p = (const _server_demosaic_params_t *)target->params;
@@ -947,6 +987,29 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
       p->deflicker_percentile = (float)json_object_get_double_member(new_params, "deflicker_percentile");
     if(json_object_has_member(new_params, "deflicker_target_level"))
       p->deflicker_target_level = (float)json_object_get_double_member(new_params, "deflicker_target_level");
+  }
+  else if(!strcmp(op, "rawprepare"))
+  {
+    _server_rawprepare_params_t *p = (_server_rawprepare_params_t *)target->params;
+
+    if(json_object_has_member(new_params, "raw_black_level_separate"))
+    {
+      JsonArray *arr = json_object_get_array_member(new_params, "raw_black_level_separate");
+      for(int i = 0; i < 4 && i < (int)json_array_get_length(arr); i++)
+        p->raw_black_level_separate[i] = (uint16_t)json_array_get_int_element(arr, i);
+    }
+    if(json_object_has_member(new_params, "raw_white_point"))
+      p->raw_white_point = (uint16_t)json_object_get_int_member(new_params, "raw_white_point");
+    if(json_object_has_member(new_params, "flat_field"))
+      p->flat_field = (_server_rawprepare_flat_field_t)json_object_get_int_member(new_params, "flat_field");
+    if(json_object_has_member(new_params, "left"))
+      p->left = (int32_t)json_object_get_int_member(new_params, "left");
+    if(json_object_has_member(new_params, "top"))
+      p->top = (int32_t)json_object_get_int_member(new_params, "top");
+    if(json_object_has_member(new_params, "right"))
+      p->right = (int32_t)json_object_get_int_member(new_params, "right");
+    if(json_object_has_member(new_params, "bottom"))
+      p->bottom = (int32_t)json_object_get_int_member(new_params, "bottom");
   }
   else if(!strcmp(op, "demosaic"))
   {
