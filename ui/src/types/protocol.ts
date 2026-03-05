@@ -100,6 +100,23 @@ export interface ExposureParams {
   deflicker_computed_exposure?: number;
 }
 
+export interface SigmoidParams {
+  middle_grey_contrast: number;
+  contrast_skewness: number;
+  color_processing: number; // 0 = per channel, 1 = RGB ratio
+  hue_preservation: number;
+  display_white_target: number;
+  display_black_target: number;
+  base_primaries: number; // 0=working profile, 1=Rec2020, 2=Display P3, 3=Adobe RGB, 4=sRGB
+  red_inset: number;
+  red_rotation: number;
+  green_inset: number;
+  green_rotation: number;
+  blue_inset: number;
+  blue_rotation: number;
+  purity: number;
+}
+
 export interface PixelSampleResult {
   mean_r: number;
   mean_g: number;

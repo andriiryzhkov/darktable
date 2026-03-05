@@ -357,6 +357,14 @@ body {
   border-radius: 2px;
 }
 
+.bauhaus-slider-color {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .bauhaus-slider-fill {
   position: absolute;
   top: 0;

@@ -9,6 +9,7 @@ interface BauhausSliderProps {
   defaultValue?: number;
   origin?: number;
   gradient?: string;
+  color?: string;
   format?: (v: number) => string;
   onChange?: (value: number) => void;
   actionIcon?: ReactNode;
@@ -29,6 +30,7 @@ export default function BauhausSlider({
   defaultValue,
   origin,
   gradient,
+  color,
   format = defaultFormat,
   onChange,
   actionIcon,
@@ -104,6 +106,12 @@ export default function BauhausSlider({
           className="bauhaus-slider-track"
           style={gradient ? { background: gradient } : undefined}
         >
+          {color && (
+            <div
+              className="bauhaus-slider-color"
+              style={{ backgroundColor: color }}
+            />
+          )}
           <div
             className="bauhaus-slider-fill"
             style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }}

@@ -47,6 +47,32 @@ typedef struct _server_exposure_params_t
   gboolean compensate_hilite_pres;
 } _server_exposure_params_t;
 
+// Mirror of dt_iop_sigmoid_params_t from iop/sigmoid.c
+// Must match the struct layout exactly (introspection version 3).
+typedef enum _server_sigmoid_method_t
+{
+  _SIGMOID_METHOD_PER_CHANNEL = 0,
+  _SIGMOID_METHOD_RGB_RATIO = 1
+} _server_sigmoid_method_t;
+
+typedef struct _server_sigmoid_params_t
+{
+  float middle_grey_contrast;
+  float contrast_skewness;
+  float display_white_target;
+  float display_black_target;
+  _server_sigmoid_method_t color_processing;
+  float hue_preservation;
+  float red_inset;
+  float red_rotation;
+  float green_inset;
+  float green_rotation;
+  float blue_inset;
+  float blue_rotation;
+  float purity;
+  int base_primaries;
+} _server_sigmoid_params_t;
+
 // Mirror of dt_iop_exposure_data_t — committed pipe data (after process)
 typedef struct _server_exposure_data_t
 {
@@ -561,6 +587,38 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
       dt_pthread_mutex_unlock(&pipe->busy_mutex);
     }
   }
+  else if(!strcmp(op, "sigmoid"))
+  {
+    const _server_sigmoid_params_t *p = (const _server_sigmoid_params_t *)target->params;
+    json_builder_set_member_name(b, "middle_grey_contrast");
+    json_builder_add_double_value(b, p->middle_grey_contrast);
+    json_builder_set_member_name(b, "contrast_skewness");
+    json_builder_add_double_value(b, p->contrast_skewness);
+    json_builder_set_member_name(b, "color_processing");
+    json_builder_add_int_value(b, (int)p->color_processing);
+    json_builder_set_member_name(b, "hue_preservation");
+    json_builder_add_double_value(b, p->hue_preservation);
+    json_builder_set_member_name(b, "display_white_target");
+    json_builder_add_double_value(b, p->display_white_target);
+    json_builder_set_member_name(b, "display_black_target");
+    json_builder_add_double_value(b, p->display_black_target);
+    json_builder_set_member_name(b, "base_primaries");
+    json_builder_add_int_value(b, p->base_primaries);
+    json_builder_set_member_name(b, "red_inset");
+    json_builder_add_double_value(b, p->red_inset);
+    json_builder_set_member_name(b, "red_rotation");
+    json_builder_add_double_value(b, p->red_rotation);
+    json_builder_set_member_name(b, "green_inset");
+    json_builder_add_double_value(b, p->green_inset);
+    json_builder_set_member_name(b, "green_rotation");
+    json_builder_add_double_value(b, p->green_rotation);
+    json_builder_set_member_name(b, "blue_inset");
+    json_builder_add_double_value(b, p->blue_inset);
+    json_builder_set_member_name(b, "blue_rotation");
+    json_builder_add_double_value(b, p->blue_rotation);
+    json_builder_set_member_name(b, "purity");
+    json_builder_add_double_value(b, p->purity);
+  }
   else
   {
     // Generic: return params as base64 blob for unsupported modules
@@ -783,6 +841,39 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
       p->deflicker_percentile = (float)json_object_get_double_member(new_params, "deflicker_percentile");
     if(json_object_has_member(new_params, "deflicker_target_level"))
       p->deflicker_target_level = (float)json_object_get_double_member(new_params, "deflicker_target_level");
+  }
+  else if(!strcmp(op, "sigmoid"))
+  {
+    _server_sigmoid_params_t *p = (_server_sigmoid_params_t *)target->params;
+
+    if(json_object_has_member(new_params, "middle_grey_contrast"))
+      p->middle_grey_contrast = (float)json_object_get_double_member(new_params, "middle_grey_contrast");
+    if(json_object_has_member(new_params, "contrast_skewness"))
+      p->contrast_skewness = (float)json_object_get_double_member(new_params, "contrast_skewness");
+    if(json_object_has_member(new_params, "color_processing"))
+      p->color_processing = (_server_sigmoid_method_t)json_object_get_int_member(new_params, "color_processing");
+    if(json_object_has_member(new_params, "hue_preservation"))
+      p->hue_preservation = (float)json_object_get_double_member(new_params, "hue_preservation");
+    if(json_object_has_member(new_params, "display_white_target"))
+      p->display_white_target = (float)json_object_get_double_member(new_params, "display_white_target");
+    if(json_object_has_member(new_params, "display_black_target"))
+      p->display_black_target = (float)json_object_get_double_member(new_params, "display_black_target");
+    if(json_object_has_member(new_params, "base_primaries"))
+      p->base_primaries = (int)json_object_get_int_member(new_params, "base_primaries");
+    if(json_object_has_member(new_params, "red_inset"))
+      p->red_inset = (float)json_object_get_double_member(new_params, "red_inset");
+    if(json_object_has_member(new_params, "red_rotation"))
+      p->red_rotation = (float)json_object_get_double_member(new_params, "red_rotation");
+    if(json_object_has_member(new_params, "green_inset"))
+      p->green_inset = (float)json_object_get_double_member(new_params, "green_inset");
+    if(json_object_has_member(new_params, "green_rotation"))
+      p->green_rotation = (float)json_object_get_double_member(new_params, "green_rotation");
+    if(json_object_has_member(new_params, "blue_inset"))
+      p->blue_inset = (float)json_object_get_double_member(new_params, "blue_inset");
+    if(json_object_has_member(new_params, "blue_rotation"))
+      p->blue_rotation = (float)json_object_get_double_member(new_params, "blue_rotation");
+    if(json_object_has_member(new_params, "purity"))
+      p->purity = (float)json_object_get_double_member(new_params, "purity");
   }
   else
   {
