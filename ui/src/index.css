@@ -433,19 +433,31 @@ body {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  width: 12px;
-  height: 12px;
-}
-
-.bauhaus-button-icon svg {
-  width: 100%;
-  height: 100%;
 }
 
 .bauhaus-button-icon-only {
   width: auto;
   padding: 4px;
   aspect-ratio: 1;
+}
+
+.bauhaus-button-icon-only.bauhaus-button-transparent {
+  padding: 2px;
+}
+
+.bauhaus-button-transparent {
+  background: transparent;
+  border-color: transparent;
+  color: var(--plugin-label-color);
+}
+
+.bauhaus-button-transparent:hover {
+  background-color: var(--button-hover-bg);
+  color: var(--button-hover-fg);
+}
+
+.bauhaus-button-transparent[data-active="true"] {
+  color: var(--fg-color);
 }
 
 .bauhaus-button-row {
@@ -958,7 +970,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
+  padding: 0 2px;
   height: 26px;
   flex-shrink: 0;
   background-color: var(--plugin-bg-color);

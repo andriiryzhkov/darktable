@@ -11,6 +11,7 @@ import {
   type FilterType,
 } from "../../stores/filterStore";
 import BauhausCombo from "../controls/BauhausCombo";
+import BauhausButton from "../controls/BauhausButton";
 
 const STAR_PATH =
   "M12 2l2.9 6.6L22 9.5l-5 4.8 1.2 7.2L12 18l-6.2 3.5L7 14.3l-5-4.8 7.1-.9z";
@@ -309,22 +310,23 @@ function SortControls() {
   const toggleSortDirection = useFilterStore((s) => s.toggleSortDirection);
 
   return (
-    <div className="filter-pill filter-sort">
-      <button
-        className="toolbar-icon-btn"
+    <>
+      <div className="filter-pill filter-sort">
+        <BauhausCombo
+          label="sort by"
+          hideLabel
+          groups={SORT_COMBO_GROUPS}
+          value={sortBy}
+          onChange={setSortBy}
+        />
+      </div>
+      <BauhausButton
+        icon={sortDirection === "asc" ? <ArrowUpNarrowWide size={14} /> : <ArrowDownWideNarrow size={14} />}
         title={sortDirection === "asc" ? "Ascending — click for descending" : "Descending — click for ascending"}
+        transparent
         onClick={toggleSortDirection}
-      >
-        {sortDirection === "asc" ? <ArrowUpNarrowWide size={12} /> : <ArrowDownWideNarrow size={12} />}
-      </button>
-      <BauhausCombo
-        label="sort by"
-        hideLabel
-        groups={SORT_COMBO_GROUPS}
-        value={sortBy}
-        onChange={setSortBy}
       />
-    </div>
+    </>
   );
 }
 
@@ -425,11 +427,11 @@ export default function FilterBar() {
       {/* filter config button */}
       <button
         ref={configBtnRef}
-        className="toolbar-icon-btn"
+        className="bauhaus-button bauhaus-button-icon-only bauhaus-button-transparent"
         title="Configure filters"
         onClick={toggleConfig}
       >
-        <Filter size={14} />
+        <span className="bauhaus-button-icon"><Filter size={14} /></span>
       </button>
 
       {/* quick filters as pills */}

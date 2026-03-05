@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Star, HelpCircle, Keyboard, Settings, Group, Ungroup } from "lucide-react";
 import { useCatalogStore } from "../../stores/catalogStore";
 import { useFilterStore } from "../../stores/filterStore";
+import BauhausButton from "../controls/BauhausButton";
 import FilterBar from "./FilterBar";
 
 export default function TopToolbar() {
@@ -25,26 +26,17 @@ export default function TopToolbar() {
 
       {/* Right: action buttons */}
       <div className="top-toolbar-right">
-        <button
-          className="toolbar-icon-btn"
+        <BauhausButton
+          icon={grouping ? <Group size={14} /> : <Ungroup size={14} />}
           title={grouping ? "Grouped — click to show all" : "Ungrouped — click to collapse groups"}
-          data-active={grouping}
+          active={grouping}
+          transparent
           onClick={toggleGrouping}
-        >
-          {grouping ? <Group size={14} /> : <Ungroup size={14} />}
-        </button>
-        <button className="toolbar-icon-btn" title="Overlays">
-          <Star size={14} />
-        </button>
-        <button className="toolbar-icon-btn" title="Help">
-          <HelpCircle size={14} />
-        </button>
-        <button className="toolbar-icon-btn" title="Keyboard shortcuts">
-          <Keyboard size={14} />
-        </button>
-        <button className="toolbar-icon-btn" title="Preferences">
-          <Settings size={14} />
-        </button>
+        />
+        <BauhausButton icon={<Star size={14} />} title="Overlays" transparent />
+        <BauhausButton icon={<HelpCircle size={14} />} title="Help" transparent />
+        <BauhausButton icon={<Keyboard size={14} />} title="Keyboard shortcuts" transparent />
+        <BauhausButton icon={<Settings size={14} />} title="Preferences" transparent />
       </div>
     </div>
   );

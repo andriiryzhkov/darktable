@@ -4,15 +4,25 @@ interface BauhausButtonProps {
   label?: string;
   icon?: ReactNode;
   disabled?: boolean;
+  active?: boolean;
+  title?: string;
+  transparent?: boolean;
   onClick?: () => void;
 }
 
-export default function BauhausButton({ label, icon, disabled, onClick }: BauhausButtonProps) {
+export default function BauhausButton({ label, icon, disabled, active, title, transparent, onClick }: BauhausButtonProps) {
   const iconOnly = icon && !label;
+  const classes = [
+    "bauhaus-button",
+    iconOnly ? "bauhaus-button-icon-only" : "",
+    transparent ? "bauhaus-button-transparent" : "",
+  ].filter(Boolean).join(" ");
   return (
     <button
-      className={`bauhaus-button${iconOnly ? " bauhaus-button-icon-only" : ""}`}
+      className={classes}
       disabled={disabled}
+      data-active={active}
+      title={title}
       onClick={onClick}
     >
       {icon && <span className="bauhaus-button-icon">{icon}</span>}
