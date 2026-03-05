@@ -11,7 +11,7 @@ export interface ModuleGroupDef {
   icon: ReactNode;
 }
 
-const S = 16;
+const S = 18;
 
 const ICON_MAP: Record<string, ReactNode> = {
   Circle: <Circle size={S} />,
