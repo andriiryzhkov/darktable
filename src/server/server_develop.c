@@ -793,6 +793,366 @@ char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request
   return resp;
 }
 
+// --- Generic introspection-based param serialization ---
+
+/** Serialize a single introspection field value from params blob to JSON */
+static void _introspection_serialize_field(JsonBuilder *b, const dt_introspection_field_t *field,
+                                           const void *params)
+{
+  const void *ptr = (const char *)params + field->header.offset;
+
+  switch(field->header.type)
+  {
+    case DT_INTROSPECTION_TYPE_FLOAT:
+      json_builder_add_double_value(b, *(const float *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_DOUBLE:
+      json_builder_add_double_value(b, *(const double *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_INT:
+      json_builder_add_int_value(b, *(const int *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_UINT:
+      json_builder_add_int_value(b, *(const unsigned int *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_SHORT:
+      json_builder_add_int_value(b, *(const short *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_USHORT:
+      json_builder_add_int_value(b, *(const unsigned short *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_INT8:
+      json_builder_add_int_value(b, *(const int8_t *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_UINT8:
+      json_builder_add_int_value(b, *(const uint8_t *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_LONG:
+      json_builder_add_int_value(b, *(const long *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_ULONG:
+      json_builder_add_int_value(b, (gint64)*(const unsigned long *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_BOOL:
+      json_builder_add_boolean_value(b, *(const gboolean *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_ENUM:
+      json_builder_add_int_value(b, *(const int *)ptr);
+      break;
+    case DT_INTROSPECTION_TYPE_CHAR:
+    {
+      // A single char field — treat as int
+      json_builder_add_int_value(b, *(const char *)ptr);
+      break;
+    }
+    case DT_INTROSPECTION_TYPE_ARRAY:
+    {
+      json_builder_begin_array(b);
+      const dt_introspection_type_array_t *arr = &field->Array;
+      for(size_t i = 0; i < arr->count; i++)
+      {
+        // Create a temporary field descriptor with adjusted offset for each element
+        dt_introspection_field_t elem = *arr->field;
+        elem.header.offset = field->header.offset + i * arr->field->header.size;
+        _introspection_serialize_field(b, &elem, params);
+      }
+      json_builder_end_array(b);
+      break;
+    }
+    case DT_INTROSPECTION_TYPE_STRUCT:
+    {
+      json_builder_begin_object(b);
+      const dt_introspection_type_struct_t *s = &field->Struct;
+      for(size_t i = 0; i < s->entries; i++)
+      {
+        const dt_introspection_field_t *child = s->fields[i];
+        if(!child->header.field_name) continue;
+        json_builder_set_member_name(b, child->header.field_name);
+        _introspection_serialize_field(b, child, params);
+      }
+      json_builder_end_object(b);
+      break;
+    }
+    default:
+      // OPAQUE, FLOATCOMPLEX, UNION — skip with null
+      json_builder_add_null_value(b);
+      break;
+  }
+}
+
+/** Serialize all top-level params fields using introspection */
+static gboolean _introspection_serialize_params(JsonBuilder *b, const dt_iop_module_t *module)
+{
+  dt_introspection_t *intro = module->so->get_introspection();
+  if(!intro || !intro->field || intro->field->header.type != DT_INTROSPECTION_TYPE_STRUCT)
+    return FALSE;
+
+  const dt_introspection_type_struct_t *root = &intro->field->Struct;
+  for(size_t i = 0; i < root->entries; i++)
+  {
+    const dt_introspection_field_t *child = root->fields[i];
+    if(!child->header.field_name) continue;
+    json_builder_set_member_name(b, child->header.field_name);
+    _introspection_serialize_field(b, child, module->params);
+  }
+  return TRUE;
+}
+
+/** Deserialize a single field from JSON into the params blob */
+static void _introspection_deserialize_field(const dt_introspection_field_t *field,
+                                             void *params, JsonNode *node)
+{
+  void *ptr = (char *)params + field->header.offset;
+
+  switch(field->header.type)
+  {
+    case DT_INTROSPECTION_TYPE_FLOAT:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(float *)ptr = (float)json_node_get_double(node);
+      break;
+    case DT_INTROSPECTION_TYPE_DOUBLE:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(double *)ptr = json_node_get_double(node);
+      break;
+    case DT_INTROSPECTION_TYPE_INT:
+    case DT_INTROSPECTION_TYPE_ENUM:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(int *)ptr = (int)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_UINT:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(unsigned int *)ptr = (unsigned int)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_SHORT:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(short *)ptr = (short)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_USHORT:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(unsigned short *)ptr = (unsigned short)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_INT8:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(int8_t *)ptr = (int8_t)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_UINT8:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(uint8_t *)ptr = (uint8_t)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_LONG:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(long *)ptr = (long)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_ULONG:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(unsigned long *)ptr = (unsigned long)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_BOOL:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(gboolean *)ptr = json_node_get_boolean(node);
+      break;
+    case DT_INTROSPECTION_TYPE_CHAR:
+      if(JSON_NODE_HOLDS_VALUE(node))
+        *(char *)ptr = (char)json_node_get_int(node);
+      break;
+    case DT_INTROSPECTION_TYPE_ARRAY:
+    {
+      if(!JSON_NODE_HOLDS_ARRAY(node)) break;
+      JsonArray *arr = json_node_get_array(node);
+      const dt_introspection_type_array_t *a = &field->Array;
+      const guint len = MIN(json_array_get_length(arr), (guint)a->count);
+      for(guint i = 0; i < len; i++)
+      {
+        dt_introspection_field_t elem = *a->field;
+        elem.header.offset = field->header.offset + i * a->field->header.size;
+        _introspection_deserialize_field(&elem, params, json_array_get_element(arr, i));
+      }
+      break;
+    }
+    case DT_INTROSPECTION_TYPE_STRUCT:
+    {
+      if(!JSON_NODE_HOLDS_OBJECT(node)) break;
+      JsonObject *obj = json_node_get_object(node);
+      const dt_introspection_type_struct_t *s = &field->Struct;
+      for(size_t i = 0; i < s->entries; i++)
+      {
+        const dt_introspection_field_t *child = s->fields[i];
+        if(!child->header.field_name) continue;
+        if(json_object_has_member(obj, child->header.field_name))
+          _introspection_deserialize_field(child, params,
+            json_object_get_member(obj, child->header.field_name));
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+/** Deserialize JSON params object into module params blob using introspection.
+ *  Only fields present in the JSON are modified (partial update). */
+static gboolean _introspection_deserialize_params(const dt_iop_module_t *module,
+                                                   JsonObject *new_params)
+{
+  dt_introspection_t *intro = module->so->get_introspection();
+  if(!intro || !intro->field || intro->field->header.type != DT_INTROSPECTION_TYPE_STRUCT)
+    return FALSE;
+
+  const dt_introspection_type_struct_t *root = &intro->field->Struct;
+  for(size_t i = 0; i < root->entries; i++)
+  {
+    const dt_introspection_field_t *child = root->fields[i];
+    if(!child->header.field_name) continue;
+    if(!json_object_has_member(new_params, child->header.field_name)) continue;
+    JsonNode *node = json_object_get_member(new_params, child->header.field_name);
+    _introspection_deserialize_field(child, module->params, node);
+  }
+  return TRUE;
+}
+
+/** Serialize introspection schema for a module (field types, min/max/default, enums) */
+static void _introspection_serialize_schema_field(JsonBuilder *b, const dt_introspection_field_t *field)
+{
+  json_builder_begin_object(b);
+
+  json_builder_set_member_name(b, "name");
+  json_builder_add_string_value(b, field->header.field_name ? field->header.field_name : "");
+
+  json_builder_set_member_name(b, "type");
+  switch(field->header.type)
+  {
+    case DT_INTROSPECTION_TYPE_FLOAT:
+      json_builder_add_string_value(b, "float");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_double_value(b, field->Float.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_double_value(b, field->Float.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_double_value(b, field->Float.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_DOUBLE:
+      json_builder_add_string_value(b, "double");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_double_value(b, field->Double.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_double_value(b, field->Double.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_double_value(b, field->Double.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_INT:
+      json_builder_add_string_value(b, "int");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_int_value(b, field->Int.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_int_value(b, field->Int.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->Int.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_UINT:
+      json_builder_add_string_value(b, "uint");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_int_value(b, field->UInt.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_int_value(b, field->UInt.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->UInt.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_BOOL:
+      json_builder_add_string_value(b, "bool");
+      json_builder_set_member_name(b, "default");
+      json_builder_add_boolean_value(b, field->Bool.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_ENUM:
+      json_builder_add_string_value(b, "enum");
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->Enum.Default);
+      json_builder_set_member_name(b, "values");
+      json_builder_begin_array(b);
+      for(size_t j = 0; j < field->Enum.entries; j++)
+      {
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "name");
+        json_builder_add_string_value(b, field->Enum.values[j].name);
+        json_builder_set_member_name(b, "value");
+        json_builder_add_int_value(b, field->Enum.values[j].value);
+        if(field->Enum.values[j].description)
+        {
+          json_builder_set_member_name(b, "description");
+          json_builder_add_string_value(b, field->Enum.values[j].description);
+        }
+        json_builder_end_object(b);
+      }
+      json_builder_end_array(b);
+      break;
+    case DT_INTROSPECTION_TYPE_SHORT:
+      json_builder_add_string_value(b, "short");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_int_value(b, field->Short.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_int_value(b, field->Short.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->Short.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_USHORT:
+      json_builder_add_string_value(b, "ushort");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_int_value(b, field->UShort.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_int_value(b, field->UShort.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->UShort.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_INT8:
+      json_builder_add_string_value(b, "int8");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_int_value(b, field->Int8.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_int_value(b, field->Int8.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->Int8.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_UINT8:
+      json_builder_add_string_value(b, "uint8");
+      json_builder_set_member_name(b, "min");
+      json_builder_add_int_value(b, field->UInt8.Min);
+      json_builder_set_member_name(b, "max");
+      json_builder_add_int_value(b, field->UInt8.Max);
+      json_builder_set_member_name(b, "default");
+      json_builder_add_int_value(b, field->UInt8.Default);
+      break;
+    case DT_INTROSPECTION_TYPE_ARRAY:
+    {
+      json_builder_add_string_value(b, "array");
+      json_builder_set_member_name(b, "count");
+      json_builder_add_int_value(b, field->Array.count);
+      json_builder_set_member_name(b, "element");
+      _introspection_serialize_schema_field(b, field->Array.field);
+      break;
+    }
+    case DT_INTROSPECTION_TYPE_STRUCT:
+    {
+      json_builder_add_string_value(b, "struct");
+      json_builder_set_member_name(b, "fields");
+      json_builder_begin_array(b);
+      for(size_t j = 0; j < field->Struct.entries; j++)
+        _introspection_serialize_schema_field(b, field->Struct.fields[j]);
+      json_builder_end_array(b);
+      break;
+    }
+    default:
+      json_builder_add_string_value(b, "opaque");
+      break;
+  }
+
+  if(field->header.description)
+  {
+    json_builder_set_member_name(b, "description");
+    json_builder_add_string_value(b, field->header.description);
+  }
+
+  json_builder_end_object(b);
+}
+
 // Exposure applied by the last deflicker run. Same computation as
 // _compute_deflicker_correction() in iop/exposure.c, using the raw histogram
 // the module caches in its pipe data.
@@ -909,7 +1269,8 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
     // data are only safe to walk under busy_mutex; trylock like
     // preview_data.c does, a busy pipe just skips the readout this time.
     dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
-    if(p->mode == _EXPOSURE_MODE_DEFLICKER && !dt_pthread_mutex_trylock(&pipe->busy_mutex))
+    const _server_exposure_params_t *ep = (const _server_exposure_params_t *)target->params;
+    if(ep->mode == _EXPOSURE_MODE_DEFLICKER && !dt_pthread_mutex_trylock(&pipe->busy_mutex))
     {
       for(GList *nodes = pipe->nodes; nodes; nodes = g_list_next(nodes))
       {
@@ -1167,9 +1528,13 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
     json_builder_set_member_name(b, "purity");
     json_builder_add_double_value(b, p->purity);
   }
+  else if(target->so->have_introspection && _introspection_serialize_params(b, target))
+  {
+    // Generic introspection-based serialization succeeded
+  }
   else
   {
-    // Generic: return params as base64 blob for unsupported modules
+    // No introspection available — return raw base64 blob
     gchar *b64 = g_base64_encode((const guchar *)target->params, target->params_size);
     json_builder_set_member_name(b, "_raw_base64");
     json_builder_add_string_value(b, b64);
@@ -1620,10 +1985,14 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
     if(json_object_has_member(new_params, "purity"))
       p->purity = (float)json_object_get_double_member(new_params, "purity");
   }
+  else if(target->so->have_introspection && _introspection_deserialize_params(target, new_params))
+  {
+    // Generic introspection-based deserialization succeeded
+  }
   else
   {
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
-                                 "Module params not yet supported for this operation");
+                                 "Module has no introspection data for parameter updates");
   }
 
   if(preview_only)
@@ -3079,6 +3448,68 @@ char *dt_server_develop_delete_preset(dt_server_t *server, const dt_server_reque
   json_builder_begin_object(b);
   json_builder_set_member_name(b, "status");
   json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_get_introspection(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or op parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  if(!session_id || !op)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id and op must be strings");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *target = NULL;
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op))
+    {
+      target = mod;
+      break;
+    }
+  }
+
+  if(!target)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  if(!target->so->have_introspection)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Module has no introspection");
+
+  dt_introspection_t *intro = target->so->get_introspection();
+  if(!intro || !intro->field || intro->field->header.type != DT_INTROSPECTION_TYPE_STRUCT)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Invalid introspection data");
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+
+  json_builder_set_member_name(b, "op");
+  json_builder_add_string_value(b, op);
+
+  json_builder_set_member_name(b, "params_version");
+  json_builder_add_int_value(b, intro->params_version);
+
+  json_builder_set_member_name(b, "fields");
+  json_builder_begin_array(b);
+  const dt_introspection_type_struct_t *root = &intro->field->Struct;
+  for(size_t i = 0; i < root->entries; i++)
+    _introspection_serialize_schema_field(b, root->fields[i]);
+  json_builder_end_array(b);
+
   json_builder_end_object(b);
 
   JsonNode *result = json_builder_get_root(b);

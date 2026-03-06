@@ -11,6 +11,7 @@ import type {
   FilmRoll,
   Tag,
   PresetListResult,
+  IntrospectionResult,
 } from "../types/protocol";
 import type { CollectionRuleParam, PropertyValue } from "../types/collections";
 import type { FolderEntry, FileEntry } from "../types/import";
@@ -46,6 +47,7 @@ declare global {
     developDeleteInstance: (sessionId: string, op: string, instance: number) => Promise<unknown>;
     developMoveInstance: (sessionId: string, op: string, instance: number, direction: "up" | "down") => Promise<unknown>;
     developRenameInstance: (sessionId: string, op: string, instance: number, name: string) => Promise<unknown>;
+    developGetIntrospection: (sessionId: string, op: string) => Promise<IntrospectionResult>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     pickFolder: () => Promise<string | null>;
     listFolders: (path: string) => Promise<FolderEntry[]>;
@@ -147,6 +149,9 @@ export const developMoveInstance = (sessionId: string, op: string, instance: num
 
 export const developRenameInstance = (sessionId: string, op: string, instance: number, name: string) =>
   window.developRenameInstance(sessionId, op, instance, name);
+
+export const developGetIntrospection = (sessionId: string, op: string) =>
+  window.developGetIntrospection(sessionId, op);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);

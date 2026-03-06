@@ -6,6 +6,7 @@ import {
   developCommitParams,
   developResetParams,
   developGetParams,
+  developGetIntrospection,
   developRequestPreview,
   developSamplePixels,
   developGetModules,
@@ -25,7 +26,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { TemperatureParams, ExposureParams, FlipParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo } from "../types/protocol";
+import type { TemperatureParams, ExposureParams, FlipParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -61,6 +62,8 @@ interface DevelopState {
   coloroutParams: ColoroutParams | null;
   modules: ModuleInfo[];
   moduleDescriptions: Record<string, ModuleDescription>; // op → description from server
+  genericParams: Record<string, Record<string, unknown>>; // op → params from introspection
+  introspectionSchemas: Record<string, IntrospectionResult>; // op → schema cache
   historyItems: HistoryItem[];
   historyEnd: number;
   loading: boolean;
@@ -104,6 +107,8 @@ interface DevelopState {
   deleteInstance: (op: string, instance: number) => Promise<void>;
   moveInstance: (op: string, instance: number, direction: "up" | "down") => Promise<void>;
   renameInstance: (op: string, instance: number, name: string) => Promise<void>;
+  fetchIntrospection: (op: string) => Promise<IntrospectionResult | null>;
+  fetchGenericParams: (op: string) => Promise<void>;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -151,6 +156,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   coloroutParams: null,
   modules: [],
   moduleDescriptions: {},
+  genericParams: {},
+  introspectionSchemas: {},
   historyItems: [],
   historyEnd: 0,
   loading: false,
@@ -624,6 +631,31 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       });
     } catch (e) {
       console.error("rename instance failed:", e);
+    }
+  },
+
+  fetchIntrospection: async (op: string) => {
+    const { sessionId, introspectionSchemas } = get();
+    if (!sessionId) return null;
+    if (introspectionSchemas[op]) return introspectionSchemas[op];
+    try {
+      const result = await developGetIntrospection(sessionId, op);
+      set({ introspectionSchemas: { ...get().introspectionSchemas, [op]: result } });
+      return result;
+    } catch (e) {
+      console.error(`fetch introspection for ${op} failed:`, e);
+      return null;
+    }
+  },
+
+  fetchGenericParams: async (op: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      const result = await developGetParams(sessionId, op);
+      set({ genericParams: { ...get().genericParams, [op]: result.params } });
+    } catch (e) {
+      console.error(`fetch generic params for ${op} failed:`, e);
     }
   },
 }));

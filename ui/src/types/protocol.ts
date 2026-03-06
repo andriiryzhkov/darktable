@@ -260,3 +260,28 @@ export interface PresetInfo {
 export interface PresetListResult {
   presets: PresetInfo[];
 }
+
+export interface IntrospectionEnumValue {
+  name: string;
+  value: number;
+  description?: string;
+}
+
+export interface IntrospectionField {
+  name: string;
+  type: string;
+  min?: number;
+  max?: number;
+  default?: number | boolean;
+  values?: IntrospectionEnumValue[];
+  count?: number;
+  element?: IntrospectionField;
+  fields?: IntrospectionField[];
+  description?: string;
+}
+
+export interface IntrospectionResult {
+  op: string;
+  params_version: number;
+  fields: IntrospectionField[];
+}

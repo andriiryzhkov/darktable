@@ -159,6 +159,7 @@ static const dt_server_route_t _routes[] = {
   { "develop.delete_instance",   dt_server_develop_delete_instance },
   { "develop.move_instance",     dt_server_develop_move_instance },
   { "develop.rename_instance",   dt_server_develop_rename_instance },
+  { "develop.get_introspection", dt_server_develop_get_introspection },
   { "export.image",               dt_server_export_image },
   { "config.get",                 _handle_config_get },
   { "config.set",                 _handle_config_set },

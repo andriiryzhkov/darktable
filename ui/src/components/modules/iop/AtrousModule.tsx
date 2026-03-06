@@ -1,7 +1,5 @@
+import GenericIopModule from "./GenericIopModule";
+
 export default function AtrousModule() {
-  return (
-    <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
-      module controls not yet implemented
-    </p>
-  );
+  return <GenericIopModule op="atrous" />;
 }

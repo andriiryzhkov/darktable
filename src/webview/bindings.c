@@ -679,6 +679,31 @@ static void on_develop_get_params(const char *id, const char *req, void *arg)
   g_free(ipc_params);
 }
 
+static void on_develop_get_introspection(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developGetIntrospection requires (sessionId, op)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
+                                     session_id, op);
+  g_free(session_id);
+  g_free(op);
+
+  _ipc_passthrough(ctx, id, "develop.get_introspection", ipc_params);
+  g_free(ipc_params);
+}
+
 static void on_develop_request_preview(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -2503,6 +2528,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developDeleteInstance", on_develop_delete_instance, ctx);
   webview_bind(ctx->webview, "developMoveInstance", on_develop_move_instance, ctx);
   webview_bind(ctx->webview, "developRenameInstance", on_develop_rename_instance, ctx);
+  webview_bind(ctx->webview, "developGetIntrospection", on_develop_get_introspection, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);
   webview_bind(ctx->webview, "listFolders", on_list_folders, ctx);
