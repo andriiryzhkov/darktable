@@ -95,7 +95,7 @@ export default function ModuleCard({
           ) : (
             <BauhausButton icon={<RotateCcw size={12} />} disabled />
           )}
-          <span ref={presetsButtonRef as React.Ref<HTMLSpanElement>}>
+          <span className="module-presets-wrapper" ref={presetsButtonRef as React.Ref<HTMLSpanElement>}>
             {onPresets ? (
               <BauhausTooltip content={presetsTooltip} placement="bottom">
                 <BauhausButton icon={<Menu size={12} />} onClick={onPresets} />

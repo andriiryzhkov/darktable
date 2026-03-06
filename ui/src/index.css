@@ -267,7 +267,8 @@ body {
   color: var(--plugin-label-color);
 }
 
-.module-power {
+.module-power,
+.module-presets-wrapper {
   display: flex;
   align-items: center;
 }
