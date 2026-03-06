@@ -1,5 +1,7 @@
 import { type ReactNode } from "react";
 import { CircleChevronRight, CircleChevronDown } from "lucide-react";
+import BauhausButton from "../controls/BauhausButton";
+import BauhausTooltip from "../controls/BauhausTooltip";
 import ModuleCard from "./ModuleCard";
 
 interface LibModuleCardProps {
@@ -27,9 +29,16 @@ export default function LibModuleCard({
       onReset={onReset}
       extraButtons={extraButtons}
       leftIcon={(open) =>
-        open
-          ? <CircleChevronDown size={12} className="module-chevron" />
-          : <CircleChevronRight size={12} className="module-chevron" />
+        <BauhausTooltip content="show module" placement="bottom">
+          <span className="module-power">
+            <BauhausButton
+              icon={open
+                ? <CircleChevronDown size={12} />
+                : <CircleChevronRight size={12} />
+              }
+            />
+          </span>
+        </BauhausTooltip>
       }
     >
       {children}

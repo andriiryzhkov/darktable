@@ -11,11 +11,14 @@ interface ModuleCardProps {
   onToggle?: (open: boolean) => void;
   /** Icon to the left of the title; receives current open state */
   leftIcon?: ReactNode | ((open: boolean) => ReactNode);
+  /** Tooltip for the left icon */
+  leftIconTooltip?: string;
   /** Extra elements after the title (trouble warnings, etc.) */
   afterTitle?: ReactNode;
   /** Extra action buttons before reset/menu */
   extraButtons?: ReactNode;
   onReset?: () => void;
+  onPresets?: () => void;
   wrapperRef?: React.Ref<HTMLDivElement>;
   children: ReactNode;
 }
@@ -27,9 +30,11 @@ export default function ModuleCard({
   defaultOpen = false,
   onToggle,
   leftIcon,
+  leftIconTooltip,
   afterTitle,
   extraButtons,
   onReset,
+  onPresets,
   wrapperRef,
   children,
 }: ModuleCardProps) {
@@ -44,28 +49,53 @@ export default function ModuleCard({
 
   const icon = typeof leftIcon === "function" ? leftIcon(open) : leftIcon;
 
+  const titleContent = (
+    <>
+      <span className="flex-1">{title}</span>
+      {afterTitle}
+    </>
+  );
+
   return (
     <div ref={wrapperRef} className="module-wrapper" data-open={open}>
       <div className="module-header" onClick={toggle}>
-        {icon}
+        {leftIconTooltip ? (
+          <BauhausTooltip content={leftIconTooltip} placement="bottom">
+            <span>{icon}</span>
+          </BauhausTooltip>
+        ) : icon}
 
         {tooltip ? (
           <BauhausTooltip content={tooltip} placement="bottom-start" delay={700}>
-            <span className="flex-1">{title}</span>
+            <span className="module-header-main">
+              {titleContent}
+            </span>
           </BauhausTooltip>
         ) : (
-          <span className="flex-1">{title}</span>
+          <span className="module-header-main">
+            {titleContent}
+          </span>
         )}
-
-        {afterTitle}
 
         <span
           className="module-actions"
           onClick={(e) => e.stopPropagation()}
         >
           {extraButtons}
-          <BauhausButton icon={<RotateCcw size={12} />} onClick={onReset} />
-          <BauhausButton icon={<Menu size={12} />} />
+          {onReset ? (
+            <BauhausTooltip content="reset" placement="bottom">
+              <span><BauhausButton icon={<RotateCcw size={12} />} onClick={onReset} /></span>
+            </BauhausTooltip>
+          ) : (
+            <BauhausButton icon={<RotateCcw size={12} />} disabled />
+          )}
+          {onPresets ? (
+            <BauhausTooltip content="presets and preferences" placement="bottom">
+              <span><BauhausButton icon={<Menu size={12} />} onClick={onPresets} /></span>
+            </BauhausTooltip>
+          ) : (
+            <BauhausButton icon={<Menu size={12} />} disabled />
+          )}
         </span>
       </div>
       {open && <div className="module-content">{children}</div>}

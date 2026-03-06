@@ -182,6 +182,19 @@ body {
   color: var(--fg-color);
 }
 
+.module-header-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.module-header > .bauhaus-tooltip-trigger:has(.module-header-main) {
+  flex: 1;
+  min-width: 0;
+}
+
 .module-chevron {
   flex-shrink: 0;
 }
@@ -217,6 +230,11 @@ body {
 }
 
 .module-power .bauhaus-button-icon-only[data-active="true"] {
+  color: var(--fg-color);
+}
+
+.module-power .bauhaus-button-icon-only:has(svg.lucide-circle-chevron-right),
+.module-power .bauhaus-button-icon-only:has(svg.lucide-circle-chevron-down) {
   color: var(--fg-color);
 }
 
@@ -859,6 +877,7 @@ body {
 
 .bauhaus-tooltip-trigger {
   display: inline-flex;
+  align-items: center;
 }
 
 .bauhaus-tooltip {
