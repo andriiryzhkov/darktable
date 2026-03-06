@@ -60,6 +60,7 @@ export default function IopModuleCard({ module, defaultOpen }: Props) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   const historyItems = useDevelopStore((s) => s.historyItems);
   const enableModule = useDevelopStore((s) => s.enableModule);
+  const resetModule = useDevelopStore((s) => s.resetModule);
   const focusModuleOp = useDevelopStore((s) => s.focusModuleOp);
   const description = useDevelopStore((s) => s.moduleDescriptions[module.op]);
   const trouble = useModuleTrouble(module.op);
@@ -94,15 +95,19 @@ export default function IopModuleCard({ module, defaultOpen }: Props) {
       wrapperRef={wrapperRef}
       leftIcon={
         isMandatory ? (
-          <CircleDot size={12} className="module-mandatory-icon" />
+          <BauhausTooltip content={`'${module.name}' is switched on`} placement="bottom">
+            <CircleDot size={12} className="module-mandatory-icon" />
+          </BauhausTooltip>
         ) : (
-          <span className="module-power" onClick={(e) => e.stopPropagation()}>
-            <BauhausButton
-              icon={<Power size={12} />}
-              active={enabled}
-              onClick={toggleEnabled}
-            />
-          </span>
+          <BauhausTooltip content={`'${module.name}' is switched ${enabled ? "on" : "off"}`} placement="bottom">
+            <span className="module-power" onClick={(e) => e.stopPropagation()}>
+              <BauhausButton
+                icon={<Power size={12} />}
+                active={enabled}
+                onClick={toggleEnabled}
+              />
+            </span>
+          </BauhausTooltip>
         )
       }
       afterTitle={
@@ -114,7 +119,14 @@ export default function IopModuleCard({ module, defaultOpen }: Props) {
           </BauhausTooltip>
         ) : undefined
       }
-      extraButtons={<BauhausButton icon={<Copy size={12} />} />}
+      onReset={() => resetModule(module.op)}
+      resetTooltip={<span style={{ whiteSpace: "pre" }}>{"reset parameters\nctrl-click to reapply any automatic presets"}</span>}
+      extraButtons={
+        <BauhausTooltip content={<span style={{ whiteSpace: "pre" }}>{"multiple instance action\nright-click creates new instance"}</span>} placement="bottom">
+          <BauhausButton icon={<Copy size={12} />} />
+        </BauhausTooltip>
+      }
+      presetsTooltip={<span style={{ whiteSpace: "pre" }}>{"presets\nright-click to apply on new instance"}</span>}
     >
       <Suspense fallback={null}>
         <Component />

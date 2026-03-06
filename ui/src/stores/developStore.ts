@@ -4,6 +4,7 @@ import {
   developClose,
   developSetParams,
   developCommitParams,
+  developResetParams,
   developGetParams,
   developRequestPreview,
   developSamplePixels,
@@ -76,6 +77,7 @@ interface DevelopState {
   /** Full: setParams + render + frame + history + params refetch. Use on drag end. */
   setModuleParam: (op: string, params: Record<string, unknown>) => Promise<void>;
   enableModule: (op: string, enabled: boolean) => Promise<void>;
+  resetModule: (op: string) => Promise<void>;
   fetchHistory: () => Promise<void>;
   selectHistory: (historyEnd: number) => Promise<void>;
   compressHistory: () => Promise<void>;
@@ -457,6 +459,20 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().fetchHistory();
     } catch (e) {
       console.error("enable module failed:", e);
+    }
+  },
+
+  resetModule: async (op: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developResetParams(sessionId, op);
+      await get().requestPreview();
+      await get().fetchFrame();
+      await get().fetchHistory();
+      await get().fetchModuleParams(op);
+    } catch (e) {
+      console.error("reset module failed:", e);
     }
   },
 }));

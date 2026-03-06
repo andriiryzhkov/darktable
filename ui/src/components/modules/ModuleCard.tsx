@@ -18,7 +18,9 @@ interface ModuleCardProps {
   /** Extra action buttons before reset/menu */
   extraButtons?: ReactNode;
   onReset?: () => void;
+  resetTooltip?: ReactNode;
   onPresets?: () => void;
+  presetsTooltip?: ReactNode;
   wrapperRef?: React.Ref<HTMLDivElement>;
   children: ReactNode;
 }
@@ -34,7 +36,9 @@ export default function ModuleCard({
   afterTitle,
   extraButtons,
   onReset,
+  resetTooltip = "reset",
   onPresets,
+  presetsTooltip = "presets and preferences",
   wrapperRef,
   children,
 }: ModuleCardProps) {
@@ -83,15 +87,15 @@ export default function ModuleCard({
         >
           {extraButtons}
           {onReset ? (
-            <BauhausTooltip content="reset" placement="bottom">
-              <span><BauhausButton icon={<RotateCcw size={12} />} onClick={onReset} /></span>
+            <BauhausTooltip content={resetTooltip} placement="bottom">
+              <BauhausButton icon={<RotateCcw size={12} />} onClick={onReset} />
             </BauhausTooltip>
           ) : (
             <BauhausButton icon={<RotateCcw size={12} />} disabled />
           )}
           {onPresets ? (
-            <BauhausTooltip content="presets and preferences" placement="bottom">
-              <span><BauhausButton icon={<Menu size={12} />} onClick={onPresets} /></span>
+            <BauhausTooltip content={presetsTooltip} placement="bottom">
+              <BauhausButton icon={<Menu size={12} />} onClick={onPresets} />
             </BauhausTooltip>
           ) : (
             <BauhausButton icon={<Menu size={12} />} disabled />

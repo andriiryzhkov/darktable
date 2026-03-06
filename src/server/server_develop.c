@@ -1929,6 +1929,79 @@ char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_reque
   return resp;
 }
 
+char *dt_server_develop_reset_params(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op"))
+  {
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or op");
+  }
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  if(!session_id || !op)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id and op must be strings");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  // Find the module
+  dt_iop_module_t *target = NULL;
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op))
+    {
+      target = mod;
+      break;
+    }
+  }
+
+  if(!target)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  // Reset params to defaults
+  memcpy(target->params, target->default_params, target->params_size);
+
+  // Record the change to history
+  dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
+
+  // Mark pipeline dirty
+  session->dev.full.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview_pipe)
+    session->dev.preview_pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview2.pipe)
+    session->dev.preview2.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+
+  dt_dev_invalidate_all(&session->dev);
+  session->dirty = TRUE;
+
+  // Bump pipeline sequence and trigger async processing
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
+
+  fprintf(stderr, "[server] develop.reset_params: session=%s op=%s history_end=%d\n",
+          session_id, op, session->dev.history_end);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_set_member_name(b, "dirty");
+  json_builder_add_boolean_value(b, session->dirty);
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
 char *dt_server_develop_select_history(dt_server_t *server, const dt_server_request_t *req)
 {
   if(!req->params || !json_object_has_member(req->params, "session_id")

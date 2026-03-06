@@ -27,6 +27,7 @@ declare global {
     developClose: (sessionId: string) => Promise<unknown>;
     developSetParams: (sessionId: string, op: string, params: Record<string, unknown>, previewOnly?: boolean) => Promise<unknown>;
     developCommitParams: (sessionId: string, op: string) => Promise<unknown>;
+    developResetParams: (sessionId: string, op: string) => Promise<unknown>;
     developGetParams: (sessionId: string, op: string) => Promise<{ op: string; enabled: boolean; params: Record<string, unknown> }>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
     developSamplePixels: (sessionId: string, x: number, y: number, w: number, h: number) => Promise<PixelSampleResult>;
@@ -81,6 +82,9 @@ export const developSetParams = (
 
 export const developCommitParams = (sessionId: string, op: string) =>
   window.developCommitParams(sessionId, op);
+
+export const developResetParams = (sessionId: string, op: string) =>
+  window.developResetParams(sessionId, op);
 
 export const developGetParams = (sessionId: string, op: string) =>
   window.developGetParams(sessionId, op);

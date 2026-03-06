@@ -629,6 +629,31 @@ static void on_develop_commit_params(const char *id, const char *req, void *arg)
   g_free(ipc_params);
 }
 
+static void on_develop_reset_params(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developResetParams requires (sessionId, op)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  char *ipc_params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}",
+                                     session_id, op);
+  g_free(session_id);
+  g_free(op);
+
+  _ipc_passthrough(ctx, id, "develop.reset_params", ipc_params);
+  g_free(ipc_params);
+}
+
 static void on_develop_get_params(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -2094,6 +2119,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developClose", on_develop_close, ctx);
   webview_bind(ctx->webview, "developSetParams", on_develop_set_params, ctx);
   webview_bind(ctx->webview, "developCommitParams", on_develop_commit_params, ctx);
+  webview_bind(ctx->webview, "developResetParams", on_develop_reset_params, ctx);
   webview_bind(ctx->webview, "developGetParams", on_develop_get_params, ctx);
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
   webview_bind(ctx->webview, "developSamplePixels", on_develop_sample_pixels, ctx);
