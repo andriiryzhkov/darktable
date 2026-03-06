@@ -42,6 +42,10 @@ declare global {
     developApplyPreset: (sessionId: string, op: string, name: string) => Promise<unknown>;
     developStorePreset: (sessionId: string, op: string, name: string, description?: string, filters?: string) => Promise<unknown>;
     developDeletePreset: (op: string, name: string) => Promise<unknown>;
+    developNewInstance: (sessionId: string, op: string, instance?: number, copyParams?: boolean) => Promise<unknown>;
+    developDeleteInstance: (sessionId: string, op: string, instance: number) => Promise<unknown>;
+    developMoveInstance: (sessionId: string, op: string, instance: number, direction: "up" | "down") => Promise<unknown>;
+    developRenameInstance: (sessionId: string, op: string, instance: number, name: string) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     pickFolder: () => Promise<string | null>;
     listFolders: (path: string) => Promise<FolderEntry[]>;
@@ -131,6 +135,18 @@ export const developStorePreset = (sessionId: string, op: string, name: string, 
 
 export const developDeletePreset = (op: string, name: string) =>
   window.developDeletePreset(op, name);
+
+export const developNewInstance = (sessionId: string, op: string, instance?: number, copyParams?: boolean) =>
+  window.developNewInstance(sessionId, op, instance, copyParams);
+
+export const developDeleteInstance = (sessionId: string, op: string, instance: number) =>
+  window.developDeleteInstance(sessionId, op, instance);
+
+export const developMoveInstance = (sessionId: string, op: string, instance: number, direction: "up" | "down") =>
+  window.developMoveInstance(sessionId, op, instance, direction);
+
+export const developRenameInstance = (sessionId: string, op: string, instance: number, name: string) =>
+  window.developRenameInstance(sessionId, op, instance, name);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);

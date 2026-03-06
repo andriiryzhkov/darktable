@@ -7,8 +7,8 @@ import { configGet, configSet } from "../api/commands";
  */
 const accordionBus = new EventTarget();
 
-function emitAccordionOpen(group: string, op: string) {
-  accordionBus.dispatchEvent(new CustomEvent("open", { detail: { group, op } }));
+function emitAccordionOpen(group: string, moduleKey: string) {
+  accordionBus.dispatchEvent(new CustomEvent("open", { detail: { group, moduleKey } }));
 }
 
 /** Cached single_module config value */
@@ -37,10 +37,12 @@ function getSingleModule(): Promise<boolean> {
  * - single_module=TRUE: click collapses others, shift+click doesn't
  * - single_module=FALSE: click doesn't collapse, shift+click does
  */
-export function useModuleExpanded(view: string, op: string, fallback = false, accordion?: string) {
+export function useModuleExpanded(view: string, op: string, fallback = false, accordion?: string, instance = 0) {
   const [open, setOpen] = useState(fallback);
   const userToggled = useRef(false);
-  const key = `plugins/${view}/${op}/expanded`;
+  // For instance 0 keep the original key for backward compat
+  const moduleKey = instance > 0 ? `${op}_${instance}` : op;
+  const key = `plugins/${view}/${moduleKey}/expanded`;
 
   useEffect(() => {
     userToggled.current = false;
@@ -57,15 +59,15 @@ export function useModuleExpanded(view: string, op: string, fallback = false, ac
   useEffect(() => {
     if (!accordion) return;
     const handler = (e: Event) => {
-      const { group, op: openedOp } = (e as CustomEvent).detail;
-      if (group === accordion && openedOp !== op) {
+      const { group, moduleKey: openedKey } = (e as CustomEvent).detail;
+      if (group === accordion && openedKey !== moduleKey) {
         setOpen(false);
         configSet(key, "FALSE").catch(() => {});
       }
     };
     accordionBus.addEventListener("open", handler);
     return () => accordionBus.removeEventListener("open", handler);
-  }, [accordion, op, view]);
+  }, [accordion, moduleKey, key]);
 
   const toggle = useCallback(
     (next: boolean, shiftKey = false) => {
@@ -77,12 +79,12 @@ export function useModuleExpanded(view: string, op: string, fallback = false, ac
         getSingleModule().then((singleModule) => {
           const collapseOthers = singleModule !== shiftKey;
           if (collapseOthers) {
-            emitAccordionOpen(accordion, op);
+            emitAccordionOpen(accordion, moduleKey);
           }
         });
       }
     },
-    [key, accordion, op],
+    [key, accordion, moduleKey],
   );
 
   return { open, setOpen: toggle } as const;

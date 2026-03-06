@@ -4,7 +4,7 @@ import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
 
 interface ModuleCardProps {
-  title: string;
+  title: ReactNode;
   tooltip?: ReactNode;
   open?: boolean;
   defaultOpen?: boolean;

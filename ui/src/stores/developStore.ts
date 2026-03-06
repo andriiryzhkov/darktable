@@ -18,6 +18,10 @@ import {
   developApplyPreset,
   developStorePreset,
   developDeletePreset,
+  developNewInstance,
+  developDeleteInstance,
+  developMoveInstance,
+  developRenameInstance,
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
@@ -96,6 +100,10 @@ interface DevelopState {
   applyPreset: (op: string, name: string) => Promise<void>;
   storePreset: (op: string, name: string, description?: string, filters?: import("../components/modules/StorePresetDialog").PresetFilterParams) => Promise<void>;
   removePreset: (op: string, name: string) => Promise<void>;
+  newInstance: (op: string, instance?: number, copyParams?: boolean) => Promise<void>;
+  deleteInstance: (op: string, instance: number) => Promise<void>;
+  moveInstance: (op: string, instance: number, direction: "up" | "down") => Promise<void>;
+  renameInstance: (op: string, instance: number, name: string) => Promise<void>;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -533,6 +541,89 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await developDeletePreset(op, name);
     } catch (e) {
       console.error("delete preset failed:", e);
+    }
+  },
+
+  newInstance: async (op: string, instance?: number, copyParams?: boolean) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developNewInstance(sessionId, op, instance, copyParams);
+      await get().requestPreview();
+      await Promise.all([
+        get().fetchFrame(),
+        get().fetchHistory(),
+        developGetModules(sessionId).then((res) => {
+          const descs: Record<string, ModuleDescription> = {};
+          for (const m of res.modules) {
+            if (m.description) descs[m.op] = m.description;
+          }
+          set({ modules: res.modules, moduleDescriptions: descs });
+        }),
+      ]);
+    } catch (e) {
+      console.error("new instance failed:", e);
+    }
+  },
+
+  deleteInstance: async (op: string, instance: number) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developDeleteInstance(sessionId, op, instance);
+      await get().requestPreview();
+      await Promise.all([
+        get().fetchFrame(),
+        get().fetchHistory(),
+        developGetModules(sessionId).then((res) => {
+          const descs: Record<string, ModuleDescription> = {};
+          for (const m of res.modules) {
+            if (m.description) descs[m.op] = m.description;
+          }
+          set({ modules: res.modules, moduleDescriptions: descs });
+        }),
+      ]);
+    } catch (e) {
+      console.error("delete instance failed:", e);
+    }
+  },
+
+  moveInstance: async (op: string, instance: number, direction: "up" | "down") => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developMoveInstance(sessionId, op, instance, direction);
+      await get().requestPreview();
+      await Promise.all([
+        get().fetchFrame(),
+        get().fetchHistory(),
+        developGetModules(sessionId).then((res) => {
+          const descs: Record<string, ModuleDescription> = {};
+          for (const m of res.modules) {
+            if (m.description) descs[m.op] = m.description;
+          }
+          set({ modules: res.modules, moduleDescriptions: descs });
+        }),
+      ]);
+    } catch (e) {
+      console.error("move instance failed:", e);
+    }
+  },
+
+  renameInstance: async (op: string, instance: number, name: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developRenameInstance(sessionId, op, instance, name);
+      await developGetModules(sessionId).then((res) => {
+        const descs: Record<string, ModuleDescription> = {};
+        for (const m of res.modules) {
+          if (m.description) descs[m.op] = m.description;
+        }
+        set({ modules: res.modules, moduleDescriptions: descs });
+      });
+    } catch (e) {
+      console.error("rename instance failed:", e);
     }
   },
 }));

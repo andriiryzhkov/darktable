@@ -210,6 +210,7 @@ body {
 }
 
 .module-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -317,6 +318,27 @@ body {
   padding: 3px 6px;
   background: #c03030;
   border-radius: 2px;
+}
+
+.module-instance-name {
+  opacity: 0.55;
+  font-size: 0.85em;
+}
+
+.rename-instance-input {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: var(--plugin-bg-color);
+  color: var(--fg-color);
+  border: none;
+  border-radius: 2px;
+  font-size: 0.75rem;
+  font-family: inherit;
+  padding: 2px 4px;
+  outline: none;
+  z-index: 1;
 }
 
 .module-trouble-icon {
@@ -3056,6 +3078,11 @@ body {
 .preset-menu-item:hover {
   color: var(--fg-color);
   background-color: var(--bauhaus-indicator);
+}
+
+.preset-menu-item.disabled {
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 .preset-menu-item[data-active="true"] {

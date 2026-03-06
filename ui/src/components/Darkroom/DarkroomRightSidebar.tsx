@@ -13,6 +13,8 @@ import ScopeWidget from "./ScopeWidget";
 import BauhausTooltip from "../controls/BauhausTooltip";
 import { useDevelopStore } from "../../stores/developStore";
 
+
+
 function getPreset(name: string): ModuleGroupPreset {
   return MODULE_GROUP_PRESETS.find((p) => p.name === name) ?? MODULE_GROUP_PRESETS[0];
 }
@@ -29,6 +31,7 @@ export default function DarkroomRightSidebar() {
   const popupRef = useRef<HTMLDivElement>(null);
   const [popupPos, setPopupPos] = useState({ top: 0, left: 0, minWidth: 0 });
   const historyItems = useDevelopStore((s) => s.historyItems);
+  const serverModules = useDevelopStore((s) => s.modules);
   const focusModuleOp = useDevelopStore((s) => s.focusModuleOp);
 
   // React to focusModuleOp: switch to active tab so the module is visible
@@ -173,12 +176,29 @@ export default function DarkroomRightSidebar() {
       {/* Module list */}
       <div className="flex-1 overflow-y-scroll">
         <Suspense fallback={null}>
-          {filteredModules.map((mod) => (
-            <IopModuleCard
-              key={mod.op}
-              module={mod}
-            />
-          ))}
+          {filteredModules.flatMap((mod) => {
+            // Find all server instances for this op
+            const instances = serverModules.filter((m) => m.op === mod.op);
+            if (instances.length <= 1) {
+              // Single instance (or no server data yet) — render normally
+              return (
+                <IopModuleCard
+                  key={mod.op}
+                  module={mod}
+                  instance={instances[0]?.instance}
+                />
+              );
+            }
+            // Multiple instances — render one card per instance, higher iop_order first (top of sidebar)
+            return [...instances].sort((a, b) => b.iop_order - a.iop_order).map((inst) => (
+              <IopModuleCard
+                key={`${mod.op}_${inst.instance}`}
+                module={mod}
+                instance={inst.instance}
+                instanceName={inst.multi_name}
+              />
+            ));
+          })}
         </Suspense>
         {filteredModules.length === 0 && activeTab !== "quick" && (
           <p

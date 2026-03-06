@@ -1068,6 +1068,121 @@ static void on_develop_delete_preset(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+static void on_develop_new_instance(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developNewInstance requires (sessionId, op, [instance], [copyParams])");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  const int instance = json_array_get_length(args) > 2
+    ? (int)json_array_get_int_element(args, 2) : 0;
+  const gboolean copy_params = json_array_get_length(args) > 3
+    && json_array_get_boolean_element(args, 3);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf(
+    "{\"session_id\":\"%s\",\"op\":\"%s\",\"instance\":%d,\"copy_params\":%s}",
+    session_id, op, instance, copy_params ? "true" : "false");
+  g_free(session_id);
+  g_free(op);
+
+  _ipc_passthrough(ctx, id, "develop.new_instance", params);
+  g_free(params);
+}
+
+static void on_develop_delete_instance(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 3)
+  {
+    _return_error(ctx, id, "developDeleteInstance requires (sessionId, op, instance)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  const int instance = (int)json_array_get_int_element(args, 2);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf(
+    "{\"session_id\":\"%s\",\"op\":\"%s\",\"instance\":%d}",
+    session_id, op, instance);
+  g_free(session_id);
+  g_free(op);
+
+  _ipc_passthrough(ctx, id, "develop.delete_instance", params);
+  g_free(params);
+}
+
+static void on_develop_move_instance(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 4)
+  {
+    _return_error(ctx, id, "developMoveInstance requires (sessionId, op, instance, direction)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  const int instance = (int)json_array_get_int_element(args, 2);
+  char *direction = _get_string_arg(args, 3);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf(
+    "{\"session_id\":\"%s\",\"op\":\"%s\",\"instance\":%d,\"direction\":\"%s\"}",
+    session_id, op, instance, direction);
+  g_free(session_id);
+  g_free(op);
+  g_free(direction);
+
+  _ipc_passthrough(ctx, id, "develop.move_instance", params);
+  g_free(params);
+}
+
+static void on_develop_rename_instance(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 4)
+  {
+    _return_error(ctx, id, "developRenameInstance requires (sessionId, op, instance, name)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  const int instance = (int)json_array_get_int_element(args, 2);
+  char *name = _get_string_arg(args, 3);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf(
+    "{\"session_id\":\"%s\",\"op\":\"%s\",\"instance\":%d,\"name\":\"%s\"}",
+    session_id, op, instance, name);
+  g_free(session_id);
+  g_free(op);
+  g_free(name);
+
+  _ipc_passthrough(ctx, id, "develop.rename_instance", params);
+  g_free(params);
+}
+
 /* getPreviewFrame: reads pixels directly from SHM, no IPC */
 
 /* Minimal memory-to-memory JPEG compressor using libjpeg.
@@ -2384,6 +2499,10 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developApplyPreset", on_develop_apply_preset, ctx);
   webview_bind(ctx->webview, "developStorePreset", on_develop_store_preset, ctx);
   webview_bind(ctx->webview, "developDeletePreset", on_develop_delete_preset, ctx);
+  webview_bind(ctx->webview, "developNewInstance", on_develop_new_instance, ctx);
+  webview_bind(ctx->webview, "developDeleteInstance", on_develop_delete_instance, ctx);
+  webview_bind(ctx->webview, "developMoveInstance", on_develop_move_instance, ctx);
+  webview_bind(ctx->webview, "developRenameInstance", on_develop_rename_instance, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);
   webview_bind(ctx->webview, "listFolders", on_list_folders, ctx);

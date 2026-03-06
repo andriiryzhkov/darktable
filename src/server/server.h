@@ -129,6 +129,10 @@ char *dt_server_develop_list_presets(dt_server_t *server, const dt_server_reques
 char *dt_server_develop_apply_preset(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_store_preset(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_delete_preset(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_new_instance(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_delete_instance(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_move_instance(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_rename_instance(dt_server_t *server, const dt_server_request_t *req);
 
 // Export handlers (dt_server_export.c)
 char *dt_server_export_image(dt_server_t *server, const dt_server_request_t *req);

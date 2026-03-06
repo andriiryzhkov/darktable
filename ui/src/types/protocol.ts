@@ -101,10 +101,17 @@ export interface ModuleInfo {
   name: string;
   enabled: boolean;
   instance: number;
+  multi_name: string;
+  flags: number;
   iop_order: number;
   params_size: number;
   description?: ModuleDescription;
 }
+
+/** IOP module flags from dt_iop_flags_t */
+export const IOP_FLAGS = {
+  ONE_INSTANCE: 1 << 7,
+} as const;
 
 export interface HistoryItem {
   num: number;

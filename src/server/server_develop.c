@@ -554,7 +554,11 @@ char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *re
   if(!session)
     return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
 
-  fprintf(stderr, "[server] develop.close: session=%s\n", session_id);
+  fprintf(stderr, "[server] develop.close: session=%s dirty=%d\n", session_id, session->dirty);
+
+  // Write in-memory history to DB before closing
+  if(session->dirty)
+    dt_dev_write_history(&session->dev);
 
   // Destroy SHM buffers
   dt_shm_destroy(&session->shm_buffers[0]);
@@ -630,6 +634,22 @@ char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request
 
     json_builder_set_member_name(b, "instance");
     json_builder_add_int_value(b, mod->multi_priority);
+
+    json_builder_set_member_name(b, "multi_name");
+    {
+      const char *mname = mod->multi_name;
+      // Skip _builtin_ prefix
+      if(g_str_has_prefix(mname, "_builtin_"))
+        mname += strlen("_builtin_");
+      // Skip default "0" name
+      if(mname[0] && strcmp(mname, "0") != 0)
+        json_builder_add_string_value(b, mname);
+      else
+        json_builder_add_string_value(b, "");
+    }
+
+    json_builder_set_member_name(b, "flags");
+    json_builder_add_int_value(b, mod->flags());
 
     json_builder_set_member_name(b, "iop_order");
     json_builder_add_double_value(b, mod->iop_order);
@@ -2699,6 +2719,313 @@ char *dt_server_develop_store_preset(dt_server_t *server, const dt_server_reques
   json_node_unref(result);
   g_object_unref(b);
   return resp;
+}
+
+// ---- Multi-instance helpers ----
+
+/** Find a module by op + multi_priority (instance) */
+static dt_iop_module_t *_find_module(dt_server_session_t *session, const char *op, int instance)
+{
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op) && mod->multi_priority == instance)
+      return mod;
+  }
+  return NULL;
+}
+
+/** Count instances sharing the same base module (by instance pointer) */
+static int _count_instances(dt_develop_t *dev, dt_iop_module_t *module)
+{
+  int count = 0;
+  for(GList *modules = dev->iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(mod->instance == module->instance) count++;
+  }
+  return count;
+}
+
+/** Get previous module in iop list order (for move down) */
+static dt_iop_module_t *_get_prev_module(dt_develop_t *dev, dt_iop_module_t *module)
+{
+  dt_iop_module_t *prev = NULL;
+  for(GList *modules = dev->iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(mod == module) break;
+    prev = mod;
+  }
+  return prev;
+}
+
+/** Get next module in iop list order (for move up) */
+static dt_iop_module_t *_get_next_module(dt_develop_t *dev, dt_iop_module_t *module)
+{
+  gboolean found = FALSE;
+  for(GList *modules = dev->iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(found) return mod;
+    if(mod == module) found = TRUE;
+  }
+  return NULL;
+}
+
+/** Build a JSON ok response with updated modules list */
+static char *_make_modules_response(dt_server_t *server, dt_server_session_t *session,
+                                    const dt_server_request_t *req)
+{
+  // Trigger pipeline rebuild
+  session->dev.full.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview_pipe)
+    session->dev.preview_pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview2.pipe)
+    session->dev.preview2.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+
+  dt_dev_invalidate_all(&session->dev);
+  session->dirty = TRUE;
+
+  // Persist history to database
+  dt_dev_write_history(&session->dev);
+
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+// ---- develop.new_instance / develop.duplicate_instance ----
+
+char *dt_server_develop_new_instance(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id or op");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const int instance = json_object_has_member(req->params, "instance")
+    ? (int)json_object_get_int_member(req->params, "instance") : 0;
+  const gboolean copy_params = json_object_has_member(req->params, "copy_params")
+    && json_object_get_boolean_member(req->params, "copy_params");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *base = _find_module(session, op, instance);
+  if(!base)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  if(base->flags() & IOP_FLAGS_ONE_INSTANCE)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Module does not support multiple instances");
+
+  // Ensure base has a history entry before duplicating
+  dt_dev_add_history_item_ext(&session->dev, base, base->enabled, TRUE);
+
+  // Create the new module instance
+  dt_iop_module_t *module = dt_dev_module_duplicate(&session->dev, base);
+  if(!module)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Failed to create module instance");
+
+  if(copy_params)
+  {
+    // Duplicate: copy params and enabled state from base
+    memcpy(module->params, base->params, module->params_size);
+    module->enabled = base->enabled;
+    if(module->flags() & IOP_FLAGS_SUPPORTS_BLENDING)
+    {
+      dt_iop_commit_blend_params(module, base->blend_params);
+      if(dt_is_valid_maskid(base->blend_params->mask_id))
+      {
+        module->blend_params->mask_id = NO_MASKID;
+      }
+    }
+  }
+  else
+  {
+    // New instance: enable by default
+    module->enabled = TRUE;
+  }
+
+  // Save the new instance creation to history
+  dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
+
+  fprintf(stderr, "[server] develop.new_instance: op=%s instance=%d copy=%d new_instance=%d\n",
+          op, instance, copy_params, module->multi_priority);
+
+  return _make_modules_response(server, session, req);
+}
+
+// ---- develop.delete_instance ----
+
+char *dt_server_develop_delete_instance(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "instance"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id, op, or instance");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const int instance = (int)json_object_get_int_member(req->params, "instance");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *module = _find_module(session, op, instance);
+  if(!module)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  const int nb_instances = _count_instances(&session->dev, module);
+  if(nb_instances <= 1)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Cannot delete the only instance");
+
+  // Remember if this was priority 0
+  const gboolean is_zero = (module->multi_priority == 0);
+
+  // Remove from history and iop list
+  dt_dev_module_remove(&session->dev, module);
+
+  // If deleted module was priority 0, reassign priority 0 to another instance
+  if(is_zero)
+  {
+    dt_iop_module_t *first = NULL;
+    for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+    {
+      dt_iop_module_t *mod = modules->data;
+      if(mod->instance == module->instance)
+      {
+        first = mod;
+        break;
+      }
+    }
+    if(first)
+    {
+      dt_iop_update_multi_priority(first, 0);
+      // Update in history too
+      for(GList *history = session->dev.history; history; history = g_list_next(history))
+      {
+        dt_dev_history_item_t *hist = history->data;
+        if(hist->module == first) hist->multi_priority = 0;
+      }
+    }
+  }
+
+  // Don't free the module — pipeline may still reference it
+  session->dev.alliop = g_list_append(session->dev.alliop, module);
+
+  fprintf(stderr, "[server] develop.delete_instance: op=%s instance=%d\n", op, instance);
+
+  return _make_modules_response(server, session, req);
+}
+
+// ---- develop.move_instance ----
+
+char *dt_server_develop_move_instance(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "instance")
+     || !json_object_has_member(req->params, "direction"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, op, instance, or direction");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const int instance = (int)json_object_get_int_member(req->params, "instance");
+  const char *direction = json_object_get_string_member(req->params, "direction");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *module = _find_module(session, op, instance);
+  if(!module)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  int moved = 0;
+  if(!strcmp(direction, "up"))
+  {
+    dt_iop_module_t *next = _get_next_module(&session->dev, module);
+    if(next)
+    {
+      moved = dt_ioppr_move_iop_after(&session->dev, module, next);
+    }
+  }
+  else if(!strcmp(direction, "down"))
+  {
+    dt_iop_module_t *prev = _get_prev_module(&session->dev, module);
+    if(prev)
+    {
+      moved = dt_ioppr_move_iop_before(&session->dev, module, prev);
+    }
+  }
+  else
+  {
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "direction must be 'up' or 'down'");
+  }
+
+  if(!moved)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Cannot move module in that direction");
+
+  dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
+
+  fprintf(stderr, "[server] develop.move_instance: op=%s instance=%d direction=%s\n",
+          op, instance, direction);
+
+  return _make_modules_response(server, session, req);
+}
+
+// ---- develop.rename_instance ----
+
+char *dt_server_develop_rename_instance(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "instance")
+     || !json_object_has_member(req->params, "name"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, op, instance, or name");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const int instance = (int)json_object_get_int_member(req->params, "instance");
+  const char *name = json_object_get_string_member(req->params, "name");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *module = _find_module(session, op, instance);
+  if(!module)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  g_strlcpy(module->multi_name, name, sizeof(module->multi_name));
+  module->multi_name_hand_edited = TRUE;
+
+  dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
+
+  fprintf(stderr, "[server] develop.rename_instance: op=%s instance=%d name='%s'\n",
+          op, instance, name);
+
+  return _make_modules_response(server, session, req);
 }
 
 char *dt_server_develop_delete_preset(dt_server_t *server, const dt_server_request_t *req)
