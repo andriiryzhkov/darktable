@@ -857,6 +857,24 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+.bauhaus-tooltip-trigger {
+  display: inline-flex;
+}
+
+.bauhaus-tooltip {
+  position: fixed;
+  z-index: 10001;
+  background-color: var(--bauhaus-bg);
+  border-radius: 4px;
+  padding: 4px 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  white-space: pre-line;
+  pointer-events: none;
+  max-width: 280px;
+}
+
 .bauhaus-combo-popup-row {
   display: flex;
   align-items: baseline;
