@@ -2,7 +2,7 @@ import CollapsibleModule from "../CollapsibleModule";
 
 export default function TaggingModule() {
   return (
-    <CollapsibleModule title="tagging">
+    <CollapsibleModule title="tagging" description="add or remove keywords for the currently selected images">
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         attach / detach tags to selected images
       </p>

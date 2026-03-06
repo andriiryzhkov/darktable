@@ -879,7 +879,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  white-space: normal;
+  white-space: pre-line;
   width: 300px;
 }
 

@@ -10,7 +10,7 @@ export default function ExportModule() {
   const [quality, setQuality] = useState(95);
 
   return (
-    <CollapsibleModule title="export" defaultOpen>
+    <CollapsibleModule title="export" description="create new files for the currently selected images which apply your edits" defaultOpen>
       <div className="space-y-1">
         <BauhausCombo label="target storage" options={["file on disk"]} />
         <BauhausRow label="">

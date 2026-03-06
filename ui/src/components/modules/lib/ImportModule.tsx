@@ -9,7 +9,7 @@ export default function ImportModule() {
   const openDialog = useImportStore((s) => s.openDialog);
 
   return (
-    <CollapsibleModule title="import" defaultOpen>
+    <CollapsibleModule title="import" description="add images to the library or copy and import from external locations" defaultOpen>
       <div className="space-y-1">
         <div className="bauhaus-button-row">
           <BauhausButton label="add to library..." onClick={() => openDialog("inplace")} />

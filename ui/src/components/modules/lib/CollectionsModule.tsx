@@ -221,7 +221,7 @@ export default function CollectionsModule() {
 
   return (
     <>
-    <CollapsibleModule title="collections" defaultOpen onReset={() => { clearRules(); setActiveRuleId(null); }}>
+    <CollapsibleModule title="collections" description="define search criteria for images to be displayed or edited" defaultOpen onReset={() => { clearRules(); setActiveRuleId(null); }}>
       <div className="collection-rules">
         {/* Rule rows */}
         {rules.map((rule, index) => (

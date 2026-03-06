@@ -259,7 +259,7 @@ export default function ImageInfoModule() {
     : null;
 
   return (
-    <CollapsibleModule title="image information" defaultOpen>
+    <CollapsibleModule title="image information" description="display camera and image metadata for the selected image" defaultOpen>
       {selected ? (
         <>
           <ExifBar image={selected} />
