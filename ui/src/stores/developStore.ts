@@ -182,6 +182,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       // Start history + module params fetch in parallel with preview render
       const metadataPromise = Promise.all([
         get().fetchHistory(),
+        get().fetchModuleParams("temperature"),
         get().fetchModuleParams("exposure"),
         get().fetchModuleParams("sigmoid"),
         get().fetchModuleParams("demosaic"),

@@ -13,8 +13,8 @@ function useModuleTrouble(op: string): string | null {
   if (op === "temperature") {
     const tempEnabled = enabledOps.has("temperature");
     const colorCalEnabled = enabledOps.has("channelmixerrgb");
-    const preset = temperatureParams?.preset;
-    const isD65 = preset === 3 || preset === 4;
+    if (!temperatureParams) return null; // params not loaded yet
+    const isD65 = temperatureParams.preset === 3 || temperatureParams.preset === 4;
     if (tempEnabled && colorCalEnabled && !isD65) return "white balance applied twice";
   }
 
