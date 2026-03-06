@@ -1278,20 +1278,11 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   }
   else if(!strcmp(op, "temperature"))
   {
-    const _server_temperature_params_t *p = (const _server_temperature_params_t *)target->params;
-    json_builder_set_member_name(b, "red");
-    json_builder_add_double_value(b, p->red);
-    json_builder_set_member_name(b, "green");
-    json_builder_add_double_value(b, p->green);
-    json_builder_set_member_name(b, "blue");
-    json_builder_add_double_value(b, p->blue);
-    json_builder_set_member_name(b, "various");
-    json_builder_add_double_value(b, p->various);
-    json_builder_set_member_name(b, "preset");
-    json_builder_add_int_value(b, p->preset);
+    // Use introspection for base params (red, green, blue, various, preset)
+    _introspection_serialize_params(b, target);
 
     // Compute temperature and tint from coefficients using camera color matrix
-    // Uses exact same method as darktable's _mul2temp (coeffs → XYZ → binary search)
+    const _server_temperature_params_t *p = (const _server_temperature_params_t *)target->params;
     {
       float d65_cm[9];
       memcpy(d65_cm, session->dev.image_storage.d65_color_matrix, sizeof(d65_cm));
@@ -1300,7 +1291,6 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
           session->dev.image_storage.adobe_XYZ_to_CAM, d65_cm,
           XYZ_to_CAM, CAM_to_XYZ))
       {
-        // Invert coefficients: camera multipliers → XYZ (same as _mul2xyz)
         double CAM[4] = {
           p->red > 0.0f ? 1.0 / p->red : 0.0,
           p->green > 0.0f ? 1.0 / p->green : 0.0,
@@ -1326,52 +1316,20 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
       }
     }
   }
-  else if(!strcmp(op, "rawprepare"))
-  {
-    const _server_rawprepare_params_t *p = (const _server_rawprepare_params_t *)target->params;
-    json_builder_set_member_name(b, "raw_black_level_separate");
-    json_builder_begin_array(b);
-    for(int i = 0; i < 4; i++)
-      json_builder_add_int_value(b, p->raw_black_level_separate[i]);
-    json_builder_end_array(b);
-    json_builder_set_member_name(b, "raw_white_point");
-    json_builder_add_int_value(b, p->raw_white_point);
-    json_builder_set_member_name(b, "flat_field");
-    json_builder_add_int_value(b, (int)p->flat_field);
-    json_builder_set_member_name(b, "left");
-    json_builder_add_int_value(b, p->left);
-    json_builder_set_member_name(b, "top");
-    json_builder_add_int_value(b, p->top);
-    json_builder_set_member_name(b, "right");
-    json_builder_add_int_value(b, p->right);
-    json_builder_set_member_name(b, "bottom");
-    json_builder_add_int_value(b, p->bottom);
-  }
   else if(!strcmp(op, "colorin"))
   {
+    // Use introspection for base params
+    _introspection_serialize_params(b, target);
+
     const _server_colorin_params_t *p = (const _server_colorin_params_t *)target->params;
 
-    // Current params
-    json_builder_set_member_name(b, "type");
-    json_builder_add_int_value(b, (int)p->type);
-    json_builder_set_member_name(b, "filename");
-    json_builder_add_string_value(b, p->filename);
-    json_builder_set_member_name(b, "intent");
-    json_builder_add_int_value(b, (int)p->intent);
-    json_builder_set_member_name(b, "normalize");
-    json_builder_add_int_value(b, (int)p->normalize);
-    json_builder_set_member_name(b, "type_work");
-    json_builder_add_int_value(b, (int)p->type_work);
-    json_builder_set_member_name(b, "filename_work");
-    json_builder_add_string_value(b, p->filename_work);
-
-    // Current profile display names
+    // Computed: current profile display names
     json_builder_set_member_name(b, "input_profile_name");
     json_builder_add_string_value(b, dt_colorspaces_get_name(p->type, p->filename));
     json_builder_set_member_name(b, "work_profile_name");
     json_builder_add_string_value(b, dt_colorspaces_get_name(p->type_work, p->filename_work));
 
-    // Build available input profiles list (system profiles with in_pos)
+    // Computed: available input profiles list
     json_builder_set_member_name(b, "input_profiles");
     json_builder_begin_array(b);
     for(GList *l = darktable.color_profiles->profiles; l; l = g_list_next(l))
@@ -1391,7 +1349,7 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
     }
     json_builder_end_array(b);
 
-    // Build available working profiles list
+    // Computed: available working profiles list
     json_builder_set_member_name(b, "work_profiles");
     json_builder_begin_array(b);
     for(GList *l = darktable.color_profiles->profiles; l; l = g_list_next(l))
@@ -1413,20 +1371,16 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   }
   else if(!strcmp(op, "colorout"))
   {
+    // Use introspection for base params
+    _introspection_serialize_params(b, target);
+
     const _server_colorout_params_t *p = (const _server_colorout_params_t *)target->params;
 
-    json_builder_set_member_name(b, "type");
-    json_builder_add_int_value(b, (int)p->type);
-    json_builder_set_member_name(b, "filename");
-    json_builder_add_string_value(b, p->filename);
-    json_builder_set_member_name(b, "intent");
-    json_builder_add_int_value(b, (int)p->intent);
-
-    // Current profile display name
+    // Computed: current profile display name
     json_builder_set_member_name(b, "output_profile_name");
     json_builder_add_string_value(b, dt_colorspaces_get_name(p->type, p->filename));
 
-    // Available output profiles
+    // Computed: available output profiles
     json_builder_set_member_name(b, "output_profiles");
     json_builder_begin_array(b);
     for(GList *l = darktable.color_profiles->profiles; l; l = g_list_next(l))
@@ -1448,33 +1402,10 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   }
   else if(!strcmp(op, "demosaic"))
   {
-    const _server_demosaic_params_t *p = (const _server_demosaic_params_t *)target->params;
-    json_builder_set_member_name(b, "demosaicing_method");
-    json_builder_add_int_value(b, (int)p->demosaicing_method);
-    json_builder_set_member_name(b, "green_eq");
-    json_builder_add_int_value(b, (int)p->green_eq);
-    json_builder_set_member_name(b, "median_thrs");
-    json_builder_add_double_value(b, p->median_thrs);
-    json_builder_set_member_name(b, "color_smoothing");
-    json_builder_add_int_value(b, (int)p->color_smoothing);
-    json_builder_set_member_name(b, "lmmse_refine");
-    json_builder_add_int_value(b, (int)p->lmmse_refine);
-    json_builder_set_member_name(b, "dual_thrs");
-    json_builder_add_double_value(b, p->dual_thrs);
-    json_builder_set_member_name(b, "cs_enabled");
-    json_builder_add_boolean_value(b, p->cs_enabled);
-    json_builder_set_member_name(b, "cs_radius");
-    json_builder_add_double_value(b, p->cs_radius);
-    json_builder_set_member_name(b, "cs_thrs");
-    json_builder_add_double_value(b, p->cs_thrs);
-    json_builder_set_member_name(b, "cs_boost");
-    json_builder_add_double_value(b, p->cs_boost);
-    json_builder_set_member_name(b, "cs_iter");
-    json_builder_add_int_value(b, p->cs_iter);
-    json_builder_set_member_name(b, "cs_center");
-    json_builder_add_double_value(b, p->cs_center);
+    // Use introspection for base params
+    _introspection_serialize_params(b, target);
 
-    // Include sensor type so UI can show appropriate method options
+    // Computed: sensor type for UI method filtering
     const dt_image_t *img = &session->dev.image_storage;
     const gboolean is_xtrans = img->buf_dsc.filters == 9u;
     const gboolean is_bayer4 = img->flags & DT_IMAGE_4BAYER;
@@ -1482,38 +1413,6 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
     const char *sensor_type = is_mono ? "mono" : is_xtrans ? "xtrans" : is_bayer4 ? "bayer4" : "bayer";
     json_builder_set_member_name(b, "sensor_type");
     json_builder_add_string_value(b, sensor_type);
-  }
-  else if(!strcmp(op, "sigmoid"))
-  {
-    const _server_sigmoid_params_t *p = (const _server_sigmoid_params_t *)target->params;
-    json_builder_set_member_name(b, "middle_grey_contrast");
-    json_builder_add_double_value(b, p->middle_grey_contrast);
-    json_builder_set_member_name(b, "contrast_skewness");
-    json_builder_add_double_value(b, p->contrast_skewness);
-    json_builder_set_member_name(b, "color_processing");
-    json_builder_add_int_value(b, (int)p->color_processing);
-    json_builder_set_member_name(b, "hue_preservation");
-    json_builder_add_double_value(b, p->hue_preservation);
-    json_builder_set_member_name(b, "display_white_target");
-    json_builder_add_double_value(b, p->display_white_target);
-    json_builder_set_member_name(b, "display_black_target");
-    json_builder_add_double_value(b, p->display_black_target);
-    json_builder_set_member_name(b, "base_primaries");
-    json_builder_add_int_value(b, p->base_primaries);
-    json_builder_set_member_name(b, "red_inset");
-    json_builder_add_double_value(b, p->red_inset);
-    json_builder_set_member_name(b, "red_rotation");
-    json_builder_add_double_value(b, p->red_rotation);
-    json_builder_set_member_name(b, "green_inset");
-    json_builder_add_double_value(b, p->green_inset);
-    json_builder_set_member_name(b, "green_rotation");
-    json_builder_add_double_value(b, p->green_rotation);
-    json_builder_set_member_name(b, "blue_inset");
-    json_builder_add_double_value(b, p->blue_inset);
-    json_builder_set_member_name(b, "blue_rotation");
-    json_builder_add_double_value(b, p->blue_rotation);
-    json_builder_set_member_name(b, "purity");
-    json_builder_add_double_value(b, p->purity);
   }
   else if(target->so->have_introspection && _introspection_serialize_params(b, target))
   {
@@ -1739,22 +1638,15 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   }
   else if(!strcmp(op, "temperature"))
   {
+    // Use introspection for basic field writes (red, green, blue, various, preset)
+    _introspection_deserialize_params(target, new_params);
+
     _server_temperature_params_t *p = (_server_temperature_params_t *)target->params;
 
-    if(json_object_has_member(new_params, "red"))
-      p->red = (float)json_object_get_double_member(new_params, "red");
-    if(json_object_has_member(new_params, "green"))
-      p->green = (float)json_object_get_double_member(new_params, "green");
-    if(json_object_has_member(new_params, "blue"))
-      p->blue = (float)json_object_get_double_member(new_params, "blue");
-    if(json_object_has_member(new_params, "various"))
-      p->various = (float)json_object_get_double_member(new_params, "various");
+    // Post-processing: when preset changes, override coefficients from dev->chroma
     if(json_object_has_member(new_params, "preset"))
     {
-      const int preset = (int)json_object_get_int_member(new_params, "preset");
-      p->preset = preset;
-
-      // When preset changes, load corresponding coefficients from dev->chroma
+      const int preset = p->preset;
       const dt_dev_chroma_t *chr = &session->dev.chroma;
       switch(preset)
       {
@@ -1781,7 +1673,7 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
     // Handle temperature_k and/or tint: convert to RGB coefficients
     if(json_object_has_member(new_params, "temperature_k") || json_object_has_member(new_params, "tint"))
     {
-      // Recover current temp/tint from coefficients using binary search (same as get_params)
+      // Recover current temp/tint from coefficients using binary search
       double cur_temp_k = 5000.0, cur_tint = 1.0;
       {
         float d65_cm[9];
@@ -1828,7 +1720,6 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
         p->red     = (float)mul[0];
         p->green   = (float)mul[1];
         p->blue    = (float)mul[2];
-        // Only update 4th channel if sensor uses it (non-zero original value)
         if(p->various > 0.0f && isfinite(mul[3]) && mul[3] > 0.0)
           p->various = (float)mul[3];
         p->preset  = 2; // DT_IOP_TEMP_USER — user modified
@@ -1839,29 +1730,6 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
                 new_temp_k, new_tint);
       }
     }
-  }
-  else if(!strcmp(op, "rawprepare"))
-  {
-    _server_rawprepare_params_t *p = (_server_rawprepare_params_t *)target->params;
-
-    if(json_object_has_member(new_params, "raw_black_level_separate"))
-    {
-      JsonArray *arr = json_object_get_array_member(new_params, "raw_black_level_separate");
-      for(int i = 0; i < 4 && i < (int)json_array_get_length(arr); i++)
-        p->raw_black_level_separate[i] = (uint16_t)json_array_get_int_element(arr, i);
-    }
-    if(json_object_has_member(new_params, "raw_white_point"))
-      p->raw_white_point = (uint16_t)json_object_get_int_member(new_params, "raw_white_point");
-    if(json_object_has_member(new_params, "flat_field"))
-      p->flat_field = (_server_rawprepare_flat_field_t)json_object_get_int_member(new_params, "flat_field");
-    if(json_object_has_member(new_params, "left"))
-      p->left = (int32_t)json_object_get_int_member(new_params, "left");
-    if(json_object_has_member(new_params, "top"))
-      p->top = (int32_t)json_object_get_int_member(new_params, "top");
-    if(json_object_has_member(new_params, "right"))
-      p->right = (int32_t)json_object_get_int_member(new_params, "right");
-    if(json_object_has_member(new_params, "bottom"))
-      p->bottom = (int32_t)json_object_get_int_member(new_params, "bottom");
   }
   else if(!strcmp(op, "colorin"))
   {
@@ -1890,68 +1758,6 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
       g_strlcpy(p->filename, json_object_get_string_member(new_params, "filename"), _SERVER_IOP_COLOR_ICC_LEN);
     if(json_object_has_member(new_params, "intent"))
       p->intent = (dt_iop_color_intent_t)json_object_get_int_member(new_params, "intent");
-  }
-  else if(!strcmp(op, "demosaic"))
-  {
-    _server_demosaic_params_t *p = (_server_demosaic_params_t *)target->params;
-
-    if(json_object_has_member(new_params, "demosaicing_method"))
-      p->demosaicing_method = (_server_demosaic_method_t)json_object_get_int_member(new_params, "demosaicing_method");
-    if(json_object_has_member(new_params, "green_eq"))
-      p->green_eq = (_server_demosaic_greeneq_t)json_object_get_int_member(new_params, "green_eq");
-    if(json_object_has_member(new_params, "median_thrs"))
-      p->median_thrs = (float)json_object_get_double_member(new_params, "median_thrs");
-    if(json_object_has_member(new_params, "color_smoothing"))
-      p->color_smoothing = (_server_demosaic_smooth_t)json_object_get_int_member(new_params, "color_smoothing");
-    if(json_object_has_member(new_params, "lmmse_refine"))
-      p->lmmse_refine = (_server_demosaic_lmmse_t)json_object_get_int_member(new_params, "lmmse_refine");
-    if(json_object_has_member(new_params, "dual_thrs"))
-      p->dual_thrs = (float)json_object_get_double_member(new_params, "dual_thrs");
-    if(json_object_has_member(new_params, "cs_enabled"))
-      p->cs_enabled = json_object_get_boolean_member(new_params, "cs_enabled");
-    if(json_object_has_member(new_params, "cs_radius"))
-      p->cs_radius = (float)json_object_get_double_member(new_params, "cs_radius");
-    if(json_object_has_member(new_params, "cs_thrs"))
-      p->cs_thrs = (float)json_object_get_double_member(new_params, "cs_thrs");
-    if(json_object_has_member(new_params, "cs_boost"))
-      p->cs_boost = (float)json_object_get_double_member(new_params, "cs_boost");
-    if(json_object_has_member(new_params, "cs_iter"))
-      p->cs_iter = (int)json_object_get_int_member(new_params, "cs_iter");
-    if(json_object_has_member(new_params, "cs_center"))
-      p->cs_center = (float)json_object_get_double_member(new_params, "cs_center");
-  }
-  else if(!strcmp(op, "sigmoid"))
-  {
-    _server_sigmoid_params_t *p = (_server_sigmoid_params_t *)target->params;
-
-    if(json_object_has_member(new_params, "middle_grey_contrast"))
-      p->middle_grey_contrast = (float)json_object_get_double_member(new_params, "middle_grey_contrast");
-    if(json_object_has_member(new_params, "contrast_skewness"))
-      p->contrast_skewness = (float)json_object_get_double_member(new_params, "contrast_skewness");
-    if(json_object_has_member(new_params, "color_processing"))
-      p->color_processing = (_server_sigmoid_method_t)json_object_get_int_member(new_params, "color_processing");
-    if(json_object_has_member(new_params, "hue_preservation"))
-      p->hue_preservation = (float)json_object_get_double_member(new_params, "hue_preservation");
-    if(json_object_has_member(new_params, "display_white_target"))
-      p->display_white_target = (float)json_object_get_double_member(new_params, "display_white_target");
-    if(json_object_has_member(new_params, "display_black_target"))
-      p->display_black_target = (float)json_object_get_double_member(new_params, "display_black_target");
-    if(json_object_has_member(new_params, "base_primaries"))
-      p->base_primaries = (int)json_object_get_int_member(new_params, "base_primaries");
-    if(json_object_has_member(new_params, "red_inset"))
-      p->red_inset = (float)json_object_get_double_member(new_params, "red_inset");
-    if(json_object_has_member(new_params, "red_rotation"))
-      p->red_rotation = (float)json_object_get_double_member(new_params, "red_rotation");
-    if(json_object_has_member(new_params, "green_inset"))
-      p->green_inset = (float)json_object_get_double_member(new_params, "green_inset");
-    if(json_object_has_member(new_params, "green_rotation"))
-      p->green_rotation = (float)json_object_get_double_member(new_params, "green_rotation");
-    if(json_object_has_member(new_params, "blue_inset"))
-      p->blue_inset = (float)json_object_get_double_member(new_params, "blue_inset");
-    if(json_object_has_member(new_params, "blue_rotation"))
-      p->blue_rotation = (float)json_object_get_double_member(new_params, "blue_rotation");
-    if(json_object_has_member(new_params, "purity"))
-      p->purity = (float)json_object_get_double_member(new_params, "purity");
   }
   else if(target->so->have_introspection && _introspection_deserialize_params(target, new_params))
   {

@@ -19,7 +19,7 @@ function useThrottledParam(op: string) {
   const applyParam = useDevelopStore((s) => s.applyParam);
   const commitParam = useDevelopStore((s) => s.commitParam);
   const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const busyRef = useRef(false);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
   const draggingRef = useRef(false);
@@ -42,10 +42,10 @@ function useThrottledParam(op: string) {
         draggingRef.current = false;
         await commitParam(op);
         fetchHistory();
-        fetchModuleParams(op);
+        fetchGenericParams(op);
       }
     },
-    [op, applyParam, commitParam, fetchHistory, fetchModuleParams],
+    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
   );
 
   return { apply, draggingRef };
@@ -140,9 +140,9 @@ function buildGradient(
 }
 
 export default function TemperatureModule() {
-  const temperatureParams = useDevelopStore((s) => s.temperatureParams);
+  const params = useDevelopStore((s) => s.genericParams["temperature"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const samplePixels = useDevelopStore((s) => s.samplePixels);
   const historyItems = useDevelopStore((s) => s.historyItems);
   const isMandatory = historyItems.some((h) => h.op === "temperature" && h.mandatory);
@@ -193,9 +193,9 @@ export default function TemperatureModule() {
 
       // The sampled area should be neutral. Adjust current coefficients
       // by the inverse of the color cast: if output is too red, reduce red coeff.
-      const curRed = temperatureParams?.red ?? 1;
-      const curGreen = temperatureParams?.green ?? 1;
-      const curBlue = temperatureParams?.blue ?? 1;
+      const curRed = (params?.red as number) ?? 1;
+      const curGreen = (params?.green as number) ?? 1;
+      const curBlue = (params?.blue as number) ?? 1;
 
       const corrRed = curRed * (gLin / rLin);
       const corrBlue = curBlue * (gLin / bLin);
@@ -215,20 +215,20 @@ export default function TemperatureModule() {
   }, [pickerActive, pickerBoxKey, samplePixels, setModuleParam]);
 
   useEffect(() => {
-    if (!temperatureParams) {
-      fetchModuleParams("temperature");
+    if (!params) {
+      fetchGenericParams("temperature");
     }
-  }, [temperatureParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
   useEffect(() => {
-    if (temperatureParams && !draggingRef.current) {
-      setLocalRed(temperatureParams.red);
-      setLocalGreen(temperatureParams.green);
-      setLocalBlue(temperatureParams.blue);
-      if (temperatureParams.temperature_k != null) setLocalTempK(temperatureParams.temperature_k);
-      if (temperatureParams.tint != null) setLocalTint(temperatureParams.tint);
+    if (params && !draggingRef.current) {
+      setLocalRed(params.red as number);
+      setLocalGreen(params.green as number);
+      setLocalBlue(params.blue as number);
+      if (params.temperature_k != null) setLocalTempK(params.temperature_k as number);
+      if (params.tint != null) setLocalTint(params.tint as number);
     }
-  }, [temperatureParams, draggingRef]);
+  }, [params, draggingRef]);
 
   const tempGradient = useMemo(
     () => buildGradient(9, 1901, 25000, (t) => tempTintToRGB(t, localTint)),
@@ -245,7 +245,7 @@ export default function TemperatureModule() {
     );
   }
 
-  if (!temperatureParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading white balance params...
@@ -253,10 +253,8 @@ export default function TemperatureModule() {
     );
   }
 
-  const presetIdx = temperatureParams.preset;
+  const presetIdx = params.preset as number;
   const presetLabel = PRESET_OPTIONS[presetIdx] ?? PRESET_OPTIONS[0];
-  const tempK = temperatureParams.temperature_k;
-  const tint = temperatureParams.tint;
 
   // Detect "white balance applied twice": color calibration is doing chromatic
   // adaptation while temperature is not set to camera reference (D65).
