@@ -8,7 +8,7 @@ interface ModuleCardProps {
   tooltip?: ReactNode;
   open?: boolean;
   defaultOpen?: boolean;
-  onToggle?: (open: boolean) => void;
+  onToggle?: (open: boolean, shiftKey?: boolean) => void;
   /** Icon to the left of the title; receives current open state */
   leftIcon?: ReactNode | ((open: boolean) => ReactNode);
   /** Tooltip for the left icon */
@@ -47,10 +47,10 @@ export default function ModuleCard({
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
 
-  const toggle = () => {
+  const toggle = (e: React.MouseEvent) => {
     const next = !open;
     setInternalOpen(next);
-    onToggle?.(next);
+    onToggle?.(next, e.shiftKey);
   };
 
   const icon = typeof leftIcon === "function" ? leftIcon(open) : leftIcon;

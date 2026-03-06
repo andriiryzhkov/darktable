@@ -11,12 +11,31 @@ function emitAccordionOpen(group: string, op: string) {
   accordionBus.dispatchEvent(new CustomEvent("open", { detail: { group, op } }));
 }
 
+/** Cached single_module config value */
+let singleModuleCached: boolean | null = null;
+
+/** Load single_module config (cached after first call) */
+function getSingleModule(): Promise<boolean> {
+  if (singleModuleCached !== null) return Promise.resolve(singleModuleCached);
+  return configGet("darkroom/ui/single_module")
+    .then(({ value }) => {
+      singleModuleCached = value === "TRUE";
+      return singleModuleCached;
+    })
+    .catch(() => {
+      singleModuleCached = true; // default: accordion on
+      return true;
+    });
+}
+
 /**
  * Manages module expanded state, synced with darktable's config system.
  * Config key: plugins/{view}/{op}/expanded  (values: "TRUE" / "FALSE")
  *
- * When `accordion` is set to a group name, opening this module will close
- * all other modules in the same accordion group (GTK darktable IOP behavior).
+ * When `accordion` is set to a group name, the single_module config and
+ * shift key determine whether opening this module collapses others:
+ * - single_module=TRUE: click collapses others, shift+click doesn't
+ * - single_module=FALSE: click doesn't collapse, shift+click does
  */
 export function useModuleExpanded(view: string, op: string, fallback = false, accordion?: string) {
   const [open, setOpen] = useState(fallback);
@@ -41,19 +60,26 @@ export function useModuleExpanded(view: string, op: string, fallback = false, ac
       const { group, op: openedOp } = (e as CustomEvent).detail;
       if (group === accordion && openedOp !== op) {
         setOpen(false);
+        configSet(key, "FALSE").catch(() => {});
       }
     };
     accordionBus.addEventListener("open", handler);
     return () => accordionBus.removeEventListener("open", handler);
-  }, [accordion, op]);
+  }, [accordion, op, view]);
 
   const toggle = useCallback(
-    (next: boolean) => {
+    (next: boolean, shiftKey = false) => {
       userToggled.current = true;
       setOpen(next);
       configSet(key, next ? "TRUE" : "FALSE").catch(() => {});
       if (next && accordion) {
-        emitAccordionOpen(accordion, op);
+        // XOR: single_module inverts shift behavior
+        getSingleModule().then((singleModule) => {
+          const collapseOthers = singleModule !== shiftKey;
+          if (collapseOthers) {
+            emitAccordionOpen(accordion, op);
+          }
+        });
       }
     },
     [key, accordion, op],
