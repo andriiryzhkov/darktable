@@ -119,7 +119,7 @@ export default function HistoryModule() {
                 );
               })}
             </div>
-            <div className="bauhaus-button-row" style={{ marginTop: 4 }} onContextMenu={(e) => e.preventDefault()}>
+            <div className="bauhaus-button-row" style={{ marginTop: 4 }}>
               <BauhausButton
                 label="compress history stack"
                 title={"compress history stack\nctrl+click to truncate to selected item"}
