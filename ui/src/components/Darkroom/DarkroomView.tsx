@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useDevelopStore } from "../../stores/developStore";
+import { useUIStore } from "../../stores/uiStore";
 import PreviewCanvas from "./PreviewCanvas";
 import ImageInfo from "./ImageInfo";
 import TopToolbar from "../Lighttable/TopToolbar";
@@ -10,6 +11,7 @@ interface Props {
 
 export default function DarkroomView({ imgid }: Props) {
   const { openSession, closeSession } = useDevelopStore();
+  const borderSize = useUIStore((s) => s.darkroomBorderSize);
 
   useEffect(() => {
     openSession(imgid);
@@ -23,7 +25,7 @@ export default function DarkroomView({ imgid }: Props) {
       <TopToolbar />
       <div
         className="flex-1 flex items-center justify-center overflow-hidden"
-        style={{ backgroundColor: "var(--darkroom-bg-color)" }}
+        style={{ backgroundColor: "var(--darkroom-bg-color)", padding: borderSize }}
       >
         <PreviewCanvas />
       </div>

@@ -18,6 +18,7 @@ interface UIState {
   filmstripHeight: number;
   showGuides: boolean;
   guidesModuleOpen: boolean;
+  darkroomBorderSize: number;
 
   setActiveView: (view: View) => void;
   setDarkroomImgId: (imgid: number) => void;
@@ -52,6 +53,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   filmstripHeight: 100,
   showGuides: false,
   guidesModuleOpen: false,
+  darkroomBorderSize: 20,
 
   setActiveView: (view) => set({ activeView: view }),
   setDarkroomImgId: (imgid) => set({ darkroomImgId: imgid }),
@@ -93,6 +95,12 @@ export const useUIStore = create<UIState>((set, get) => ({
         if (n > 0 && n <= 20) {
           set({ targetColumns: n });
         }
+      })
+      .catch(() => {});
+    configGet("plugins/darkroom/ui/border_size")
+      .then(({ value }) => {
+        const n = parseInt(value, 10);
+        if (n >= 0) set({ darkroomBorderSize: n });
       })
       .catch(() => {});
   },
