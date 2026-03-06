@@ -10,6 +10,8 @@ interface SidebarProps {
   width: number;
   onToggle: () => void;
   onResize: (w: number) => void;
+  /** When true, sidebar-scroll won't scroll; children handle their own scrolling */
+  innerScroll?: boolean;
   children: ReactNode;
 }
 
@@ -19,6 +21,7 @@ export default function Sidebar({
   width,
   onToggle: _onToggle,
   onResize,
+  innerScroll = false,
   children,
 }: SidebarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,7 +85,7 @@ export default function Sidebar({
       {open && (
         <>
           <div
-            className="sidebar-scroll"
+            className={innerScroll ? "sidebar-scroll sidebar-scroll-inner" : "sidebar-scroll"}
             style={{ direction: side === "left" ? "rtl" : "ltr" }}
           >
             <div style={{ direction: "ltr", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>{children}</div>

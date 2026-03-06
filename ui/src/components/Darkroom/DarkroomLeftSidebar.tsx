@@ -20,7 +20,7 @@ export default function DarkroomLeftSidebar() {
       </Suspense>
 
       {/* Modules — scrollable, scrollbar on left via RTL trick */}
-      <div className="flex-1 overflow-y-auto min-h-0" style={{ direction: "rtl" }}>
+      <div className="flex-1 overflow-y-scroll min-h-0" style={{ direction: "rtl" }}>
         <div style={{ direction: "ltr" }}>
           <Suspense fallback={null}>
             {centerModules.map((m) => (

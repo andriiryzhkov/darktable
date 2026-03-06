@@ -171,7 +171,7 @@ export default function DarkroomRightSidebar() {
       </div>
 
       {/* Module list */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-scroll">
         <Suspense fallback={null}>
           {filteredModules.map((mod) => (
             <IopModuleCard

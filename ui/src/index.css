@@ -1403,8 +1403,12 @@ body {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
   min-height: 0;
+}
+
+.sidebar-scroll-inner {
+  overflow-y: hidden;
 }
 
 .sidebar-resize-handle {

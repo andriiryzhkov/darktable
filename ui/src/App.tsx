@@ -90,6 +90,7 @@ function App() {
           width={leftSidebarWidth}
           onToggle={toggleLeftSidebar}
           onResize={setLeftSidebarWidth}
+          innerScroll={activeView === "darkroom"}
         >
           {activeView === "lighttable" && <LeftSidebarModules />}
           {activeView === "darkroom" && <DarkroomLeftSidebar />}
@@ -113,6 +114,7 @@ function App() {
           width={rightSidebarWidth}
           onToggle={toggleRightSidebar}
           onResize={setRightSidebarWidth}
+          innerScroll={activeView === "darkroom"}
         >
           {activeView === "lighttable" && <RightSidebarModules />}
           {activeView === "darkroom" && <DarkroomRightSidebar />}
