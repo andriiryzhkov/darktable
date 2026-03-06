@@ -9,7 +9,7 @@ export default function ImportModule() {
   const openDialog = useImportStore((s) => s.openDialog);
 
   return (
-    <LibModuleCard title="import" description="add images to the library or copy and import from external locations" defaultOpen>
+    <LibModuleCard title="import" description="add images to the library or copy and import from external locations">
       <div className="space-y-1">
         <div className="bauhaus-button-row">
           <BauhausButton label="add to library..." onClick={() => openDialog("inplace")} />

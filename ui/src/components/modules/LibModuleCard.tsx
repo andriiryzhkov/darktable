@@ -3,11 +3,12 @@ import { CircleChevronRight, CircleChevronDown } from "lucide-react";
 import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
 import ModuleCard from "./ModuleCard";
+import { useModuleContext } from "./ModuleContext";
+import { useModuleExpanded } from "../../hooks/useModuleExpanded";
 
 interface LibModuleCardProps {
   title: string;
   description?: string;
-  defaultOpen?: boolean;
   onReset?: () => void;
   extraButtons?: ReactNode;
   children: ReactNode;
@@ -16,23 +17,26 @@ interface LibModuleCardProps {
 export default function LibModuleCard({
   title,
   description,
-  defaultOpen = false,
   onReset,
   extraButtons,
   children,
 }: LibModuleCardProps) {
+  const { op, view } = useModuleContext();
+  const { open, setOpen } = useModuleExpanded(view, op);
+
   return (
     <ModuleCard
       title={title}
       tooltip={description ? <div className="module-desc-tooltip">{description}</div> : undefined}
-      defaultOpen={defaultOpen}
+      open={open}
+      onToggle={setOpen}
       onReset={onReset}
       extraButtons={extraButtons}
-      leftIcon={(open) =>
+      leftIcon={(isOpen) =>
         <BauhausTooltip content="show module" placement="bottom">
           <span className="module-power">
             <BauhausButton
-              icon={open
+              icon={isOpen
                 ? <CircleChevronDown size={12} />
                 : <CircleChevronRight size={12} />
               }

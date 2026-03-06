@@ -26,6 +26,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <signal.h>
+
 #ifdef __APPLE__
 #include "osx/osx.h"
 #endif
@@ -33,6 +35,14 @@
 #ifdef _WIN32
 #include "win/main_wrapper.h"
 #endif
+
+static dt_server_t *_g_server = NULL;
+
+static void _sigterm_handler(int sig)
+{
+  (void)sig;
+  if(_g_server) dt_server_shutdown(_g_server);
+}
 
 static void usage(const char *progname)
 {
@@ -129,6 +139,11 @@ int main(int argc, char *argv[])
   // Print socket path AFTER the socket is listening so the client can connect immediately
   fprintf(stdout, "SOCKET=%s\n", socket_path);
   fflush(stdout);
+
+  // Install SIGTERM handler for clean shutdown (saves config to disk)
+  _g_server = server;
+  signal(SIGTERM, _sigterm_handler);
+  signal(SIGINT, _sigterm_handler);
 
   fprintf(stderr, "[server] running (pid=%d)\n", getpid());
   dt_server_run(server); // blocks until shutdown

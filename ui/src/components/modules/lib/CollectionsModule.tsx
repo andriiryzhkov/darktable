@@ -221,7 +221,7 @@ export default function CollectionsModule() {
 
   return (
     <>
-    <LibModuleCard title="collections" description="define search criteria for images to be displayed or edited" defaultOpen onReset={() => { clearRules(); setActiveRuleId(null); }}>
+    <LibModuleCard title="collections" description="define search criteria for images to be displayed or edited" onReset={() => { clearRules(); setActiveRuleId(null); }}>
       <div className="collection-rules">
         {/* Rule rows */}
         {rules.map((rule, index) => (

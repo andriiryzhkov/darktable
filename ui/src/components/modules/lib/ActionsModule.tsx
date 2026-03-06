@@ -36,7 +36,7 @@ function ActionButton({
 
 export default function ActionsModule() {
   return (
-    <LibModuleCard title="actions on selection" description="perform various operations on the currently selected images" defaultOpen>
+    <LibModuleCard title="actions on selection" description="perform various operations on the currently selected images">
       <div className="space-y-2">
         {/* Tab bar */}
         <div className="flex gap-1 text-xs">

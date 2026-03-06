@@ -70,7 +70,7 @@ export default function HistoryModule() {
 
   return (
     <>
-      <LibModuleCard title="history" description={"display the sequence of edit actions\n- click on an entry to temporarily return to that earlier state of the edit\n- shift-click to focus that module without changing the edit state"} defaultOpen onReset={handleReset}>
+      <LibModuleCard title="history" description={"display the sequence of edit actions\n- click on an entry to temporarily return to that earlier state of the edit\n- shift-click to focus that module without changing the edit state"} onReset={handleReset}>
         {sessionId ? (
           <div>
             <div className="history-list">

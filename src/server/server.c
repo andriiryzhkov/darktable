@@ -17,6 +17,7 @@
 */
 
 #include "server/server.h"
+#include "control/conf.h"
 
 #include <errno.h>
 #include <poll.h>
@@ -75,6 +76,52 @@ static char *_handle_get_version(dt_server_t *server, const dt_server_request_t 
   return resp;
 }
 
+static char *_handle_config_get(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  const char *key = json_object_get_string_member(req->params, "key");
+  if(!key)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "missing 'key'");
+
+  gchar *value = dt_conf_get_string(key);
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "key");
+  json_builder_add_string_value(b, key);
+  json_builder_set_member_name(b, "value");
+  json_builder_add_string_value(b, value ? value : "");
+  json_builder_end_object(b);
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  g_free(value);
+  return resp;
+}
+
+static char *_handle_config_set(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  const char *key = json_object_get_string_member(req->params, "key");
+  const char *value = json_object_get_string_member(req->params, "value");
+  if(!key || !value)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "missing 'key' or 'value'");
+
+  dt_conf_set_string(key, value);
+  fprintf(stderr, "[server] config.set '%s' = '%s'\n", key, value);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
 static const dt_server_route_t _routes[] = {
   { "system.ping",                _handle_ping },
   { "system.shutdown",            _handle_shutdown },
@@ -105,6 +152,8 @@ static const dt_server_route_t _routes[] = {
   { "develop.truncate_history",   dt_server_develop_truncate_history },
   { "develop.delete_history",     dt_server_develop_delete_history },
   { "export.image",               dt_server_export_image },
+  { "config.get",                 _handle_config_get },
+  { "config.set",                 _handle_config_set },
   { NULL, NULL }
 };
 

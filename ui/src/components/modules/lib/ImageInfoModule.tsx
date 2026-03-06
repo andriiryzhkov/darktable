@@ -259,7 +259,7 @@ export default function ImageInfoModule() {
     : null;
 
   return (
-    <LibModuleCard title="image information" description="display camera and image metadata for the selected image" defaultOpen>
+    <LibModuleCard title="image information" description="display camera and image metadata for the selected image">
       {selected ? (
         <>
           <ExifBar image={selected} />

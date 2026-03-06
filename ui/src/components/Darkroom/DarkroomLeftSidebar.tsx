@@ -5,6 +5,7 @@ import {
   PANEL_LEFT_TOP,
   PANEL_LEFT_CENTER,
 } from "../modules/registry";
+import { ModuleProvider } from "../modules/ModuleContext";
 
 const topModules = getLibModules(VIEW_DARKROOM, PANEL_LEFT_TOP);
 const centerModules = getLibModules(VIEW_DARKROOM, PANEL_LEFT_CENTER);
@@ -15,7 +16,9 @@ export default function DarkroomLeftSidebar() {
       {/* Navigation — always visible, not scrollable */}
       <Suspense fallback={null}>
         {topModules.map((m) => (
-          <m.component key={m.op} />
+          <ModuleProvider key={m.op} value={{ op: m.op, view: "darkroom" }}>
+            <m.component />
+          </ModuleProvider>
         ))}
       </Suspense>
 
@@ -24,7 +27,9 @@ export default function DarkroomLeftSidebar() {
         <div style={{ direction: "ltr" }}>
           <Suspense fallback={null}>
             {centerModules.map((m) => (
-              <m.component key={m.op} />
+              <ModuleProvider key={m.op} value={{ op: m.op, view: "darkroom" }}>
+                <m.component />
+              </ModuleProvider>
             ))}
           </Suspense>
         </div>

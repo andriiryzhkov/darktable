@@ -49,6 +49,8 @@ declare global {
     catalogGetCollectionValues: (property: string, filter: string) => Promise<{ values: PropertyValue[] }>;
     catalogGetFilmrolls: () => Promise<{ filmrolls: FilmRoll[] }>;
     catalogGetTags: () => Promise<{ tags: Tag[] }>;
+    configGet: (key: string) => Promise<{ key: string; value: string }>;
+    configSet: (key: string, value: string) => Promise<unknown>;
     windowStartDrag: () => Promise<void>;
     windowZoom: () => Promise<void>;
   }
@@ -139,6 +141,10 @@ export const catalogGetCollectionValues = (property: string, filter: string) =>
 export const catalogGetFilmrolls = () => window.catalogGetFilmrolls();
 
 export const catalogGetTags = () => window.catalogGetTags();
+
+export const configGet = (key: string) => window.configGet(key);
+
+export const configSet = (key: string, value: string) => window.configSet(key, value);
 
 export const windowStartDrag = () => window.windowStartDrag();
 

@@ -2092,6 +2092,52 @@ static void on_pick_folder(const char *id, const char *req, void *arg)
   }
 }
 
+static void on_config_get(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "configGet requires (key)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *key = _get_string_arg(args, 0);
+  g_object_unref(parser);
+
+  char *ipc_params = g_strdup_printf("{\"key\":\"%s\"}", key);
+  g_free(key);
+
+  _ipc_passthrough(ctx, id, "config.get", ipc_params);
+  g_free(ipc_params);
+}
+
+static void on_config_set(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "configSet requires (key, value)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *key = _get_string_arg(args, 0);
+  char *value = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  char *ipc_params = g_strdup_printf("{\"key\":\"%s\",\"value\":\"%s\"}", key, value);
+  g_free(key);
+  g_free(value);
+
+  _ipc_passthrough(ctx, id, "config.set", ipc_params);
+  g_free(ipc_params);
+}
+
 void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
 {
   /* Initialize NFD once */
@@ -2141,6 +2187,8 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "catalogGetCollectionValues", on_catalog_get_collection_values, ctx);
   webview_bind(ctx->webview, "catalogGetFilmrolls", on_catalog_get_filmrolls, ctx);
   webview_bind(ctx->webview, "catalogGetTags", on_catalog_get_tags, ctx);
+  webview_bind(ctx->webview, "configGet", on_config_get, ctx);
+  webview_bind(ctx->webview, "configSet", on_config_set, ctx);
 }
 
 void dt_webview_register_window_bindings(dt_webview_ctx_t *ctx)

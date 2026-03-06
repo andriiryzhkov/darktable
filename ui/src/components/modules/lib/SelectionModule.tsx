@@ -15,7 +15,7 @@ export default function SelectionModule() {
   const hasSelection = selectedIds.size > 0;
 
   return (
-    <LibModuleCard title="selection" description="modify which of the displayed images are selected" defaultOpen>
+    <LibModuleCard title="selection" description="modify which of the displayed images are selected" >
       <div className="module-button-grid">
         <BauhausButton label="select all" onClick={selectAll} disabled={!hasImages} />
         <BauhausButton label="select none" onClick={clearSelection} disabled={!hasSelection} />

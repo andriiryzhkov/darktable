@@ -383,6 +383,20 @@ int main(int argc, char *argv[])
   fprintf(stderr, "[webview] shutting down...\n");
   webview_destroy(ctx.webview);
 
+  // Send graceful shutdown to server (before closing IPC) so it saves config
+  if(ctx.server_pid > 0 && ctx.socket_fd >= 0)
+  {
+    char *error = NULL;
+    char *resp = NULL;
+    if(ctx.ipc_ctx)
+      resp = dt_ipc_request2(ctx.ipc_ctx, "system.shutdown", "{}", &error);
+    else
+      resp = dt_ipc_request(ctx.socket_fd, &ctx.ipc_mutex,
+                            "system.shutdown", "{}", &error);
+    g_free(resp);
+    g_free(error);
+  }
+
   // Shut down frame server and IPC reader thread before closing the socket
   if(ctx.frame_server)
     dt_frame_server_stop(ctx.frame_server);
@@ -405,12 +419,20 @@ int main(int argc, char *argv[])
     }
   }
 
-  // stop server
+  // wait for server to exit cleanly, force kill if needed
   if(ctx.server_pid > 0)
   {
-    kill(ctx.server_pid, SIGTERM);
     int status;
+    for(int i = 0; i < 30; i++)
+    {
+      pid_t ret = waitpid(ctx.server_pid, &status, WNOHANG);
+      if(ret != 0) goto server_done;
+      usleep(100000); // 100ms
+    }
+    fprintf(stderr, "[webview] server did not exit, sending SIGTERM\n");
+    kill(ctx.server_pid, SIGTERM);
     waitpid(ctx.server_pid, &status, 0);
+server_done:
     fprintf(stderr, "[webview] server stopped\n");
   }
 

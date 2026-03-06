@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Suspense } from "react";
+import { useCallback, useEffect, useRef, Suspense } from "react";
 import { Copy, Power, CircleDot, AlertTriangle, Crosshair, ArrowRightToLine, Workflow, ArrowRightFromLine } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import type { ModuleDescription } from "../../types/protocol";
@@ -6,6 +6,7 @@ import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
 import ModuleCard from "./ModuleCard";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
+import { useModuleExpanded } from "../../hooks/useModuleExpanded";
 
 /** Detect pipeline trouble messages for known modules */
 function useModuleTrouble(op: string): string | null {
@@ -53,11 +54,10 @@ function ModuleDescriptionTooltip({ desc }: { desc: ModuleDescription }) {
 
 interface Props {
   module: IopModuleDef;
-  defaultOpen?: boolean;
 }
 
-export default function IopModuleCard({ module, defaultOpen }: Props) {
-  const [open, setOpen] = useState(defaultOpen ?? false);
+export default function IopModuleCard({ module }: Props) {
+  const { open, setOpen } = useModuleExpanded("darkroom", module.op);
   const historyItems = useDevelopStore((s) => s.historyItems);
   const enableModule = useDevelopStore((s) => s.enableModule);
   const resetModule = useDevelopStore((s) => s.resetModule);
