@@ -18,7 +18,7 @@ interface UIState {
   filmstripHeight: number;
   showGuides: boolean;
   guidesModuleOpen: boolean;
-  darkroomBorderSize: number;
+  darkroomBorderSize: number | null;
 
   setActiveView: (view: View) => void;
   setDarkroomImgId: (imgid: number) => void;
@@ -53,7 +53,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   filmstripHeight: 100,
   showGuides: false,
   guidesModuleOpen: false,
-  darkroomBorderSize: 20,
+  darkroomBorderSize: null,
 
   setActiveView: (view) => set({ activeView: view }),
   setDarkroomImgId: (imgid) => set({ darkroomImgId: imgid }),

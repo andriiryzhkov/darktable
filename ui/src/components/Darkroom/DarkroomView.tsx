@@ -25,7 +25,7 @@ export default function DarkroomView({ imgid }: Props) {
       <TopToolbar />
       <div
         className="flex-1 flex items-center justify-center overflow-hidden"
-        style={{ backgroundColor: "var(--darkroom-bg-color)", padding: borderSize }}
+        style={{ backgroundColor: "var(--darkroom-bg-color)", padding: borderSize ?? undefined }}
       >
         <PreviewCanvas />
       </div>

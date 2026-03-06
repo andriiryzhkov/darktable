@@ -66,7 +66,10 @@ export default function GuidesOverlay({ targetRef }: Props) {
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(target);
-    return () => ro.disconnect();
+    // Redraw when zoom/pan changes the target's style (transform, transformOrigin)
+    const mo = new MutationObserver(draw);
+    mo.observe(target, { attributes: true, attributeFilter: ["style"] });
+    return () => { ro.disconnect(); mo.disconnect(); };
   }, [showGuides, targetRef]);
 
   return <canvas ref={canvasRef} className="guides-overlay" />;
