@@ -88,6 +88,14 @@ export interface PreviewResult {
   front_buffer: number;
 }
 
+export interface ModuleDescription {
+  main: string;
+  purpose: string;
+  input: string;
+  process: string;
+  output: string;
+}
+
 export interface ModuleInfo {
   op: string;
   name: string;
@@ -95,6 +103,7 @@ export interface ModuleInfo {
   instance: number;
   iop_order: number;
   params_size: number;
+  description?: ModuleDescription;
 }
 
 export interface HistoryItem {

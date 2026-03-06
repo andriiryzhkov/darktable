@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, Suspense } from "react";
-import { RotateCcw, Menu, Copy, Power, CircleDot, AlertTriangle } from "lucide-react";
+import { RotateCcw, Menu, Copy, Power, CircleDot, AlertTriangle, Crosshair, ArrowRightToLine, Workflow, ArrowRightFromLine } from "lucide-react";
 import type { IopModuleDef } from "./registry";
+import type { ModuleDescription } from "../../types/protocol";
 import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
@@ -22,6 +23,33 @@ function useModuleTrouble(op: string): string | null {
   return null;
 }
 
+const ICON_SIZE = 10;
+
+function ModuleDescriptionTooltip({ desc }: { desc: ModuleDescription }) {
+  return (
+    <div className="module-desc-tooltip">
+      <div className="module-desc-main">{desc.main}</div>
+      <div className="module-desc-grid">
+        <Crosshair size={ICON_SIZE} strokeWidth={2.5} />
+        <strong>purpose:</strong>
+        <span>{desc.purpose}</span>
+
+        <ArrowRightToLine size={ICON_SIZE} strokeWidth={2.5} />
+        <strong>input:</strong>
+        <span>{desc.input}</span>
+
+        <Workflow size={ICON_SIZE} strokeWidth={2.5} />
+        <strong>process:</strong>
+        <span>{desc.process}</span>
+
+        <ArrowRightFromLine size={ICON_SIZE} strokeWidth={2.5} />
+        <strong>output:</strong>
+        <span>{desc.output}</span>
+      </div>
+    </div>
+  );
+}
+
 interface Props {
   module: IopModuleDef;
   defaultOpen?: boolean;
@@ -32,6 +60,7 @@ export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
   const historyItems = useDevelopStore((s) => s.historyItems);
   const enableModule = useDevelopStore((s) => s.enableModule);
   const focusModuleOp = useDevelopStore((s) => s.focusModuleOp);
+  const description = useDevelopStore((s) => s.moduleDescriptions[module.op]);
   const trouble = useModuleTrouble(module.op);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +101,13 @@ export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
           </span>
         )}
 
-        <span className="flex-1">{module.name}</span>
+        {description ? (
+          <BauhausTooltip content={<ModuleDescriptionTooltip desc={description} />} placement="bottom-start" delay={700}>
+            <span className="flex-1">{module.name}</span>
+          </BauhausTooltip>
+        ) : (
+          <span className="flex-1">{module.name}</span>
+        )}
         {trouble && (
           <BauhausTooltip content={trouble} placement="left">
             <span className="module-trouble-icon">

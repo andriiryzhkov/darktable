@@ -7,6 +7,7 @@ import type {
   PreviewFrameResult,
   PixelSampleResult,
   HistoryResult,
+  ModuleInfo,
   FilmRoll,
   Tag,
 } from "../types/protocol";
@@ -29,6 +30,7 @@ declare global {
     developGetParams: (sessionId: string, op: string) => Promise<{ op: string; enabled: boolean; params: Record<string, unknown> }>;
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
     developSamplePixels: (sessionId: string, x: number, y: number, w: number, h: number) => Promise<PixelSampleResult>;
+    developGetModules: (sessionId: string) => Promise<{ modules: ModuleInfo[] }>;
     developGetHistory: (sessionId: string) => Promise<HistoryResult>;
     developSelectHistory: (sessionId: string, historyEnd: number) => Promise<unknown>;
     developCompressHistory: (sessionId: string) => Promise<unknown>;
@@ -88,6 +90,9 @@ export const developRequestPreview = (sessionId: string) =>
 
 export const developSamplePixels = (sessionId: string, x: number, y: number, w: number, h: number) =>
   window.developSamplePixels(sessionId, x, y, w, h);
+
+export const developGetModules = (sessionId: string) =>
+  window.developGetModules(sessionId);
 
 export const developGetHistory = (sessionId: string) =>
   window.developGetHistory(sessionId);

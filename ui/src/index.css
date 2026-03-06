@@ -872,7 +872,35 @@ body {
   color: var(--plugin-label-color);
   white-space: pre-line;
   pointer-events: none;
-  max-width: 280px;
+  max-width: 580px;
+}
+
+.module-desc-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  white-space: normal;
+  width: 300px;
+}
+
+.module-desc-main {
+  line-height: 1.4;
+  padding-bottom: 4px;
+}
+
+.module-desc-grid {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 3px 6px;
+  align-items: baseline;
+}
+
+.module-desc-grid > svg {
+  align-self: center;
+}
+
+.module-desc-purpose > svg {
+  opacity: 1;
 }
 
 .bauhaus-combo-popup-row {
@@ -2516,6 +2544,10 @@ body {
   align-items: center;
   gap: 1px;
   padding: 4px;
+}
+
+.darkroom-group-tabs > .bauhaus-tooltip-trigger {
+  flex: 1;
 }
 
 .darkroom-group-tab {

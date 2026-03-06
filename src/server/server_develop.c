@@ -634,6 +634,27 @@ char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request
     json_builder_set_member_name(b, "params_size");
     json_builder_add_int_value(b, mod->params_size);
 
+    // Module description from description() callback
+    const char **des = mod->description ? mod->description(mod) : NULL;
+    if(des && des[0])
+    {
+      json_builder_set_member_name(b, "description");
+      json_builder_begin_object(b);
+
+      json_builder_set_member_name(b, "main");
+      json_builder_add_string_value(b, des[0] ? des[0] : "");
+      json_builder_set_member_name(b, "purpose");
+      json_builder_add_string_value(b, des[1] ? des[1] : "");
+      json_builder_set_member_name(b, "input");
+      json_builder_add_string_value(b, des[2] ? des[2] : "");
+      json_builder_set_member_name(b, "process");
+      json_builder_add_string_value(b, des[3] ? des[3] : "");
+      json_builder_set_member_name(b, "output");
+      json_builder_add_string_value(b, des[4] ? des[4] : "");
+
+      json_builder_end_object(b);
+    }
+
     json_builder_end_object(b);
   }
 

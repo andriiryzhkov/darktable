@@ -704,6 +704,28 @@ static void on_develop_sample_pixels(const char *id, const char *req, void *arg)
   g_free(ipc_params);
 }
 
+static void on_develop_get_modules(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "developGetModules requires (sessionId)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_free(session_id);
+
+  _ipc_passthrough(ctx, id, "develop.get_modules", params);
+  g_free(params);
+}
+
 static void on_develop_get_history(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -2075,6 +2097,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developGetParams", on_develop_get_params, ctx);
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
   webview_bind(ctx->webview, "developSamplePixels", on_develop_sample_pixels, ctx);
+  webview_bind(ctx->webview, "developGetModules", on_develop_get_modules, ctx);
   webview_bind(ctx->webview, "developGetHistory", on_develop_get_history, ctx);
   webview_bind(ctx->webview, "developSelectHistory", on_develop_select_history, ctx);
   webview_bind(ctx->webview, "developCompressHistory", on_develop_compress_history, ctx);

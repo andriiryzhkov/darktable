@@ -7,6 +7,7 @@ import {
   developGetParams,
   developRequestPreview,
   developSamplePixels,
+  developGetModules,
   developGetHistory,
   developSelectHistory,
   developCompressHistory,
@@ -15,7 +16,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { TemperatureParams, ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { TemperatureParams, ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -49,6 +50,7 @@ interface DevelopState {
   colorinParams: ColorinParams | null;
   coloroutParams: ColoroutParams | null;
   modules: ModuleInfo[];
+  moduleDescriptions: Record<string, ModuleDescription>; // op → description from server
   historyItems: HistoryItem[];
   historyEnd: number;
   loading: boolean;
@@ -128,6 +130,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   colorinParams: null,
   coloroutParams: null,
   modules: [],
+  moduleDescriptions: {},
   historyItems: [],
   historyEnd: 0,
   loading: false,
@@ -179,9 +182,22 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         previewHeight: result.preview_height,
       });
 
-      // Start history + module params fetch in parallel with preview render
+      // Start history + module info + params fetch in parallel with preview render
       const metadataPromise = Promise.all([
         get().fetchHistory(),
+        (typeof window.developGetModules === "function"
+          ? developGetModules(result.session_id).then((res) => {
+              if (gen !== sessionGeneration) return;
+              console.log("[developStore] get_modules response:", JSON.stringify(res).substring(0, 500));
+              const descs: Record<string, ModuleDescription> = {};
+              for (const m of res.modules) {
+                if (m.description) descs[m.op] = m.description;
+              }
+              console.log("[developStore] moduleDescriptions:", Object.keys(descs));
+              set({ modules: res.modules, moduleDescriptions: descs });
+            })
+          : Promise.resolve()
+        ).catch((e) => console.error("develop.get_modules failed:", e)),
         get().fetchModuleParams("temperature"),
         get().fetchModuleParams("exposure"),
         get().fetchModuleParams("sigmoid"),
@@ -232,6 +248,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       sigmoidParams: null,
       demosaicParams: null,
       modules: [],
+      moduleDescriptions: {},
       historyItems: [],
       historyEnd: 0,
       sequence: 0,
