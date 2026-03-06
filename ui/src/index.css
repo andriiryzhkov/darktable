@@ -584,8 +584,13 @@ body {
   margin-bottom: 4px;
 }
 
+.bauhaus-button-row > * {
+  flex: 1;
+}
+
 .bauhaus-button-row .bauhaus-button {
   flex: 1;
+  width: 100%;
   padding: 1px 4px;
   aspect-ratio: unset;
 }
