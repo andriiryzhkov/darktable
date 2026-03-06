@@ -130,6 +130,10 @@ export interface TemperatureParams {
   tint?: number;
 }
 
+export interface FlipParams {
+  orientation: number; // dt_image_orientation_t bitmask
+}
+
 export interface ExposureParams {
   mode: number;
   exposure: number;

@@ -10,7 +10,7 @@ interface BauhausCheckboxProps {
 export default function BauhausCheckbox({
   label,
   checked: controlledChecked,
-  align = "right",
+  align = "left",
   onChange,
 }: BauhausCheckboxProps) {
   const [internal, setInternal] = useState(false);

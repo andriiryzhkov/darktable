@@ -16,6 +16,8 @@ interface UIState {
   targetColumns: number;
   filmstripOpen: boolean;
   filmstripHeight: number;
+  showGuides: boolean;
+  guidesModuleOpen: boolean;
 
   setActiveView: (view: View) => void;
   setDarkroomImgId: (imgid: number) => void;
@@ -27,6 +29,8 @@ interface UIState {
   setGridColumns: (cols: number) => void;
   toggleFilmstrip: () => void;
   setFilmstripHeight: (h: number) => void;
+  setShowGuides: (show: boolean) => void;
+  setGuidesModuleOpen: (open: boolean) => void;
   loadFromConfig: () => void;
 }
 
@@ -46,6 +50,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   targetColumns: 0,
   filmstripOpen: true,
   filmstripHeight: 100,
+  showGuides: false,
+  guidesModuleOpen: false,
 
   setActiveView: (view) => set({ activeView: view }),
   setDarkroomImgId: (imgid) => set({ darkroomImgId: imgid }),
@@ -77,6 +83,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   toggleFilmstrip: () => set((s) => ({ filmstripOpen: !s.filmstripOpen })),
   setFilmstripHeight: (h) => set({ filmstripHeight: Math.max(60, Math.min(200, h)) }),
+  setShowGuides: (show) => set({ showGuides: show }),
+  setGuidesModuleOpen: (open) => set({ guidesModuleOpen: open }),
 
   loadFromConfig: () => {
     configGet("plugins/lighttable/images_in_row")

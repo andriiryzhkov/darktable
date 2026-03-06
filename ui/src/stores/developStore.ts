@@ -17,7 +17,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { TemperatureParams, ExposureParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { TemperatureParams, ExposureParams, FlipParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -49,6 +49,7 @@ interface DevelopState {
   demosaicParams: DemosaicParams | null;
   rawprepareParams: RawprepareParams | null;
   colorinParams: ColorinParams | null;
+  flipParams: FlipParams | null;
   coloroutParams: ColoroutParams | null;
   modules: ModuleInfo[];
   moduleDescriptions: Record<string, ModuleDescription>; // op → description from server
@@ -126,6 +127,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   sequence: 0,
   temperatureParams: null,
   exposureParams: null,
+  flipParams: null,
   sigmoidParams: null,
   demosaicParams: null,
   rawprepareParams: null,
@@ -202,6 +204,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         ).catch((e) => console.error("develop.get_modules failed:", e)),
         get().fetchModuleParams("temperature"),
         get().fetchModuleParams("exposure"),
+        get().fetchModuleParams("flip"),
         get().fetchModuleParams("sigmoid"),
         get().fetchModuleParams("demosaic"),
         get().fetchModuleParams("rawprepare"),
@@ -247,6 +250,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       frameData: null,
       temperatureParams: null,
       exposureParams: null,
+      flipParams: null,
       sigmoidParams: null,
       demosaicParams: null,
       modules: [],
@@ -392,6 +396,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         set({ temperatureParams: result.params as unknown as TemperatureParams });
       } else if (op === "exposure") {
         set({ exposureParams: result.params as unknown as ExposureParams });
+      } else if (op === "flip") {
+        set({ flipParams: result.params as unknown as FlipParams });
       } else if (op === "sigmoid") {
         set({ sigmoidParams: result.params as unknown as SigmoidParams });
       } else if (op === "demosaic") {

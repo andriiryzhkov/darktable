@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useDevelopStore, ZOOM_LEVELS } from "../../stores/developStore";
+import GuidesOverlay from "./GuidesOverlay";
 import PickerOverlay from "./PickerOverlay";
 
 const VERTEX_SRC = `#version 300 es
@@ -233,6 +234,7 @@ export default function WebGLPreview() {
         className="max-w-full max-h-full object-contain"
         style={transformStyle}
       />
+      <GuidesOverlay targetRef={canvasRef} />
       <PickerOverlay targetRef={canvasRef} />
     </div>
   );

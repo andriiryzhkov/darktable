@@ -600,6 +600,27 @@ body {
   grid-column: 1 / -1;
 }
 
+/* Orientation module: label + icon buttons row */
+.orientation-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.orientation-label {
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  flex-shrink: 0;
+}
+
+.orientation-buttons {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  justify-content: space-evenly;
+}
+
 /* Bauhaus picker (pipette icon button) */
 .bauhaus-picker {
   display: flex;
@@ -2911,6 +2932,14 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+/* Rule of thirds guides — 2D canvas positioned via JS over WebGL canvas */
+.guides-overlay {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 5;
 }
 
 /* Picker overlay */

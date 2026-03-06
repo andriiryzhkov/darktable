@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useDevelopStore, ZOOM_LEVELS } from "../../stores/developStore";
 import WebGLPreview from "./WebGLPreview";
+import GuidesOverlay from "./GuidesOverlay";
 import PickerOverlay from "./PickerOverlay";
 
 export default function PreviewCanvas() {
@@ -151,6 +152,7 @@ export default function PreviewCanvas() {
       style={{ cursor: isZoomed ? "grab" : "default" }}
     >
       {content}
+      <GuidesOverlay targetRef={previewSrc ? imgRef : canvasRef} />
       <PickerOverlay targetRef={previewSrc ? imgRef : canvasRef} />
     </div>
   );
