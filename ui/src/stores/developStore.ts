@@ -415,6 +415,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     if (!sessionId) return;
     try {
       const result = await developGetParams(sessionId, op);
+      // Always store in genericParams for introspection-based modules
+      set({ genericParams: { ...get().genericParams, [op]: result.params } });
+      // Also update legacy typed stores for custom UI modules
       if (op === "temperature") {
         set({ temperatureParams: result.params as unknown as TemperatureParams });
       } else if (op === "exposure") {
