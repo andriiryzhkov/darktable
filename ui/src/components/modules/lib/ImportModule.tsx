@@ -1,4 +1,4 @@
-import CollapsibleModule from "../CollapsibleModule";
+import LibModuleCard from "../LibModuleCard";
 import BauhausButton from "../../controls/BauhausButton";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
 import BauhausInput from "../../controls/BauhausInput";
@@ -9,7 +9,7 @@ export default function ImportModule() {
   const openDialog = useImportStore((s) => s.openDialog);
 
   return (
-    <CollapsibleModule title="import" description="add images to the library or copy and import from external locations" defaultOpen>
+    <LibModuleCard title="import" description="add images to the library or copy and import from external locations" defaultOpen>
       <div className="space-y-1">
         <div className="bauhaus-button-row">
           <BauhausButton label="add to library..." onClick={() => openDialog("inplace")} />
@@ -44,6 +44,6 @@ export default function ImportModule() {
           </div>
         </BauhausSection>
       </div>
-    </CollapsibleModule>
+    </LibModuleCard>
   );
 }

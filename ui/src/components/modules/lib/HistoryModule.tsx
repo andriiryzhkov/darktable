@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import CollapsibleModule from "../CollapsibleModule";
+import LibModuleCard from "../LibModuleCard";
 import ConfirmDialog from "../../ConfirmDialog";
 import { useDevelopStore } from "../../../stores/developStore";
 import BauhausButton from "../../controls/BauhausButton";
@@ -70,7 +70,7 @@ export default function HistoryModule() {
 
   return (
     <>
-      <CollapsibleModule title="history" description={"display the sequence of edit actions\n- click on an entry to temporarily return to that earlier state of the edit\n- shift-click to focus that module without changing the edit state"} defaultOpen onReset={handleReset}>
+      <LibModuleCard title="history" description={"display the sequence of edit actions\n- click on an entry to temporarily return to that earlier state of the edit\n- shift-click to focus that module without changing the edit state"} defaultOpen onReset={handleReset}>
         {sessionId ? (
           <div>
             <div className="history-list">
@@ -134,7 +134,7 @@ export default function HistoryModule() {
             no active session
           </p>
         )}
-      </CollapsibleModule>
+      </LibModuleCard>
       {showConfirm && (
         <ConfirmDialog
           title="delete image's history?"

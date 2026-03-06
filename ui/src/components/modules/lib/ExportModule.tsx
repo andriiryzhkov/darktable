@@ -1,5 +1,5 @@
 import { useState } from "react";
-import CollapsibleModule from "../CollapsibleModule";
+import LibModuleCard from "../LibModuleCard";
 import BauhausButton from "../../controls/BauhausButton";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausRow from "../../controls/BauhausRow";
@@ -10,7 +10,7 @@ export default function ExportModule() {
   const [quality, setQuality] = useState(95);
 
   return (
-    <CollapsibleModule title="export" description="create new files for the currently selected images which apply your edits" defaultOpen>
+    <LibModuleCard title="export" description="create new files for the currently selected images which apply your edits" defaultOpen>
       <div className="space-y-1">
         <BauhausCombo label="target storage" options={["file on disk"]} />
         <BauhausRow label="">
@@ -47,6 +47,6 @@ export default function ExportModule() {
         <BauhausCombo label="style" options={["none"]} />
         <BauhausButton label="export" />
       </div>
-    </CollapsibleModule>
+    </LibModuleCard>
   );
 }

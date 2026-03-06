@@ -8,7 +8,7 @@ import {
   DEFAULT_PRESET_NAME,
   type ModuleGroupPreset,
 } from "./moduleGroupPresets";
-import ProcessingModuleCard from "../modules/ProcessingModuleCard";
+import IopModuleCard from "../modules/IopModuleCard";
 import ScopeWidget from "./ScopeWidget";
 import BauhausTooltip from "../controls/BauhausTooltip";
 import { useDevelopStore } from "../../stores/developStore";
@@ -174,7 +174,7 @@ export default function DarkroomRightSidebar() {
       <div className="flex-1 overflow-y-auto">
         <Suspense fallback={null}>
           {filteredModules.map((mod) => (
-            <ProcessingModuleCard
+            <IopModuleCard
               key={mod.op}
               module={mod}
             />

@@ -1,4 +1,4 @@
-import CollapsibleModule from "../CollapsibleModule";
+import LibModuleCard from "../LibModuleCard";
 import BauhausTooltip from "../../controls/BauhausTooltip";
 import {
   Trash2,
@@ -36,7 +36,7 @@ function ActionButton({
 
 export default function ActionsModule() {
   return (
-    <CollapsibleModule title="actions on selection" description="perform various operations on the currently selected images" defaultOpen>
+    <LibModuleCard title="actions on selection" description="perform various operations on the currently selected images" defaultOpen>
       <div className="space-y-2">
         {/* Tab bar */}
         <div className="flex gap-1 text-xs">
@@ -121,6 +121,6 @@ export default function ActionsModule() {
           <span>show in files</span>
         </button>
       </div>
-    </CollapsibleModule>
+    </LibModuleCard>
   );
 }

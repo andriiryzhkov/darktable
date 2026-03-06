@@ -1,4 +1,4 @@
-import CollapsibleModule from "../CollapsibleModule";
+import LibModuleCard from "../LibModuleCard";
 import BauhausSection from "../../controls/BauhausSection";
 import { useCatalogStore } from "../../../stores/catalogStore";
 import type { ImageInfo } from "../../../types/protocol";
@@ -259,7 +259,7 @@ export default function ImageInfoModule() {
     : null;
 
   return (
-    <CollapsibleModule title="image information" description="display camera and image metadata for the selected image" defaultOpen>
+    <LibModuleCard title="image information" description="display camera and image metadata for the selected image" defaultOpen>
       {selected ? (
         <>
           <ExifBar image={selected} />
@@ -272,6 +272,6 @@ export default function ImageInfoModule() {
           no image selected
         </p>
       )}
-    </CollapsibleModule>
+    </LibModuleCard>
   );
 }

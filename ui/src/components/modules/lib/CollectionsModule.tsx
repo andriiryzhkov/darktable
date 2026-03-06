@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight, ChevronDown } from "lucide-react";
-import CollapsibleModule from "../CollapsibleModule";
+import LibModuleCard from "../LibModuleCard";
 import BauhausCombo, { type ComboGroup } from "../../controls/BauhausCombo";
 import BauhausInput from "../../controls/BauhausInput";
 import BauhausButton from "../../controls/BauhausButton";
@@ -221,7 +221,7 @@ export default function CollectionsModule() {
 
   return (
     <>
-    <CollapsibleModule title="collections" description="define search criteria for images to be displayed or edited" defaultOpen onReset={() => { clearRules(); setActiveRuleId(null); }}>
+    <LibModuleCard title="collections" description="define search criteria for images to be displayed or edited" defaultOpen onReset={() => { clearRules(); setActiveRuleId(null); }}>
       <div className="collection-rules">
         {/* Rule rows */}
         {rules.map((rule, index) => (
@@ -381,7 +381,7 @@ export default function CollectionsModule() {
           )}
         </div>
       </div>
-    </CollapsibleModule>
+    </LibModuleCard>
 
     {/* Action popup rendered via portal to escape sidebar overflow */}
     {actionPopup &&
