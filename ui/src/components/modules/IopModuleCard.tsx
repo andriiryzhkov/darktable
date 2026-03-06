@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import { Copy, Power, CircleDot, AlertTriangle, Crosshair, ArrowRightToLine, Workflow, ArrowRightFromLine } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import type { ModuleDescription } from "../../types/protocol";
 import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
 import ModuleCard from "./ModuleCard";
+import PresetMenu from "./PresetMenu";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 import { useModuleExpanded } from "../../hooks/useModuleExpanded";
 
@@ -65,6 +66,8 @@ export default function IopModuleCard({ module }: Props) {
   const description = useDevelopStore((s) => s.moduleDescriptions[module.op]);
   const trouble = useModuleTrouble(module.op);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const presetsRef = useRef<HTMLElement>(null);
+  const [presetsOpen, setPresetsOpen] = useState(false);
 
   useEffect(() => {
     if (focusModuleOp === module.op) {
@@ -87,50 +90,57 @@ export default function IopModuleCard({ module }: Props) {
   const Component = module.component;
 
   return (
-    <ModuleCard
-      title={module.name}
-      tooltip={description ? <ModuleDescriptionTooltip desc={description} /> : undefined}
-      open={open}
-      onToggle={setOpen}
-      wrapperRef={wrapperRef}
-      leftIcon={
-        isMandatory ? (
-          <BauhausTooltip content={`'${module.name}' is switched on`} placement="bottom">
-            <CircleDot size={12} className="module-mandatory-icon" />
+    <>
+      <ModuleCard
+        title={module.name}
+        tooltip={description ? <ModuleDescriptionTooltip desc={description} /> : undefined}
+        open={open}
+        onToggle={setOpen}
+        wrapperRef={wrapperRef}
+        leftIcon={
+          isMandatory ? (
+            <BauhausTooltip content={`'${module.name}' is switched on`} placement="bottom">
+              <CircleDot size={12} className="module-mandatory-icon" />
+            </BauhausTooltip>
+          ) : (
+            <BauhausTooltip content={`'${module.name}' is switched ${enabled ? "on" : "off"}`} placement="bottom">
+              <span className="module-power" onClick={(e) => e.stopPropagation()}>
+                <BauhausButton
+                  icon={<Power size={12} />}
+                  active={enabled}
+                  onClick={toggleEnabled}
+                />
+              </span>
+            </BauhausTooltip>
+          )
+        }
+        afterTitle={
+          trouble ? (
+            <BauhausTooltip content={trouble} placement="left">
+              <span className="module-trouble-icon">
+                <AlertTriangle size={12} />
+              </span>
+            </BauhausTooltip>
+          ) : undefined
+        }
+        onReset={() => resetModule(module.op)}
+        resetTooltip={<span style={{ whiteSpace: "pre" }}>{"reset parameters\nctrl-click to reapply any automatic presets"}</span>}
+        extraButtons={
+          <BauhausTooltip content={<span style={{ whiteSpace: "pre" }}>{"multiple instance action\nright-click creates new instance"}</span>} placement="bottom">
+            <BauhausButton icon={<Copy size={12} />} />
           </BauhausTooltip>
-        ) : (
-          <BauhausTooltip content={`'${module.name}' is switched ${enabled ? "on" : "off"}`} placement="bottom">
-            <span className="module-power" onClick={(e) => e.stopPropagation()}>
-              <BauhausButton
-                icon={<Power size={12} />}
-                active={enabled}
-                onClick={toggleEnabled}
-              />
-            </span>
-          </BauhausTooltip>
-        )
-      }
-      afterTitle={
-        trouble ? (
-          <BauhausTooltip content={trouble} placement="left">
-            <span className="module-trouble-icon">
-              <AlertTriangle size={12} />
-            </span>
-          </BauhausTooltip>
-        ) : undefined
-      }
-      onReset={() => resetModule(module.op)}
-      resetTooltip={<span style={{ whiteSpace: "pre" }}>{"reset parameters\nctrl-click to reapply any automatic presets"}</span>}
-      extraButtons={
-        <BauhausTooltip content={<span style={{ whiteSpace: "pre" }}>{"multiple instance action\nright-click creates new instance"}</span>} placement="bottom">
-          <BauhausButton icon={<Copy size={12} />} />
-        </BauhausTooltip>
-      }
-      presetsTooltip={<span style={{ whiteSpace: "pre" }}>{"presets\nright-click to apply on new instance"}</span>}
-    >
-      <Suspense fallback={null}>
-        <Component />
-      </Suspense>
-    </ModuleCard>
+        }
+        onPresets={() => setPresetsOpen((v) => !v)}
+        presetsButtonRef={presetsRef}
+        presetsTooltip={<span style={{ whiteSpace: "pre" }}>{"presets\nright-click to apply on new instance"}</span>}
+      >
+        <Suspense fallback={null}>
+          <Component />
+        </Suspense>
+      </ModuleCard>
+      {presetsOpen && (
+        <PresetMenu op={module.op} moduleName={module.name} anchorRef={presetsRef} onClose={() => setPresetsOpen(false)} />
+      )}
+    </>
   );
 }

@@ -10,6 +10,7 @@ import type {
   ModuleInfo,
   FilmRoll,
   Tag,
+  PresetListResult,
 } from "../types/protocol";
 import type { CollectionRuleParam, PropertyValue } from "../types/collections";
 import type { FolderEntry, FileEntry } from "../types/import";
@@ -37,6 +38,10 @@ declare global {
     developCompressHistory: (sessionId: string) => Promise<unknown>;
     developTruncateHistory: (sessionId: string, historyEnd: number) => Promise<unknown>;
     developDeleteHistory: (sessionId: string) => Promise<unknown>;
+    developListPresets: (sessionId: string, op: string) => Promise<PresetListResult>;
+    developApplyPreset: (sessionId: string, op: string, name: string) => Promise<unknown>;
+    developStorePreset: (sessionId: string, op: string, name: string, description?: string, filters?: string) => Promise<unknown>;
+    developDeletePreset: (op: string, name: string) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     pickFolder: () => Promise<string | null>;
     listFolders: (path: string) => Promise<FolderEntry[]>;
@@ -114,6 +119,18 @@ export const developTruncateHistory = (sessionId: string, historyEnd: number) =>
 
 export const developDeleteHistory = (sessionId: string) =>
   window.developDeleteHistory(sessionId);
+
+export const developListPresets = (sessionId: string, op: string) =>
+  window.developListPresets(sessionId, op);
+
+export const developApplyPreset = (sessionId: string, op: string, name: string) =>
+  window.developApplyPreset(sessionId, op, name);
+
+export const developStorePreset = (sessionId: string, op: string, name: string, description?: string, filters?: import("../components/modules/StorePresetDialog").PresetFilterParams) =>
+  window.developStorePreset(sessionId, op, name, description, filters ? JSON.stringify(filters) : undefined);
+
+export const developDeletePreset = (op: string, name: string) =>
+  window.developDeletePreset(op, name);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);

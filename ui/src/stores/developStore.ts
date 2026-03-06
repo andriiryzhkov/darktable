@@ -14,10 +14,14 @@ import {
   developCompressHistory,
   developTruncateHistory,
   developDeleteHistory,
+  developListPresets,
+  developApplyPreset,
+  developStorePreset,
+  developDeletePreset,
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { TemperatureParams, ExposureParams, FlipParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult } from "../types/protocol";
+import type { TemperatureParams, ExposureParams, FlipParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -88,6 +92,10 @@ interface DevelopState {
   setZoom: (zoom: ZoomLevel) => void;
   setPan: (x: number, y: number) => void;
   focusModule: (op: string) => void;
+  listPresets: (op: string) => Promise<PresetInfo[]>;
+  applyPreset: (op: string, name: string) => Promise<void>;
+  storePreset: (op: string, name: string, description?: string, filters?: import("../components/modules/StorePresetDialog").PresetFilterParams) => Promise<void>;
+  removePreset: (op: string, name: string) => Promise<void>;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -479,6 +487,52 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().fetchModuleParams(op);
     } catch (e) {
       console.error("reset module failed:", e);
+    }
+  },
+
+  listPresets: async (op: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return [];
+    try {
+      const result = await developListPresets(sessionId, op);
+      return result.presets;
+    } catch (e) {
+      console.error("list presets failed:", e);
+      return [];
+    }
+  },
+
+  applyPreset: async (op: string, name: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developApplyPreset(sessionId, op, name);
+      await get().requestPreview();
+      await get().fetchFrame();
+      await get().fetchHistory();
+      await get().fetchModuleParams(op);
+    } catch (e) {
+      console.error("apply preset failed:", e);
+    }
+  },
+
+  storePreset: async (op: string, name: string, description?: string, filters?: import("../components/modules/StorePresetDialog").PresetFilterParams) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developStorePreset(sessionId, op, name, description, filters);
+    } catch (e) {
+      console.error("store preset failed:", e);
+    }
+  },
+
+  removePreset: async (op: string, name: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developDeletePreset(op, name);
+    } catch (e) {
+      console.error("delete preset failed:", e);
     }
   },
 }));

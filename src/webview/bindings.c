@@ -863,6 +863,211 @@ static void on_develop_delete_history(const char *id, const char *req, void *arg
   g_free(params);
 }
 
+static void on_develop_list_presets(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developListPresets requires (sessionId, op)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\"}", session_id, op);
+  g_free(session_id);
+  g_free(op);
+
+  _ipc_passthrough(ctx, id, "develop.list_presets", params);
+  g_free(params);
+}
+
+static void on_develop_apply_preset(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 3)
+  {
+    _return_error(ctx, id, "developApplyPreset requires (sessionId, op, name)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  char *name = _get_string_arg(args, 2);
+  g_object_unref(parser);
+
+  // Build JSON with proper escaping via JsonBuilder
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "session_id");
+  json_builder_add_string_value(b, session_id);
+  json_builder_set_member_name(b, "op");
+  json_builder_add_string_value(b, op);
+  json_builder_set_member_name(b, "name");
+  json_builder_add_string_value(b, name);
+  json_builder_end_object(b);
+
+  JsonGenerator *gen = json_generator_new();
+  JsonNode *root = json_builder_get_root(b);
+  json_generator_set_root(gen, root);
+  char *params = json_generator_to_data(gen, NULL);
+  json_node_unref(root);
+  g_object_unref(gen);
+  g_object_unref(b);
+  g_free(session_id);
+  g_free(op);
+  g_free(name);
+
+  _ipc_passthrough(ctx, id, "develop.apply_preset", params);
+  g_free(params);
+}
+
+static void on_develop_store_preset(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 3)
+  {
+    _return_error(ctx, id, "developStorePreset requires (sessionId, op, name, [description])");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  char *name = _get_string_arg(args, 2);
+  char *description = (json_array_get_length(args) > 3) ? _get_string_arg(args, 3) : g_strdup("");
+  char *filters_json = (json_array_get_length(args) > 4) ? _get_string_arg(args, 4) : NULL;
+
+  // Parse filters JSON if provided
+  JsonObject *filters = NULL;
+  JsonParser *filters_parser = NULL;
+  if(filters_json && filters_json[0])
+  {
+    filters_parser = json_parser_new();
+    if(json_parser_load_from_data(filters_parser, filters_json, -1, NULL))
+    {
+      JsonNode *fnode = json_parser_get_root(filters_parser);
+      if(fnode && JSON_NODE_HOLDS_OBJECT(fnode))
+        filters = json_node_get_object(fnode);
+    }
+  }
+  g_object_unref(parser);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "session_id");
+  json_builder_add_string_value(b, session_id);
+  json_builder_set_member_name(b, "op");
+  json_builder_add_string_value(b, op);
+  json_builder_set_member_name(b, "name");
+  json_builder_add_string_value(b, name);
+  json_builder_set_member_name(b, "description");
+  json_builder_add_string_value(b, description);
+
+  if(filters)
+  {
+    // Forward filter fields into the params object
+    static const char *str_fields[] = { "model", "maker", "lens", NULL };
+    for(const char **f = str_fields; *f; f++)
+      if(json_object_has_member(filters, *f))
+      {
+        json_builder_set_member_name(b, *f);
+        json_builder_add_string_value(b, json_object_get_string_member(filters, *f));
+      }
+
+    static const char *real_fields[] = {
+      "iso_min", "iso_max", "exposure_min", "exposure_max",
+      "aperture_min", "aperture_max", "focal_length_min", "focal_length_max", NULL
+    };
+    for(const char **f = real_fields; *f; f++)
+      if(json_object_has_member(filters, *f))
+      {
+        json_builder_set_member_name(b, *f);
+        json_builder_add_double_value(b, json_object_get_double_member(filters, *f));
+      }
+
+    static const char *int_fields[] = { "autoapply", "filter", "format", NULL };
+    for(const char **f = int_fields; *f; f++)
+      if(json_object_has_member(filters, *f))
+      {
+        json_builder_set_member_name(b, *f);
+        // booleans come as true/false, integers as numbers
+        JsonNode *node = json_object_get_member(filters, *f);
+        if(JSON_NODE_HOLDS_VALUE(node) && json_node_get_value_type(node) == G_TYPE_BOOLEAN)
+          json_builder_add_int_value(b, json_node_get_boolean(node) ? 1 : 0);
+        else
+          json_builder_add_int_value(b, json_object_get_int_member(filters, *f));
+      }
+  }
+
+  json_builder_end_object(b);
+
+  JsonGenerator *gen = json_generator_new();
+  JsonNode *root = json_builder_get_root(b);
+  json_generator_set_root(gen, root);
+  char *params = json_generator_to_data(gen, NULL);
+  json_node_unref(root);
+  g_object_unref(gen);
+  g_object_unref(b);
+  if(filters_parser) g_object_unref(filters_parser);
+  g_free(session_id);
+  g_free(op);
+  g_free(name);
+  g_free(description);
+  g_free(filters_json);
+
+  _ipc_passthrough(ctx, id, "develop.store_preset", params);
+  g_free(params);
+}
+
+static void on_develop_delete_preset(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developDeletePreset requires (op, name)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *op = _get_string_arg(args, 0);
+  char *name = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "op");
+  json_builder_add_string_value(b, op);
+  json_builder_set_member_name(b, "name");
+  json_builder_add_string_value(b, name);
+  json_builder_end_object(b);
+
+  JsonGenerator *gen = json_generator_new();
+  JsonNode *root = json_builder_get_root(b);
+  json_generator_set_root(gen, root);
+  char *params = json_generator_to_data(gen, NULL);
+  json_node_unref(root);
+  g_object_unref(gen);
+  g_object_unref(b);
+  g_free(op);
+  g_free(name);
+
+  _ipc_passthrough(ctx, id, "develop.delete_preset", params);
+  g_free(params);
+}
+
 /* getPreviewFrame: reads pixels directly from SHM, no IPC */
 
 /* Minimal memory-to-memory JPEG compressor using libjpeg.
@@ -2175,6 +2380,10 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developCompressHistory", on_develop_compress_history, ctx);
   webview_bind(ctx->webview, "developTruncateHistory", on_develop_truncate_history, ctx);
   webview_bind(ctx->webview, "developDeleteHistory", on_develop_delete_history, ctx);
+  webview_bind(ctx->webview, "developListPresets", on_develop_list_presets, ctx);
+  webview_bind(ctx->webview, "developApplyPreset", on_develop_apply_preset, ctx);
+  webview_bind(ctx->webview, "developStorePreset", on_develop_store_preset, ctx);
+  webview_bind(ctx->webview, "developDeletePreset", on_develop_delete_preset, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);
   webview_bind(ctx->webview, "listFolders", on_list_folders, ctx);

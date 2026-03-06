@@ -21,6 +21,7 @@ interface ModuleCardProps {
   resetTooltip?: ReactNode;
   onPresets?: () => void;
   presetsTooltip?: ReactNode;
+  presetsButtonRef?: React.RefObject<HTMLElement | null>;
   wrapperRef?: React.Ref<HTMLDivElement>;
   children: ReactNode;
 }
@@ -39,6 +40,7 @@ export default function ModuleCard({
   resetTooltip = "reset",
   onPresets,
   presetsTooltip = "presets and preferences",
+  presetsButtonRef,
   wrapperRef,
   children,
 }: ModuleCardProps) {
@@ -93,13 +95,15 @@ export default function ModuleCard({
           ) : (
             <BauhausButton icon={<RotateCcw size={12} />} disabled />
           )}
-          {onPresets ? (
-            <BauhausTooltip content={presetsTooltip} placement="bottom">
-              <BauhausButton icon={<Menu size={12} />} onClick={onPresets} />
-            </BauhausTooltip>
-          ) : (
-            <BauhausButton icon={<Menu size={12} />} disabled />
-          )}
+          <span ref={presetsButtonRef as React.Ref<HTMLSpanElement>}>
+            {onPresets ? (
+              <BauhausTooltip content={presetsTooltip} placement="bottom">
+                <BauhausButton icon={<Menu size={12} />} onClick={onPresets} />
+              </BauhausTooltip>
+            ) : (
+              <BauhausButton icon={<Menu size={12} />} disabled />
+            )}
+          </span>
         </span>
       </div>
       {open && <div className="module-content">{children}</div>}

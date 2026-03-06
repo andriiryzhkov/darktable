@@ -3,6 +3,7 @@ import { useState, useCallback } from "react";
 interface BauhausCheckboxProps {
   label: string;
   checked?: boolean;
+  disabled?: boolean;
   align?: "left" | "right";
   onChange?: (checked: boolean) => void;
 }
@@ -10,6 +11,7 @@ interface BauhausCheckboxProps {
 export default function BauhausCheckbox({
   label,
   checked: controlledChecked,
+  disabled,
   align = "left",
   onChange,
 }: BauhausCheckboxProps) {
@@ -17,10 +19,11 @@ export default function BauhausCheckbox({
   const checked = controlledChecked ?? internal;
 
   const handleClick = useCallback(() => {
+    if (disabled) return;
     const next = !checked;
     setInternal(next);
     onChange?.(next);
-  }, [checked, onChange]);
+  }, [checked, disabled, onChange]);
 
   const box = (
     <span className="bauhaus-checkbox-box" data-checked={checked}>
@@ -33,7 +36,7 @@ export default function BauhausCheckbox({
   );
 
   return (
-    <div className="bauhaus-checkbox" data-align={align} onClick={handleClick}>
+    <div className="bauhaus-checkbox" data-align={align} data-disabled={disabled || undefined} onClick={handleClick}>
       {align === "left" && box}
       <span className="bauhaus-checkbox-label">{label}</span>
       {align === "right" && box}

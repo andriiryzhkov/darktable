@@ -242,3 +242,14 @@ export interface Tag {
   name: string;
   flags: number;
 }
+
+export interface PresetInfo {
+  name: string;
+  description: string;
+  writeprotect: boolean;
+  active: boolean;
+}
+
+export interface PresetListResult {
+  presets: PresetInfo[];
+}

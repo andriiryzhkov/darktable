@@ -23,8 +23,11 @@
 #include "common/image_cache.h"
 #include "common/iop_order.h"
 #include "develop/develop.h"
+#include "develop/blend.h"
 #include "develop/imageop.h"
 #include "develop/pixelpipe.h"
+#include "common/database.h"
+#include "common/debug.h"
 
 #include <float.h>
 #include <string.h>
@@ -2317,6 +2320,443 @@ char *dt_server_develop_delete_history(dt_server_t *server, const dt_server_requ
   JsonNode *res = json_builder_get_root(b);
   char *resp = dt_server_make_response(req->id, res);
   json_node_unref(res);
+  g_object_unref(b);
+  return resp;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Preset handlers
+// ──────────────────────────────────────────────────────────────────────────────
+
+char *dt_server_develop_list_presets(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or op");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  if(!session_id || !op)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id and op must be strings");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  // Find the module to compare current params for active detection
+  dt_iop_module_t *target = NULL;
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op))
+    {
+      target = mod;
+      break;
+    }
+  }
+
+  if(!target)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  // Query all presets for this operation
+  sqlite3_stmt *stmt;
+  DT_DEBUG_SQLITE3_PREPARE_V2(
+    dt_database_get(darktable.db),
+    "SELECT name, description, op_params, blendop_params, enabled, writeprotect"
+    " FROM data.presets"
+    " WHERE operation = ?1 AND op_version = ?2"
+    " ORDER BY writeprotect DESC, LOWER(name), rowid",
+    -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, target->op, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 2, target->version());
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "presets");
+  json_builder_begin_array(b);
+
+  while(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    const char *name = (const char *)sqlite3_column_text(stmt, 0);
+    const char *description = (const char *)sqlite3_column_text(stmt, 1);
+    const void *op_params = sqlite3_column_blob(stmt, 2);
+    const int op_length = sqlite3_column_bytes(stmt, 2);
+    const void *blendop_params = sqlite3_column_blob(stmt, 3);
+    const int bl_length = sqlite3_column_bytes(stmt, 3);
+    const int enabled = sqlite3_column_int(stmt, 4);
+    const int writeprotect = sqlite3_column_int(stmt, 5);
+
+    // Check if this preset matches current module state (active detection)
+    gboolean is_active = FALSE;
+    if(((op_length == 0
+         && !memcmp(target->default_params, target->params, target->params_size))
+        || ((op_length > 0
+             && op_length == (int)target->params_size
+             && !memcmp(target->params, op_params, op_length))))
+       && blendop_params
+       && bl_length == (int)sizeof(dt_develop_blend_params_t)
+       && !memcmp(target->blend_params, blendop_params, bl_length)
+       && target->enabled == enabled)
+    {
+      is_active = TRUE;
+    }
+
+    json_builder_begin_object(b);
+    json_builder_set_member_name(b, "name");
+    json_builder_add_string_value(b, name ? name : "");
+    json_builder_set_member_name(b, "description");
+    json_builder_add_string_value(b, description ? description : "");
+    json_builder_set_member_name(b, "writeprotect");
+    json_builder_add_boolean_value(b, writeprotect);
+    json_builder_set_member_name(b, "active");
+    json_builder_add_boolean_value(b, is_active);
+    json_builder_end_object(b);
+  }
+  sqlite3_finalize(stmt);
+
+  json_builder_end_array(b);
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_apply_preset(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "name"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, op, or name");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const char *name = json_object_get_string_member(req->params, "name");
+  if(!session_id || !op || !name)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "params must be strings");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *target = NULL;
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op))
+    {
+      target = mod;
+      break;
+    }
+  }
+
+  if(!target)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  // Fetch preset from database (mirrors dt_gui_presets_apply_preset logic)
+  sqlite3_stmt *stmt;
+  DT_DEBUG_SQLITE3_PREPARE_V2(
+    dt_database_get(darktable.db),
+    "SELECT op_params, enabled, blendop_params, blendop_version"
+    " FROM data.presets"
+    " WHERE operation = ?1 AND op_version = ?2 AND name = ?3",
+    -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, target->op, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 2, target->version());
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 3, name, -1, SQLITE_TRANSIENT);
+
+  if(sqlite3_step(stmt) != SQLITE_ROW)
+  {
+    sqlite3_finalize(stmt);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Preset not found");
+  }
+
+  const void *op_params = sqlite3_column_blob(stmt, 0);
+  const int op_length = sqlite3_column_bytes(stmt, 0);
+  const int enabled = sqlite3_column_int(stmt, 1);
+  const void *blendop_params = sqlite3_column_blob(stmt, 2);
+  const int bl_length = sqlite3_column_bytes(stmt, 2);
+  const int blendop_version = sqlite3_column_int(stmt, 3);
+
+  // Apply op_params
+  if(op_params && (op_length == (int)target->params_size))
+    memcpy(target->params, op_params, op_length);
+  else
+    memcpy(target->params, target->default_params, target->params_size);
+
+  target->enabled = enabled;
+
+  // Apply blend params
+  if(blendop_params
+     && (blendop_version == dt_develop_blend_version())
+     && (bl_length == (int)sizeof(dt_develop_blend_params_t)))
+  {
+    dt_iop_commit_blend_params(target, blendop_params);
+  }
+  else if(blendop_params
+          && dt_develop_blend_legacy_params(target, blendop_params,
+                                            blendop_version, target->blend_params,
+                                            dt_develop_blend_version(), bl_length) == FALSE)
+  {
+    // legacy conversion succeeded — blend_params already updated
+  }
+  else
+  {
+    dt_iop_commit_blend_params(target, target->default_blendop_params);
+  }
+
+  sqlite3_finalize(stmt);
+
+  // Record to history
+  dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
+
+  // Mark pipeline dirty
+  session->dev.full.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview_pipe)
+    session->dev.preview_pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+  if(session->dev.preview2.pipe)
+    session->dev.preview2.pipe->changed |= DT_DEV_PIPE_TOP_CHANGED;
+
+  dt_dev_invalidate_all(&session->dev);
+  session->dirty = TRUE;
+
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
+
+  fprintf(stderr, "[server] develop.apply_preset: session=%s op=%s preset='%s'\n",
+          session_id, op, name);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_set_member_name(b, "dirty");
+  json_builder_add_boolean_value(b, session->dirty);
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_store_preset(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "name"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, op, or name");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const char *name = json_object_get_string_member(req->params, "name");
+  const char *description = json_object_has_member(req->params, "description")
+    ? json_object_get_string_member(req->params, "description") : "";
+  if(!session_id || !op || !name)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "params must be strings");
+
+  // Optional filter fields
+  const int autoapply = json_object_has_member(req->params, "autoapply")
+    ? (int)json_object_get_int_member(req->params, "autoapply") : 0;
+  const int filter = json_object_has_member(req->params, "filter")
+    ? (int)json_object_get_int_member(req->params, "filter") : 0;
+  const char *p_model = json_object_has_member(req->params, "model")
+    ? json_object_get_string_member(req->params, "model") : "%";
+  const char *p_maker = json_object_has_member(req->params, "maker")
+    ? json_object_get_string_member(req->params, "maker") : "%";
+  const char *p_lens = json_object_has_member(req->params, "lens")
+    ? json_object_get_string_member(req->params, "lens") : "%";
+  const double iso_min = json_object_has_member(req->params, "iso_min")
+    ? json_object_get_double_member(req->params, "iso_min") : 0;
+  const double iso_max = json_object_has_member(req->params, "iso_max")
+    ? json_object_get_double_member(req->params, "iso_max") : 51200;
+  const double exposure_min = json_object_has_member(req->params, "exposure_min")
+    ? json_object_get_double_member(req->params, "exposure_min") : 0;
+  const double exposure_max = json_object_has_member(req->params, "exposure_max")
+    ? json_object_get_double_member(req->params, "exposure_max") : 10000;
+  const double aperture_min = json_object_has_member(req->params, "aperture_min")
+    ? json_object_get_double_member(req->params, "aperture_min") : 0;
+  const double aperture_max = json_object_has_member(req->params, "aperture_max")
+    ? json_object_get_double_member(req->params, "aperture_max") : 128;
+  const double focal_length_min = json_object_has_member(req->params, "focal_length_min")
+    ? json_object_get_double_member(req->params, "focal_length_min") : 0;
+  const double focal_length_max = json_object_has_member(req->params, "focal_length_max")
+    ? json_object_get_double_member(req->params, "focal_length_max") : 1000;
+  const int format = json_object_has_member(req->params, "format")
+    ? (int)json_object_get_int_member(req->params, "format") : 0x1f;
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *target = NULL;
+  for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
+  {
+    dt_iop_module_t *mod = modules->data;
+    if(dt_iop_module_is(mod->so, op))
+    {
+      target = mod;
+      break;
+    }
+  }
+
+  if(!target)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  // Check if a writeprotected preset with this name already exists
+  sqlite3_stmt *stmt;
+  DT_DEBUG_SQLITE3_PREPARE_V2(
+    dt_database_get(darktable.db),
+    "SELECT writeprotect FROM data.presets"
+    " WHERE operation = ?1 AND op_version = ?2 AND name = ?3",
+    -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, target->op, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 2, target->version());
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 3, name, -1, SQLITE_TRANSIENT);
+
+  if(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    const int wp = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    if(wp)
+      return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                   "Cannot overwrite write-protected preset");
+
+    // Delete existing user preset so we can replace it
+    DT_DEBUG_SQLITE3_PREPARE_V2(
+      dt_database_get(darktable.db),
+      "DELETE FROM data.presets WHERE operation = ?1 AND op_version = ?2 AND name = ?3",
+      -1, &stmt, NULL);
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, target->op, -1, SQLITE_TRANSIENT);
+    DT_DEBUG_SQLITE3_BIND_INT(stmt, 2, target->version());
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 3, name, -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+  }
+  else
+  {
+    sqlite3_finalize(stmt);
+  }
+
+  // Insert new preset with current module params and filter settings
+  DT_DEBUG_SQLITE3_PREPARE_V2(
+    dt_database_get(darktable.db),
+    "INSERT INTO data.presets"
+    " (name, description, operation, op_version, op_params, enabled,"
+    "  blendop_params, blendop_version, writeprotect,"
+    "  autoapply, filter, model, maker, lens,"
+    "  iso_min, iso_max, exposure_min, exposure_max,"
+    "  aperture_min, aperture_max, focal_length_min, focal_length_max, format)"
+    " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0,"
+    "         ?9, ?10, ?11, ?12, ?13,"
+    "         ?14, ?15, ?16, ?17,"
+    "         ?18, ?19, ?20, ?21, ?22)",
+    -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, name, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 2, description ? description : "", -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 3, target->op, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 4, target->version());
+  DT_DEBUG_SQLITE3_BIND_BLOB(stmt, 5, target->params, target->params_size, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 6, target->enabled);
+  DT_DEBUG_SQLITE3_BIND_BLOB(stmt, 7, target->blend_params, sizeof(dt_develop_blend_params_t), SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 8, dt_develop_blend_version());
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 9, autoapply);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 10, filter);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 11, p_model, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 12, p_maker, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 13, p_lens, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 14, iso_min);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 15, iso_max);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 16, exposure_min);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 17, exposure_max);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 18, aperture_min);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 19, aperture_max);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 20, focal_length_min);
+  DT_DEBUG_SQLITE3_BIND_DOUBLE(stmt, 21, focal_length_max);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 22, format);
+  sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+
+  fprintf(stderr, "[server] develop.store_preset: session=%s op=%s name='%s'\n",
+          session_id, op, name);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_delete_preset(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "name"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing op or name");
+
+  const char *op = json_object_get_string_member(req->params, "op");
+  const char *name = json_object_get_string_member(req->params, "name");
+  if(!op || !name)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "op and name must be strings");
+
+  // Check writeprotect
+  sqlite3_stmt *stmt;
+  DT_DEBUG_SQLITE3_PREPARE_V2(
+    dt_database_get(darktable.db),
+    "SELECT writeprotect FROM data.presets"
+    " WHERE name = ?1 AND operation = ?2",
+    -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, name, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 2, op, -1, SQLITE_TRANSIENT);
+
+  if(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    const int wp = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    if(wp)
+      return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                   "Cannot delete write-protected preset");
+  }
+  else
+  {
+    sqlite3_finalize(stmt);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Preset not found");
+  }
+
+  DT_DEBUG_SQLITE3_PREPARE_V2(
+    dt_database_get(darktable.db),
+    "DELETE FROM data.presets WHERE name = ?1 AND operation = ?2",
+    -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, name, -1, SQLITE_TRANSIENT);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 2, op, -1, SQLITE_TRANSIENT);
+  sqlite3_step(stmt);
+  sqlite3_finalize(stmt);
+
+  fprintf(stderr, "[server] develop.delete_preset: op=%s name='%s'\n", op, name);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
   g_object_unref(b);
   return resp;
 }

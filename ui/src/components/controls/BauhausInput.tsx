@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, type ChangeEvent, type FocusEvent } from "react";
 
 interface ModuleInputBaseProps {
-  label: string;
+  label?: string;
   placeholder?: string;
 }
 
@@ -81,7 +81,7 @@ function TextInput({
   placeholder,
   onChange,
 }: {
-  label: string;
+  label?: string;
   value?: string;
   placeholder?: string;
   onChange?: (value: string) => void;
@@ -100,7 +100,7 @@ function TextInput({
 
   return (
     <div className="bauhaus-input">
-      <span className="bauhaus-input-label">{label}</span>
+      {label && <span className="bauhaus-input-label">{label}</span>}
       <input
         type="text"
         className="bauhaus-input-field"
@@ -121,7 +121,7 @@ function IntegerInput({
   max,
   step,
 }: {
-  label: string;
+  label?: string;
   defaultValue?: number;
   placeholder?: string;
   onChange?: (value: number) => void;
@@ -182,16 +182,7 @@ function IntegerInput({
 
   return (
     <div className="bauhaus-input">
-      <span className="bauhaus-input-label">{label}</span>
-      <button
-        className="bauhaus-input-step"
-        onClick={decrement}
-        disabled={value <= min}
-      >
-        <svg viewBox="0 0 8 2" xmlns="http://www.w3.org/2000/svg">
-          <path d="M0 1h8" stroke="currentColor" strokeWidth="2" />
-        </svg>
-      </button>
+      {label && <span className="bauhaus-input-label">{label}</span>}
       <input
         type="text"
         className="bauhaus-input-field bauhaus-input-field-number"
@@ -201,6 +192,15 @@ function IntegerInput({
         onFocus={handleFocus}
         onBlur={handleBlur}
       />
+      <button
+        className="bauhaus-input-step"
+        onClick={decrement}
+        disabled={value <= min}
+      >
+        <svg viewBox="0 0 8 2" xmlns="http://www.w3.org/2000/svg">
+          <path d="M0 1h8" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      </button>
       <button
         className="bauhaus-input-step"
         onClick={increment}
@@ -220,7 +220,7 @@ function SelectInput({
   defaultValue,
   onChange,
 }: {
-  label: string;
+  label?: string;
   options: string[];
   defaultValue?: string;
   onChange?: (value: string) => void;
@@ -258,7 +258,7 @@ function SelectInput({
 
   return (
     <div className="bauhaus-input bauhaus-input-select" ref={ref}>
-      <span className="bauhaus-input-label">{label}</span>
+      {label && <span className="bauhaus-input-label">{label}</span>}
       <div
         className="bauhaus-input-field bauhaus-input-field-select"
         onClick={() => setOpen(!open)}
