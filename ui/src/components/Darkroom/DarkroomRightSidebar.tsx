@@ -10,7 +10,7 @@ import {
 } from "./moduleGroupPresets";
 import ProcessingModuleCard from "../modules/ProcessingModuleCard";
 import ScopeWidget from "./ScopeWidget";
-import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
+import { useDevelopStore } from "../../stores/developStore";
 
 function getPreset(name: string): ModuleGroupPreset {
   return MODULE_GROUP_PRESETS.find((p) => p.name === name) ?? MODULE_GROUP_PRESETS[0];
@@ -28,6 +28,14 @@ export default function DarkroomRightSidebar() {
   const popupRef = useRef<HTMLDivElement>(null);
   const [popupPos, setPopupPos] = useState({ top: 0, left: 0, minWidth: 0 });
   const historyItems = useDevelopStore((s) => s.historyItems);
+  const focusModuleOp = useDevelopStore((s) => s.focusModuleOp);
+
+  // React to focusModuleOp: switch to active tab so the module is visible
+  useEffect(() => {
+    if (focusModuleOp) {
+      setActiveTab("active");
+    }
+  }, [focusModuleOp]);
 
   // Close popup on outside click or Escape
   useEffect(() => {
@@ -80,8 +88,8 @@ export default function DarkroomRightSidebar() {
     if (activeTab === "quick") {
       return [];
     } else if (activeTab === "active") {
-      const enabledOps = getEnabledOps(historyItems);
-      modules = modules.filter((m) => enabledOps.has(m.op));
+      const historyOps = new Set(historyItems.map((h) => h.op));
+      modules = modules.filter((m) => historyOps.has(m.op));
     } else if (activePresetGroup) {
       const opSet = new Set(activePresetGroup.modules);
       modules = modules.filter((m) => opSet.has(m.op));

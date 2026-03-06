@@ -202,6 +202,32 @@ body {
   color: var(--plugin-label-color);
 }
 
+.module-power {
+  display: flex;
+  align-items: center;
+}
+
+.module-power .bauhaus-button-icon-only {
+  background: transparent;
+  border-color: transparent;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  color: var(--disabled-fg-color);
+}
+
+.module-power .bauhaus-button-icon-only[data-active="true"] {
+  color: var(--fg-color);
+}
+
+.module-mandatory-icon {
+  flex-shrink: 0;
+  color: var(--plugin-label-color);
+  width: 16px;
+  height: 16px;
+  padding: 2px;
+}
+
 .module-content {
   padding: 4px 8px 6px;
 }
@@ -2576,25 +2602,6 @@ body {
 }
 
 /* ── Darkroom module enable toggle ─────────── */
-.darkroom-module-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  color: var(--disabled-fg-color);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.darkroom-module-toggle[data-enabled="true"] {
-  color: var(--fg-color);
-}
-
-.darkroom-module-toggle:hover {
-  color: var(--fg-color);
-}
-
 /* History stack */
 .history-list {
   max-height: 240px;
@@ -2607,6 +2614,17 @@ body {
   gap: 4px;
   padding: 1px 4px 1px 0;
   color: var(--fg-color);
+  cursor: pointer;
+}
+
+.history-item:hover .history-item-name {
+  background: var(--hovered-bg-color);
+  border-radius: 3px;
+}
+
+.history-item[data-selected="true"] .history-item-name {
+  background: var(--selected-bg-color);
+  border-radius: 3px;
 }
 
 .history-item[data-active="false"] {
@@ -2627,6 +2645,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0 4px;
 }
 
 .history-item-name[data-enabled="false"] {
@@ -2643,18 +2662,19 @@ body {
   display: flex;
   align-items: center;
   color: var(--disabled-fg-color);
+  cursor: pointer;
+}
+
+.history-item-icon[data-mandatory="true"] {
+  cursor: default;
 }
 
 .history-item-icon[data-enabled="true"] {
   color: var(--fg-color);
 }
 
-.history-item-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.history-item-icon:not([data-mandatory="true"]):hover {
+  color: var(--fg-color);
 }
 
 /* Navigation module */

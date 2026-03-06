@@ -726,6 +726,74 @@ static void on_develop_get_history(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+static void on_develop_select_history(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developSelectHistory requires (sessionId, historyEnd)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  int history_end = (int)json_array_get_int_element(args, 1);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\",\"history_end\":%d}", session_id, history_end);
+  g_free(session_id);
+
+  _ipc_passthrough(ctx, id, "develop.select_history", params);
+  g_free(params);
+}
+
+static void on_develop_compress_history(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "developCompressHistory requires (sessionId)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_free(session_id);
+
+  _ipc_passthrough(ctx, id, "develop.compress_history", params);
+  g_free(params);
+}
+
+static void on_develop_truncate_history(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developTruncateHistory requires (sessionId, historyEnd)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  int history_end = (int)json_array_get_int_element(args, 1);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\",\"history_end\":%d}", session_id, history_end);
+  g_free(session_id);
+
+  _ipc_passthrough(ctx, id, "develop.truncate_history", params);
+  g_free(params);
+}
+
 static void on_develop_delete_history(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -2008,6 +2076,9 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developRequestPreview", on_develop_request_preview, ctx);
   webview_bind(ctx->webview, "developSamplePixels", on_develop_sample_pixels, ctx);
   webview_bind(ctx->webview, "developGetHistory", on_develop_get_history, ctx);
+  webview_bind(ctx->webview, "developSelectHistory", on_develop_select_history, ctx);
+  webview_bind(ctx->webview, "developCompressHistory", on_develop_compress_history, ctx);
+  webview_bind(ctx->webview, "developTruncateHistory", on_develop_truncate_history, ctx);
   webview_bind(ctx->webview, "developDeleteHistory", on_develop_delete_history, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);

@@ -1,4 +1,4 @@
-import { useState, useCallback, Suspense } from "react";
+import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import { RotateCcw, Menu, Copy, Power, CircleDot, AlertTriangle } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import BauhausButton from "../controls/BauhausButton";
@@ -30,32 +30,46 @@ export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
   const [open, setOpen] = useState(defaultOpen ?? false);
   const historyItems = useDevelopStore((s) => s.historyItems);
   const enableModule = useDevelopStore((s) => s.enableModule);
+  const focusModuleOp = useDevelopStore((s) => s.focusModuleOp);
   const trouble = useModuleTrouble(module.op);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // React to focusModuleOp: open and scroll into view
+  useEffect(() => {
+    if (focusModuleOp === module.op) {
+      setOpen(true);
+      // Clear after consuming so it can be re-triggered
+      useDevelopStore.setState({ focusModuleOp: null });
+      requestAnimationFrame(() => {
+        wrapperRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    }
+  }, [focusModuleOp, module.op]);
 
   const enabled = getEnabledOps(historyItems).has(module.op);
   const isMandatory = historyItems.some((h) => h.op === module.op && h.mandatory);
 
-  const toggleEnabled = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (isMandatory) return;
-      enableModule(module.op, !enabled);
-    },
-    [module.op, enabled, enableModule, isMandatory],
-  );
+  const toggleEnabled = useCallback(() => {
+    if (isMandatory) return;
+    enableModule(module.op, !enabled);
+  }, [module.op, enabled, enableModule, isMandatory]);
 
   const Component = module.component;
 
   return (
-    <div className="module-wrapper" data-open={open}>
+    <div ref={wrapperRef} className="module-wrapper" data-open={open}>
       <div className="module-header" onClick={() => setOpen(!open)}>
-        <span
-          className="darkroom-module-toggle"
-          data-enabled={enabled}
-          onClick={toggleEnabled}
-        >
-          {isMandatory ? <CircleDot size={12} /> : <Power size={12} />}
-        </span>
+        {isMandatory ? (
+          <CircleDot size={12} className="module-mandatory-icon" />
+        ) : (
+          <span className="module-power" onClick={(e) => e.stopPropagation()}>
+            <BauhausButton
+              icon={<Power size={12} />}
+              active={enabled}
+              onClick={toggleEnabled}
+            />
+          </span>
+        )}
 
         <span className="flex-1">{module.name}</span>
         {trouble && (

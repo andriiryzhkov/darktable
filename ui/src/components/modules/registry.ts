@@ -99,7 +99,7 @@ export const LIB_MODULES: LibModuleDef[] = [
   {
     op: "history",
     name: "history",
-    component: lazy(() => import("./lib/DarkroomHistoryModule")),
+    component: lazy(() => import("./lib/HistoryModule")),
     views: VIEW_DARKROOM,
     container: PANEL_LEFT_CENTER,
     position: 900,

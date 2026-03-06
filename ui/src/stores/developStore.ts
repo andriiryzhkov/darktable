@@ -8,6 +8,9 @@ import {
   developRequestPreview,
   developSamplePixels,
   developGetHistory,
+  developSelectHistory,
+  developCompressHistory,
+  developTruncateHistory,
   developDeleteHistory,
   getPreviewFrame,
 } from "../api/commands";
@@ -51,6 +54,9 @@ interface DevelopState {
   loading: boolean;
   previewError: string | null;
 
+  // Focus module (shift+click history item → scroll to & expand module in sidebar)
+  focusModuleOp: string | null;
+
   // Zoom & pan
   zoom: ZoomLevel;
   panX: number; // 0..1, center of viewport in image space
@@ -69,10 +75,14 @@ interface DevelopState {
   setModuleParam: (op: string, params: Record<string, unknown>) => Promise<void>;
   enableModule: (op: string, enabled: boolean) => Promise<void>;
   fetchHistory: () => Promise<void>;
+  selectHistory: (historyEnd: number) => Promise<void>;
+  compressHistory: () => Promise<void>;
+  truncateHistory: (historyEnd: number) => Promise<void>;
   deleteHistory: () => Promise<void>;
   samplePixels: (x: number, y: number, w: number, h: number) => Promise<PixelSampleResult | null>;
   setZoom: (zoom: ZoomLevel) => void;
   setPan: (x: number, y: number) => void;
+  focusModule: (op: string) => void;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -122,6 +132,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   historyEnd: 0,
   loading: false,
   previewError: null,
+  focusModuleOp: null,
   zoom: "fit" as ZoomLevel,
   panX: 0.5,
   panY: 0.5,
@@ -139,6 +150,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
 
   setZoom: (zoom: ZoomLevel) => set({ zoom, panX: 0.5, panY: 0.5 }),
   setPan: (panX: number, panY: number) => set({ panX, panY }),
+  focusModule: (op: string) => set({ focusModuleOp: op }),
 
   openSession: async (imgid: number) => {
     // Bump generation — any in-flight operations for prior sessions become stale
@@ -290,6 +302,51 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       set({ historyItems: result.items, historyEnd: result.history_end });
     } catch (e) {
       console.error("develop.get_history failed:", e);
+    }
+  },
+
+  selectHistory: async (historyEnd: number) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developSelectHistory(sessionId, historyEnd);
+      set({ historyEnd });
+      // Re-render preview and refresh module params (active modules change)
+      await get().requestPreview();
+      await Promise.all([
+        get().fetchFrame(),
+        get().fetchModuleParams("exposure"),
+        get().fetchModuleParams("temperature"),
+        get().fetchModuleParams("sigmoid"),
+      ]);
+    } catch (e) {
+      console.error("develop.select_history failed:", e);
+    }
+  },
+
+  compressHistory: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developCompressHistory(sessionId);
+      await get().requestPreview();
+      await get().fetchFrame();
+      await get().fetchHistory();
+    } catch (e) {
+      console.error("develop.compress_history failed:", e);
+    }
+  },
+
+  truncateHistory: async (historyEnd: number) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developTruncateHistory(sessionId, historyEnd);
+      await get().requestPreview();
+      await get().fetchFrame();
+      await get().fetchHistory();
+    } catch (e) {
+      console.error("develop.truncate_history failed:", e);
     }
   },
 

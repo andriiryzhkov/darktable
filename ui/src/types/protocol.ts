@@ -99,6 +99,7 @@ export interface ModuleInfo {
 
 export interface HistoryItem {
   num: number;
+  history_index: number;
   op: string;
   name: string;
   enabled: boolean;

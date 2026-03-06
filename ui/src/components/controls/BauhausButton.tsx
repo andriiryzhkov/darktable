@@ -8,9 +8,10 @@ interface BauhausButtonProps {
   title?: string;
   transparent?: boolean;
   onClick?: () => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
 }
 
-export default function BauhausButton({ label, icon, disabled, active, title, transparent, onClick }: BauhausButtonProps) {
+export default function BauhausButton({ label, icon, disabled, active, title, transparent, onClick, onMouseDown }: BauhausButtonProps) {
   const iconOnly = icon && !label;
   const classes = [
     "bauhaus-button",
@@ -24,6 +25,7 @@ export default function BauhausButton({ label, icon, disabled, active, title, tr
       data-active={active}
       title={title}
       onClick={onClick}
+      onMouseDown={onMouseDown}
     >
       {icon && <span className="bauhaus-button-icon">{icon}</span>}
       {label && <span className="bauhaus-button-label">{label}</span>}

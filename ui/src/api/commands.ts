@@ -30,6 +30,9 @@ declare global {
     developRequestPreview: (sessionId: string) => Promise<PreviewResult>;
     developSamplePixels: (sessionId: string, x: number, y: number, w: number, h: number) => Promise<PixelSampleResult>;
     developGetHistory: (sessionId: string) => Promise<HistoryResult>;
+    developSelectHistory: (sessionId: string, historyEnd: number) => Promise<unknown>;
+    developCompressHistory: (sessionId: string) => Promise<unknown>;
+    developTruncateHistory: (sessionId: string, historyEnd: number) => Promise<unknown>;
     developDeleteHistory: (sessionId: string) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     pickFolder: () => Promise<string | null>;
@@ -88,6 +91,15 @@ export const developSamplePixels = (sessionId: string, x: number, y: number, w: 
 
 export const developGetHistory = (sessionId: string) =>
   window.developGetHistory(sessionId);
+
+export const developSelectHistory = (sessionId: string, historyEnd: number) =>
+  window.developSelectHistory(sessionId, historyEnd);
+
+export const developCompressHistory = (sessionId: string) =>
+  window.developCompressHistory(sessionId);
+
+export const developTruncateHistory = (sessionId: string, historyEnd: number) =>
+  window.developTruncateHistory(sessionId, historyEnd);
 
 export const developDeleteHistory = (sessionId: string) =>
   window.developDeleteHistory(sessionId);

@@ -92,6 +92,10 @@
   --thumbnail-star-bg-color: var(--grey-40);
   --thumbnail-star-hover-color: var(--grey-85);
 
+  /* ── Hovered / selected items ────────────────── */
+  --hovered-bg-color: var(--grey-40);
+  --selected-bg-color: var(--grey-45);
+
   /* ── Selection ──────────────────────────────── */
   --selection-color: rgb(255, 187, 0);
 

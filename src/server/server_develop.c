@@ -672,6 +672,8 @@ char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request
   json_builder_begin_object(b);
   json_builder_set_member_name(b, "num");
   json_builder_add_int_value(b, -1);
+  json_builder_set_member_name(b, "history_index");
+  json_builder_add_int_value(b, -1);
   json_builder_set_member_name(b, "op");
   json_builder_add_string_value(b, "");
   json_builder_set_member_name(b, "name");
@@ -685,7 +687,8 @@ char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request
   dt_pthread_mutex_lock(&session->dev.history_mutex);
 
   int num = 0;
-  for(GList *hist = session->dev.history; hist; hist = g_list_next(hist))
+  int real_index = 0;
+  for(GList *hist = session->dev.history; hist; hist = g_list_next(hist), real_index++)
   {
     dt_dev_history_item_t *item = hist->data;
     if(!item) continue;
@@ -697,6 +700,9 @@ char *dt_server_develop_get_history(dt_server_t *server, const dt_server_request
 
     json_builder_set_member_name(b, "num");
     json_builder_add_int_value(b, num++);
+
+    json_builder_set_member_name(b, "history_index");
+    json_builder_add_int_value(b, real_index);
 
     json_builder_set_member_name(b, "op");
     json_builder_add_string_value(b, item->op_name);
@@ -1320,8 +1326,22 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   const gboolean preview_only = json_object_has_member(req->params, "preview_only")
     && json_object_get_boolean_member(req->params, "preview_only");
 
-  // Apply module-specific parameter updates
-  if(!strcmp(op, "exposure"))
+  // Handle enabled toggle (can be sent alone or with other params)
+  gboolean enabled_only = FALSE;
+  if(json_object_has_member(new_params, "enabled"))
+  {
+    target->enabled = json_object_get_boolean_member(new_params, "enabled");
+    // Check if this is an enable-only request (no other params)
+    if(json_object_get_size(new_params) == 1)
+      enabled_only = TRUE;
+  }
+
+  // Apply module-specific parameter updates (skip if enable-only)
+  if(enabled_only)
+  {
+    // No module params to update — just the enabled state
+  }
+  else if(!strcmp(op, "exposure"))
   {
     _server_exposure_params_t *p = (_server_exposure_params_t *)target->params;
 
@@ -1561,10 +1581,6 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
                                  "Module params not yet supported for this operation");
   }
-
-  // Check if we should also set enabled state
-  if(json_object_has_member(req->params, "enabled"))
-    target->enabled = json_object_get_boolean_member(req->params, "enabled");
 
   if(preview_only)
   {
@@ -1888,6 +1904,234 @@ char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_reque
   JsonNode *result = json_builder_get_root(b);
   char *resp = dt_server_make_response(req->id, result);
   json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_select_history(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "history_end"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id or history_end parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+
+  const int history_end = (int)json_object_get_int_member(req->params, "history_end");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_develop_t *dev = &session->dev;
+
+  // Pop history to the requested point
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, history_end);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  // Mark pipe dirty for re-rendering
+  if(dev->full.pipe)
+  {
+    dev->full.pipe->changed |= DT_DEV_PIPE_REMOVE;
+    dev->full.pipe->status = DT_DEV_PIXELPIPE_DIRTY;
+  }
+
+  dt_dev_invalidate_all(dev);
+  session->dirty = TRUE;
+
+  // Trigger async pipeline processing
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
+
+  fprintf(stderr, "[server] develop.select_history: session=%s history_end=%d\n",
+          session_id, dev->history_end);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_set_member_name(b, "history_end");
+  json_builder_add_int_value(b, dev->history_end);
+  json_builder_end_object(b);
+
+  JsonNode *res = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, res);
+  json_node_unref(res);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_compress_history(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_imgid_t imgid = session->imgid;
+  dt_develop_t *dev = &session->dev;
+
+  // Write current in-memory history to DB before compressing
+  dt_dev_write_history(dev);
+
+  // Compress history in the database
+  dt_history_compress_on_image(imgid);
+
+  dt_lock_image(imgid);
+
+  // Reset all modules to defaults
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, 0);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  // Remove in-memory history items
+  GList *history = dev->history;
+  while(history)
+  {
+    GList *next = g_list_next(history);
+    dt_dev_history_item_t *hist = history->data;
+    dt_dev_free_history_item(hist);
+    dev->history = g_list_delete_link(dev->history, history);
+    history = next;
+  }
+
+  // Re-read compressed history from DB
+  dt_dev_read_history(dev);
+
+  // Apply the compressed history
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, dev->history_end);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  dt_ioppr_resync_iop_list(dev);
+
+  // Mark pipe dirty for re-rendering
+  if(dev->full.pipe)
+  {
+    dev->full.pipe->changed |= DT_DEV_PIPE_REMOVE;
+    dev->full.pipe->status = DT_DEV_PIXELPIPE_DIRTY;
+  }
+
+  dt_unlock_image(imgid);
+
+  // Trigger async pipeline processing
+  dt_dev_invalidate_all(dev);
+  session->dirty = TRUE;
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
+
+  fprintf(stderr, "[server] develop.compress_history: session=%s history_end=%d\n",
+          session_id, dev->history_end);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_end_object(b);
+
+  JsonNode *res = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, res);
+  json_node_unref(res);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_truncate_history(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "history_end"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id or history_end parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+
+  const int history_end = (int)json_object_get_int_member(req->params, "history_end");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_imgid_t imgid = session->imgid;
+  dt_develop_t *dev = &session->dev;
+
+  // Write current in-memory history to DB before truncating
+  dt_dev_write_history(dev);
+
+  // Truncate history in the database (deletes entries with num >= history_end)
+  dt_history_truncate_on_image(imgid, history_end);
+
+  dt_lock_image(imgid);
+
+  // Reset all modules to defaults
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, 0);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  // Remove in-memory history items
+  GList *history = dev->history;
+  while(history)
+  {
+    GList *next = g_list_next(history);
+    dt_dev_history_item_t *hist = history->data;
+    dt_dev_free_history_item(hist);
+    dev->history = g_list_delete_link(dev->history, history);
+    history = next;
+  }
+
+  // Re-read truncated history from DB
+  dt_dev_read_history(dev);
+
+  // Apply the truncated history
+  dt_pthread_mutex_lock(&dev->history_mutex);
+  dt_dev_pop_history_items_ext(dev, dev->history_end);
+  dt_pthread_mutex_unlock(&dev->history_mutex);
+
+  dt_ioppr_resync_iop_list(dev);
+
+  // Mark pipe dirty for re-rendering
+  if(dev->full.pipe)
+  {
+    dev->full.pipe->changed |= DT_DEV_PIPE_REMOVE;
+    dev->full.pipe->status = DT_DEV_PIXELPIPE_DIRTY;
+  }
+
+  dt_unlock_image(imgid);
+
+  // Trigger async pipeline processing
+  dt_dev_invalidate_all(dev);
+  session->dirty = TRUE;
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
+
+  fprintf(stderr, "[server] develop.truncate_history: session=%s history_end=%d\n",
+          session_id, dev->history_end);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "ok");
+  json_builder_set_member_name(b, "history_end");
+  json_builder_add_int_value(b, dev->history_end);
+  json_builder_end_object(b);
+
+  JsonNode *res = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, res);
+  json_node_unref(res);
   g_object_unref(b);
   return resp;
 }
