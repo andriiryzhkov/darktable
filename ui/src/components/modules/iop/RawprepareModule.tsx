@@ -7,7 +7,7 @@ function useThrottledParam(op: string) {
   const applyParam = useDevelopStore((s) => s.applyParam);
   const commitParam = useDevelopStore((s) => s.commitParam);
   const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const busyRef = useRef(false);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
   const draggingRef = useRef(false);
@@ -30,10 +30,10 @@ function useThrottledParam(op: string) {
         draggingRef.current = false;
         await commitParam(op);
         fetchHistory();
-        fetchModuleParams(op);
+        fetchGenericParams(op);
       }
     },
-    [op, applyParam, commitParam, fetchHistory, fetchModuleParams],
+    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
   );
 
   return { apply, draggingRef };
@@ -42,9 +42,9 @@ function useThrottledParam(op: string) {
 const FLAT_FIELD_OPTIONS = ["disabled", "embedded GainMap"];
 
 export default function RawprepareModule() {
-  const rawprepareParams = useDevelopStore((s) => s.rawprepareParams);
+  const params = useDevelopStore((s) => s.genericParams["rawprepare"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
 
   const [localBlack, setLocalBlack] = useState([0, 0, 0, 0]);
   const [localWhite, setLocalWhite] = useState(0);
@@ -52,19 +52,19 @@ export default function RawprepareModule() {
   const { apply: throttledApply, draggingRef } = useThrottledParam("rawprepare");
 
   useEffect(() => {
-    if (!rawprepareParams) {
-      fetchModuleParams("rawprepare");
+    if (!params) {
+      fetchGenericParams("rawprepare");
     }
-  }, [rawprepareParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
   useEffect(() => {
-    if (rawprepareParams && !draggingRef.current) {
-      setLocalBlack([...rawprepareParams.raw_black_level_separate]);
-      setLocalWhite(rawprepareParams.raw_white_point);
+    if (params && !draggingRef.current) {
+      setLocalBlack([...(params.raw_black_level_separate as number[])]);
+      setLocalWhite(params.raw_white_point as number);
     }
-  }, [rawprepareParams, draggingRef]);
+  }, [params, draggingRef]);
 
-  if (!rawprepareParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading raw black/white point params…
@@ -138,7 +138,7 @@ export default function RawprepareModule() {
       <BauhausCombo
         label="flat field correction"
         options={FLAT_FIELD_OPTIONS}
-        value={FLAT_FIELD_OPTIONS[rawprepareParams.flat_field] ?? "disabled"}
+        value={FLAT_FIELD_OPTIONS[params.flat_field as number] ?? "disabled"}
         onChange={(label) => {
           const idx = FLAT_FIELD_OPTIONS.indexOf(label);
           if (idx >= 0) setModuleParam("rawprepare", { flat_field: idx });

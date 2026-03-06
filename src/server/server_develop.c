@@ -51,51 +51,6 @@ typedef struct _server_exposure_params_t
   gboolean compensate_hilite_pres;
 } _server_exposure_params_t;
 
-// Mirror of dt_iop_sigmoid_params_t from iop/sigmoid.c
-// Must match the struct layout exactly (introspection version 3).
-typedef enum _server_sigmoid_method_t
-{
-  _SIGMOID_METHOD_PER_CHANNEL = 0,
-  _SIGMOID_METHOD_RGB_RATIO = 1
-} _server_sigmoid_method_t;
-
-typedef struct _server_sigmoid_params_t
-{
-  float middle_grey_contrast;
-  float contrast_skewness;
-  float display_white_target;
-  float display_black_target;
-  _server_sigmoid_method_t color_processing;
-  float hue_preservation;
-  float red_inset;
-  float red_rotation;
-  float green_inset;
-  float green_rotation;
-  float blue_inset;
-  float blue_rotation;
-  float purity;
-  int base_primaries;
-} _server_sigmoid_params_t;
-
-// Mirror of dt_iop_rawprepare_params_t from iop/rawprepare.c
-// Must match the struct layout exactly (introspection version 2).
-typedef enum _server_rawprepare_flat_field_t
-{
-  _FLAT_FIELD_OFF = 0,
-  _FLAT_FIELD_EMBEDDED = 1
-} _server_rawprepare_flat_field_t;
-
-typedef struct _server_rawprepare_params_t
-{
-  int32_t left;
-  int32_t top;
-  int32_t right;
-  int32_t bottom;
-  uint16_t raw_black_level_separate[4];
-  uint16_t raw_white_point;
-  _server_rawprepare_flat_field_t flat_field;
-} _server_rawprepare_params_t;
-
 // Mirror of dt_iop_colorin_params_t from iop/colorin.c
 // Must match the struct layout exactly (introspection version 7).
 #define _SERVER_IOP_COLOR_ICC_LEN 512
@@ -128,75 +83,6 @@ typedef struct _server_colorout_params_t
   char filename[_SERVER_IOP_COLOR_ICC_LEN];
   dt_iop_color_intent_t intent;
 } _server_colorout_params_t;
-
-// Mirror of dt_iop_demosaic_params_t from iop/demosaic.c
-// Must match the struct layout exactly (introspection version 5).
-#define _SERVER_DEMOSAIC_XTRANS 1024
-#define _SERVER_DEMOSAIC_DUAL   2048
-
-typedef enum _server_demosaic_greeneq_t
-{
-  _DEMOSAIC_GREEN_EQ_NO = 0,
-  _DEMOSAIC_GREEN_EQ_LOCAL = 1,
-  _DEMOSAIC_GREEN_EQ_FULL = 2,
-  _DEMOSAIC_GREEN_EQ_BOTH = 3
-} _server_demosaic_greeneq_t;
-
-typedef enum _server_demosaic_smooth_t
-{
-  _DEMOSAIC_SMOOTH_OFF = 0,
-  _DEMOSAIC_SMOOTH_1 = 1,
-  _DEMOSAIC_SMOOTH_2 = 2,
-  _DEMOSAIC_SMOOTH_3 = 3,
-  _DEMOSAIC_SMOOTH_4 = 4,
-  _DEMOSAIC_SMOOTH_5 = 5
-} _server_demosaic_smooth_t;
-
-typedef enum _server_demosaic_method_t
-{
-  _DEMOSAIC_PPG = 0,
-  _DEMOSAIC_AMAZE = 1,
-  _DEMOSAIC_VNG4 = 2,
-  _DEMOSAIC_PASSTHROUGH_MONOCHROME = 3,
-  _DEMOSAIC_PASSTHROUGH_COLOR = 4,
-  _DEMOSAIC_RCD = 5,
-  _DEMOSAIC_LMMSE = 6,
-  _DEMOSAIC_MONO = 7,
-  _DEMOSAIC_RCD_DUAL = _SERVER_DEMOSAIC_DUAL | 5,
-  _DEMOSAIC_AMAZE_DUAL = _SERVER_DEMOSAIC_DUAL | 1,
-  _DEMOSAIC_VNG = _SERVER_DEMOSAIC_XTRANS | 0,
-  _DEMOSAIC_MARKESTEIJN = _SERVER_DEMOSAIC_XTRANS | 1,
-  _DEMOSAIC_MARKESTEIJN_3 = _SERVER_DEMOSAIC_XTRANS | 2,
-  _DEMOSAIC_PASSTHR_MONOX = _SERVER_DEMOSAIC_XTRANS | 3,
-  _DEMOSAIC_FDC = _SERVER_DEMOSAIC_XTRANS | 4,
-  _DEMOSAIC_PASSTHR_COLORX = _SERVER_DEMOSAIC_XTRANS | 5,
-  _DEMOSAIC_MARKEST3_DUAL = _SERVER_DEMOSAIC_DUAL | _SERVER_DEMOSAIC_XTRANS | 2
-} _server_demosaic_method_t;
-
-typedef enum _server_demosaic_lmmse_t
-{
-  _DEMOSAIC_LMMSE_REFINE_0 = 0,
-  _DEMOSAIC_LMMSE_REFINE_1 = 1,
-  _DEMOSAIC_LMMSE_REFINE_2 = 2,
-  _DEMOSAIC_LMMSE_REFINE_3 = 3,
-  _DEMOSAIC_LMMSE_REFINE_4 = 4
-} _server_demosaic_lmmse_t;
-
-typedef struct _server_demosaic_params_t
-{
-  _server_demosaic_greeneq_t green_eq;
-  float median_thrs;
-  _server_demosaic_smooth_t color_smoothing;
-  _server_demosaic_method_t demosaicing_method;
-  _server_demosaic_lmmse_t lmmse_refine;
-  float dual_thrs;
-  float cs_radius;
-  float cs_thrs;
-  float cs_boost;
-  int cs_iter;
-  float cs_center;
-  gboolean cs_enabled;
-} _server_demosaic_params_t;
 
 // Mirror of dt_iop_temperature_params_t from iop/temperature.c
 // Must match the struct layout exactly (introspection version 4).

@@ -9,7 +9,7 @@ function useThrottledParam(op: string) {
   const applyParam = useDevelopStore((s) => s.applyParam);
   const commitParam = useDevelopStore((s) => s.commitParam);
   const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const busyRef = useRef(false);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
   const draggingRef = useRef(false);
@@ -32,10 +32,10 @@ function useThrottledParam(op: string) {
         draggingRef.current = false;
         await commitParam(op);
         fetchHistory();
-        fetchModuleParams(op);
+        fetchGenericParams(op);
       }
     },
-    [op, applyParam, commitParam, fetchHistory, fetchModuleParams],
+    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
   );
 
   return { apply, draggingRef };
@@ -96,9 +96,9 @@ function getMethodsForSensor(sensor: string) {
 }
 
 export default function DemosaicModule() {
-  const demosaicParams = useDevelopStore((s) => s.demosaicParams);
+  const params = useDevelopStore((s) => s.genericParams["demosaic"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
 
   const [localMedianThrs, setLocalMedianThrs] = useState(0);
   const [localDualThrs, setLocalDualThrs] = useState(0.2);
@@ -111,24 +111,24 @@ export default function DemosaicModule() {
   const { apply: throttledApply, draggingRef } = useThrottledParam("demosaic");
 
   useEffect(() => {
-    if (!demosaicParams) {
-      fetchModuleParams("demosaic");
+    if (!params) {
+      fetchGenericParams("demosaic");
     }
-  }, [demosaicParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
   useEffect(() => {
-    if (demosaicParams && !draggingRef.current) {
-      setLocalMedianThrs(demosaicParams.median_thrs);
-      setLocalDualThrs(demosaicParams.dual_thrs);
-      setLocalCsRadius(demosaicParams.cs_radius);
-      setLocalCsThrs(demosaicParams.cs_thrs);
-      setLocalCsBoost(demosaicParams.cs_boost);
-      setLocalCsIter(demosaicParams.cs_iter);
-      setLocalCsCenter(demosaicParams.cs_center);
+    if (params && !draggingRef.current) {
+      setLocalMedianThrs(params.median_thrs as number);
+      setLocalDualThrs(params.dual_thrs as number);
+      setLocalCsRadius(params.cs_radius as number);
+      setLocalCsThrs(params.cs_thrs as number);
+      setLocalCsBoost(params.cs_boost as number);
+      setLocalCsIter(params.cs_iter as number);
+      setLocalCsCenter(params.cs_center as number);
     }
-  }, [demosaicParams, draggingRef]);
+  }, [params, draggingRef]);
 
-  if (!demosaicParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading demosaic params…
@@ -136,9 +136,9 @@ export default function DemosaicModule() {
     );
   }
 
-  const sensor = demosaicParams.sensor_type;
+  const sensor = params.sensor_type as string;
   const methods = getMethodsForSensor(sensor);
-  const method = demosaicParams.demosaicing_method;
+  const method = params.demosaicing_method as number;
   const isDual = !!(method & DEMOSAIC_DUAL);
   const isLmmse = method === 6;
   const isPpg = method === 0;
@@ -150,7 +150,7 @@ export default function DemosaicModule() {
     || method === (DEMOSAIC_XTRANS | 3) || method === (DEMOSAIC_XTRANS | 5);
 
   const captureSupport = !isPassing && !isBayer4;
-  const showCapture = captureSupport && demosaicParams.cs_enabled;
+  const showCapture = captureSupport && params.cs_enabled as boolean;
 
   if (sensor === "mono" && !methods.some(m => m.value === method)) {
     return (
@@ -204,7 +204,7 @@ export default function DemosaicModule() {
         <BauhausCombo
           label="LMMSE refine"
           options={LMMSE_REFINE_OPTIONS}
-          value={LMMSE_REFINE_OPTIONS[demosaicParams.lmmse_refine] ?? "basic"}
+          value={LMMSE_REFINE_OPTIONS[params.lmmse_refine as number] ?? "basic"}
           onChange={(label) => {
             const idx = LMMSE_REFINE_OPTIONS.indexOf(label);
             if (idx >= 0) setModuleParam("demosaic", { lmmse_refine: idx });
@@ -216,7 +216,7 @@ export default function DemosaicModule() {
         <BauhausCombo
           label="color smoothing"
           options={COLOR_SMOOTH_OPTIONS}
-          value={COLOR_SMOOTH_OPTIONS[demosaicParams.color_smoothing] ?? "disabled"}
+          value={COLOR_SMOOTH_OPTIONS[params.color_smoothing as number] ?? "disabled"}
           onChange={(label) => {
             const idx = COLOR_SMOOTH_OPTIONS.indexOf(label);
             if (idx >= 0) setModuleParam("demosaic", { color_smoothing: idx });
@@ -228,7 +228,7 @@ export default function DemosaicModule() {
         <BauhausCombo
           label="match greens"
           options={GREEN_EQ_OPTIONS}
-          value={GREEN_EQ_OPTIONS[demosaicParams.green_eq] ?? "disabled"}
+          value={GREEN_EQ_OPTIONS[params.green_eq as number] ?? "disabled"}
           onChange={(label) => {
             const idx = GREEN_EQ_OPTIONS.indexOf(label);
             if (idx >= 0) setModuleParam("demosaic", { green_eq: idx });
@@ -239,7 +239,7 @@ export default function DemosaicModule() {
       {captureSupport && (
         <BauhausCheckbox
           label="capture sharpen"
-          checked={demosaicParams.cs_enabled}
+          checked={params.cs_enabled as boolean}
           align="left"
           onChange={(checked) => setModuleParam("demosaic", { cs_enabled: checked })}
         />
@@ -287,7 +287,7 @@ export default function DemosaicModule() {
             format={(v) => `${v.toFixed(2)} px`}
             onChange={(v) => { setLocalCsBoost(v); throttledApply("cs_boost", v); }}
           />
-          {demosaicParams.cs_boost > 0 && (
+          {(params.cs_boost as number) > 0 && (
             <BauhausSlider
               label="sharp center"
               value={localCsCenter}

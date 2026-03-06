@@ -22,17 +22,17 @@ function findProfileLabel(
 }
 
 export default function ColorInModule() {
-  const colorinParams = useDevelopStore((s) => s.colorinParams);
+  const params = useDevelopStore((s) => s.genericParams["colorin"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
 
   useEffect(() => {
-    if (!colorinParams) {
-      fetchModuleParams("colorin");
+    if (!params) {
+      fetchGenericParams("colorin");
     }
-  }, [colorinParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
-  if (!colorinParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading color profile params…
@@ -40,16 +40,16 @@ export default function ColorInModule() {
     );
   }
 
-  const inputProfiles = colorinParams.input_profiles;
-  const workProfiles = colorinParams.work_profiles;
+  const inputProfiles = params.input_profiles as ColorProfileEntry[];
+  const workProfiles = params.work_profiles as ColorProfileEntry[];
 
   const currentInputLabel =
-    findProfileLabel(inputProfiles, colorinParams.type, colorinParams.filename)
-    ?? colorinParams.input_profile_name;
+    findProfileLabel(inputProfiles, params.type as number, params.filename as string)
+    ?? (params.input_profile_name as string);
 
   const currentWorkLabel =
-    findProfileLabel(workProfiles, colorinParams.type_work, colorinParams.filename_work)
-    ?? colorinParams.work_profile_name;
+    findProfileLabel(workProfiles, params.type_work as number, params.filename_work as string)
+    ?? (params.work_profile_name as string);
 
   return (
     <>
@@ -86,7 +86,7 @@ export default function ColorInModule() {
       <BauhausCombo
         label="gamut clipping"
         options={NORMALIZE_OPTIONS}
-        value={NORMALIZE_OPTIONS[colorinParams.normalize] ?? "off"}
+        value={NORMALIZE_OPTIONS[params.normalize as number] ?? "off"}
         onChange={(label) => {
           const idx = NORMALIZE_OPTIONS.indexOf(label);
           if (idx >= 0) setModuleParam("colorin", { normalize: idx });

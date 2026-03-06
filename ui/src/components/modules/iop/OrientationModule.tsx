@@ -42,23 +42,23 @@ function flipV(orientation: number): number {
 }
 
 export default function OrientationModule() {
-  const flipParams = useDevelopStore((s) => s.flipParams);
+  const params = useDevelopStore((s) => s.genericParams["flip"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const showGuides = useUIStore((s) => s.showGuides);
   const setShowGuides = useUIStore((s) => s.setShowGuides);
   const setGuidesModuleOpen = useUIStore((s) => s.setGuidesModuleOpen);
 
   useEffect(() => {
-    if (!flipParams) fetchModuleParams("flip");
-  }, [flipParams, fetchModuleParams]);
+    if (!params) fetchGenericParams("flip");
+  }, [params, fetchGenericParams]);
 
   useEffect(() => {
     setGuidesModuleOpen(true);
     return () => setGuidesModuleOpen(false);
   }, [setGuidesModuleOpen]);
 
-  if (!flipParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading orientation params…
@@ -67,7 +67,8 @@ export default function OrientationModule() {
   }
 
   // ORIENTATION_NULL (-1) means autodetect; treat as NONE (0) for transforms
-  const current = flipParams.orientation < 0 ? 0 : flipParams.orientation;
+  const orientation = params.orientation as number;
+  const current = orientation < 0 ? 0 : orientation;
 
   const apply = (newOrientation: number) => {
     setModuleParam("flip", { orientation: newOrientation });

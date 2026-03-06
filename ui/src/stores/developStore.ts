@@ -26,7 +26,7 @@ import {
   getPreviewFrame,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
-import type { TemperatureParams, ExposureParams, FlipParams, SigmoidParams, DemosaicParams, RawprepareParams, ColorinParams, ColoroutParams, ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
+import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -52,14 +52,6 @@ interface DevelopState {
   frameData: Uint8Array | null; // raw BGRA pixels for WebGL rendering
   frontBuffer: number;
   sequence: number;
-  temperatureParams: TemperatureParams | null;
-  exposureParams: ExposureParams | null;
-  sigmoidParams: SigmoidParams | null;
-  demosaicParams: DemosaicParams | null;
-  rawprepareParams: RawprepareParams | null;
-  colorinParams: ColorinParams | null;
-  flipParams: FlipParams | null;
-  coloroutParams: ColoroutParams | null;
   modules: ModuleInfo[];
   moduleDescriptions: Record<string, ModuleDescription>; // op → description from server
   genericParams: Record<string, Record<string, unknown>>; // op → params from introspection
@@ -81,7 +73,7 @@ interface DevelopState {
   closeSession: () => Promise<void>;
   requestPreview: () => Promise<void>;
   fetchFrame: () => Promise<void>;
-  fetchModuleParams: (op: string) => Promise<void>;
+  fetchGenericParams: (op: string) => Promise<void>;
   /** Lightweight: setParams (preview_only) + render. Use during drag — skips history write. */
   applyParam: (op: string, params: Record<string, unknown>) => Promise<void>;
   /** Commit current module params to history after a preview_only drag. */
@@ -108,7 +100,6 @@ interface DevelopState {
   moveInstance: (op: string, instance: number, direction: "up" | "down") => Promise<void>;
   renameInstance: (op: string, instance: number, name: string) => Promise<void>;
   fetchIntrospection: (op: string) => Promise<IntrospectionResult | null>;
-  fetchGenericParams: (op: string) => Promise<void>;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -146,14 +137,6 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   frameData: null,
   frontBuffer: 0,
   sequence: 0,
-  temperatureParams: null,
-  exposureParams: null,
-  flipParams: null,
-  sigmoidParams: null,
-  demosaicParams: null,
-  rawprepareParams: null,
-  colorinParams: null,
-  coloroutParams: null,
   modules: [],
   moduleDescriptions: {},
   genericParams: {},
@@ -225,14 +208,14 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
             })
           : Promise.resolve()
         ).catch((e) => console.error("develop.get_modules failed:", e)),
-        get().fetchModuleParams("temperature"),
-        get().fetchModuleParams("exposure"),
-        get().fetchModuleParams("flip"),
-        get().fetchModuleParams("sigmoid"),
-        get().fetchModuleParams("demosaic"),
-        get().fetchModuleParams("rawprepare"),
-        get().fetchModuleParams("colorin"),
-        get().fetchModuleParams("colorout"),
+        get().fetchGenericParams("temperature"),
+        get().fetchGenericParams("exposure"),
+        get().fetchGenericParams("flip"),
+        get().fetchGenericParams("sigmoid"),
+        get().fetchGenericParams("demosaic"),
+        get().fetchGenericParams("rawprepare"),
+        get().fetchGenericParams("colorin"),
+        get().fetchGenericParams("colorout"),
       ]);
 
       // Render preview (server processes synchronously, SHM is ready when this returns)
@@ -271,11 +254,6 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       imgid: null,
       previewSrc: null,
       frameData: null,
-      temperatureParams: null,
-      exposureParams: null,
-      flipParams: null,
-      sigmoidParams: null,
-      demosaicParams: null,
       modules: [],
       moduleDescriptions: {},
       historyItems: [],
@@ -362,9 +340,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().requestPreview();
       await Promise.all([
         get().fetchFrame(),
-        get().fetchModuleParams("exposure"),
-        get().fetchModuleParams("temperature"),
-        get().fetchModuleParams("sigmoid"),
+        get().fetchGenericParams("exposure"),
+        get().fetchGenericParams("temperature"),
+        get().fetchGenericParams("sigmoid"),
       ]);
     } catch (e) {
       console.error("develop.select_history failed:", e);
@@ -410,31 +388,12 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     }
   },
 
-  fetchModuleParams: async (op: string) => {
+  fetchGenericParams: async (op: string) => {
     const { sessionId } = get();
     if (!sessionId) return;
     try {
       const result = await developGetParams(sessionId, op);
-      // Always store in genericParams for introspection-based modules
       set({ genericParams: { ...get().genericParams, [op]: result.params } });
-      // Also update legacy typed stores for custom UI modules
-      if (op === "temperature") {
-        set({ temperatureParams: result.params as unknown as TemperatureParams });
-      } else if (op === "exposure") {
-        set({ exposureParams: result.params as unknown as ExposureParams });
-      } else if (op === "flip") {
-        set({ flipParams: result.params as unknown as FlipParams });
-      } else if (op === "sigmoid") {
-        set({ sigmoidParams: result.params as unknown as SigmoidParams });
-      } else if (op === "demosaic") {
-        set({ demosaicParams: result.params as unknown as DemosaicParams });
-      } else if (op === "rawprepare") {
-        set({ rawprepareParams: result.params as unknown as RawprepareParams });
-      } else if (op === "colorin") {
-        set({ colorinParams: result.params as unknown as ColorinParams });
-      } else if (op === "colorout") {
-        set({ coloroutParams: result.params as unknown as ColoroutParams });
-      }
     } catch (e) {
       console.error(`fetch ${op} params failed:`, e);
     }
@@ -470,7 +429,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().requestPreview();
       await get().fetchFrame();
       await get().fetchHistory();
-      await get().fetchModuleParams(op);
+      await get().fetchGenericParams(op);
     } catch (e) {
       console.error(`set ${op} params failed:`, e);
     }
@@ -502,7 +461,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().requestPreview();
       await get().fetchFrame();
       await get().fetchHistory();
-      await get().fetchModuleParams(op);
+      await get().fetchGenericParams(op);
     } catch (e) {
       console.error("reset module failed:", e);
     }
@@ -528,7 +487,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await get().requestPreview();
       await get().fetchFrame();
       await get().fetchHistory();
-      await get().fetchModuleParams(op);
+      await get().fetchGenericParams(op);
     } catch (e) {
       console.error("apply preset failed:", e);
     }
@@ -651,16 +610,6 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     }
   },
 
-  fetchGenericParams: async (op: string) => {
-    const { sessionId } = get();
-    if (!sessionId) return;
-    try {
-      const result = await developGetParams(sessionId, op);
-      set({ genericParams: { ...get().genericParams, [op]: result.params } });
-    } catch (e) {
-      console.error(`fetch generic params for ${op} failed:`, e);
-    }
-  },
 }));
 
 // --- Event-driven preview update ---

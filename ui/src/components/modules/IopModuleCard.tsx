@@ -14,7 +14,7 @@ import { useModuleExpanded } from "../../hooks/useModuleExpanded";
 /** Detect pipeline trouble messages for known modules */
 function useModuleTrouble(op: string): string | null {
   const historyItems = useDevelopStore((s) => s.historyItems);
-  const temperatureParams = useDevelopStore((s) => s.temperatureParams);
+  const temperatureParams = useDevelopStore((s) => s.genericParams["temperature"]);
   const enabledOps = getEnabledOps(historyItems);
 
   if (op === "temperature") {

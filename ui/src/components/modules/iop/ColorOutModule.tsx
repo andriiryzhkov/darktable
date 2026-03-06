@@ -21,17 +21,17 @@ function findProfileLabel(
 }
 
 export default function ColorOutModule() {
-  const coloroutParams = useDevelopStore((s) => s.coloroutParams);
+  const params = useDevelopStore((s) => s.genericParams["colorout"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
 
   useEffect(() => {
-    if (!coloroutParams) {
-      fetchModuleParams("colorout");
+    if (!params) {
+      fetchGenericParams("colorout");
     }
-  }, [coloroutParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
-  if (!coloroutParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading output color profile params…
@@ -39,18 +39,18 @@ export default function ColorOutModule() {
     );
   }
 
-  const outputProfiles = coloroutParams.output_profiles;
+  const outputProfiles = params.output_profiles as ColorProfileEntry[];
 
   const currentLabel =
-    findProfileLabel(outputProfiles, coloroutParams.type, coloroutParams.filename)
-    ?? coloroutParams.output_profile_name;
+    findProfileLabel(outputProfiles, params.type as number, params.filename as string)
+    ?? (params.output_profile_name as string);
 
   return (
     <>
       <BauhausCombo
         label="output intent"
         options={INTENT_OPTIONS}
-        value={INTENT_OPTIONS[coloroutParams.intent] ?? "perceptual"}
+        value={INTENT_OPTIONS[params.intent as number] ?? "perceptual"}
         onChange={(label) => {
           const idx = INTENT_OPTIONS.indexOf(label);
           if (idx >= 0) setModuleParam("colorout", { intent: idx });

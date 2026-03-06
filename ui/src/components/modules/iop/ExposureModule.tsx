@@ -16,7 +16,7 @@ function useThrottledParam(op: string) {
   const applyParam = useDevelopStore((s) => s.applyParam);
   const commitParam = useDevelopStore((s) => s.commitParam);
   const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const busyRef = useRef(false);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
   const draggingRef = useRef(false);
@@ -37,13 +37,12 @@ function useThrottledParam(op: string) {
       } finally {
         busyRef.current = false;
         draggingRef.current = false;
-        // Commit final value to history, then sync UI
         await commitParam(op);
         fetchHistory();
-        fetchModuleParams(op);
+        fetchGenericParams(op);
       }
     },
-    [op, applyParam, commitParam, fetchHistory, fetchModuleParams],
+    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
   );
 
   return { apply, draggingRef };
@@ -55,9 +54,9 @@ function srgbToLinear(c: number): number {
 }
 
 export default function ExposureModule() {
-  const exposureParams = useDevelopStore((s) => s.exposureParams);
+  const params = useDevelopStore((s) => s.genericParams["exposure"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const samplePixels = useDevelopStore((s) => s.samplePixels);
 
   const [localExposure, setLocalExposure] = useState(0);
@@ -76,10 +75,10 @@ export default function ExposureModule() {
   }, [deactivatePicker]);
 
   // Track current exposure in a ref to avoid effect loops
-  const exposureRef = useRef(exposureParams?.exposure ?? 0);
+  const exposureRef = useRef((params?.exposure as number) ?? 0);
   useEffect(() => {
-    if (exposureParams) exposureRef.current = exposureParams.exposure;
-  }, [exposureParams]);
+    if (params) exposureRef.current = params.exposure as number;
+  }, [params]);
 
   // When picker box changes, sample pixels and compute exposure correction
   const pickerBoxKey = `${pickerBox.x},${pickerBox.y},${pickerBox.w},${pickerBox.h}`;
@@ -114,22 +113,22 @@ export default function ExposureModule() {
 
   // Fetch params on mount if not already loaded
   useEffect(() => {
-    if (!exposureParams) {
-      fetchModuleParams("exposure");
+    if (!params) {
+      fetchGenericParams("exposure");
     }
-  }, [exposureParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
   // Sync local slider state from store when not dragging
   useEffect(() => {
-    if (exposureParams && !draggingRef.current) {
-      setLocalExposure(exposureParams.exposure);
-      setLocalBlack(exposureParams.black);
-      setLocalPercentile(exposureParams.deflicker_percentile);
-      setLocalTarget(exposureParams.deflicker_target_level);
+    if (params && !draggingRef.current) {
+      setLocalExposure(params.exposure as number);
+      setLocalBlack(params.black as number);
+      setLocalPercentile(params.deflicker_percentile as number);
+      setLocalTarget(params.deflicker_target_level as number);
     }
-  }, [exposureParams, draggingRef]);
+  }, [params, draggingRef]);
 
-  if (!exposureParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading exposure params…
@@ -137,9 +136,9 @@ export default function ExposureModule() {
     );
   }
 
-  const isManual = exposureParams.mode === 0;
-  const biasEv = exposureParams.exposure_bias_ev ?? 0;
-  const hlBias = exposureParams.highlight_bias_ev ?? 0;
+  const isManual = params.mode === 0;
+  const biasEv = (params.exposure_bias_ev as number) ?? 0;
+  const hlBias = (params.highlight_bias_ev as number) ?? 0;
 
   return (
     <>
@@ -156,7 +155,7 @@ export default function ExposureModule() {
         <>
           <BauhausCheckbox
             label={`compensate camera exposure (${biasEv >= 0 ? "+" : ""}${biasEv.toFixed(1)} EV)`}
-            checked={exposureParams.compensate_exposure_bias}
+            checked={params.compensate_exposure_bias as boolean}
             align="left"
             onChange={(checked) =>
               setModuleParam("exposure", { compensate_exposure_bias: checked })
@@ -166,7 +165,7 @@ export default function ExposureModule() {
           {hlBias > 0 && (
             <BauhausCheckbox
               label={`highlight preservation mode (${hlBias.toFixed(1)} EV)`}
-              checked={exposureParams.compensate_hilite_pres}
+              checked={params.compensate_hilite_pres as boolean}
               align="left"
               onChange={(checked) =>
                 setModuleParam("exposure", { compensate_hilite_pres: checked })
@@ -203,8 +202,8 @@ export default function ExposureModule() {
           <BauhausLabel
             label="computed EC"
             value={
-              exposureParams.deflicker_computed_exposure != null
-                ? `${exposureParams.deflicker_computed_exposure >= 0 ? "+" : ""}${exposureParams.deflicker_computed_exposure.toFixed(2)} EV`
+              (params.deflicker_computed_exposure as number) != null
+                ? `${(params.deflicker_computed_exposure as number) >= 0 ? "+" : ""}${(params.deflicker_computed_exposure as number).toFixed(2)} EV`
                 : "N/A"
             }
           />

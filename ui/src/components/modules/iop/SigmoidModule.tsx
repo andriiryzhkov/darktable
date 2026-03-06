@@ -10,7 +10,7 @@ function useThrottledParam(op: string) {
   const applyParam = useDevelopStore((s) => s.applyParam);
   const commitParam = useDevelopStore((s) => s.commitParam);
   const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
   const busyRef = useRef(false);
   const pendingRef = useRef<Record<string, unknown> | null>(null);
   const draggingRef = useRef(false);
@@ -33,19 +33,19 @@ function useThrottledParam(op: string) {
         draggingRef.current = false;
         await commitParam(op);
         fetchHistory();
-        fetchModuleParams(op);
+        fetchGenericParams(op);
       }
     },
-    [op, applyParam, commitParam, fetchHistory, fetchModuleParams],
+    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
   );
 
   return { apply, draggingRef };
 }
 
 export default function SigmoidModule() {
-  const sigmoidParams = useDevelopStore((s) => s.sigmoidParams);
+  const params = useDevelopStore((s) => s.genericParams["sigmoid"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
-  const fetchModuleParams = useDevelopStore((s) => s.fetchModuleParams);
+  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
 
   const [localContrast, setLocalContrast] = useState(1.5);
   const [localSkew, setLocalSkew] = useState(0);
@@ -63,29 +63,29 @@ export default function SigmoidModule() {
   const { apply: throttledApply, draggingRef } = useThrottledParam("sigmoid");
 
   useEffect(() => {
-    if (!sigmoidParams) {
-      fetchModuleParams("sigmoid");
+    if (!params) {
+      fetchGenericParams("sigmoid");
     }
-  }, [sigmoidParams, fetchModuleParams]);
+  }, [params, fetchGenericParams]);
 
   useEffect(() => {
-    if (sigmoidParams && !draggingRef.current) {
-      setLocalContrast(sigmoidParams.middle_grey_contrast);
-      setLocalSkew(sigmoidParams.contrast_skewness);
-      setLocalHue(sigmoidParams.hue_preservation);
-      setLocalWhite(sigmoidParams.display_white_target);
-      setLocalBlack(sigmoidParams.display_black_target);
-      setLocalRedInset(sigmoidParams.red_inset);
-      setLocalRedRotation(sigmoidParams.red_rotation);
-      setLocalGreenInset(sigmoidParams.green_inset);
-      setLocalGreenRotation(sigmoidParams.green_rotation);
-      setLocalBlueInset(sigmoidParams.blue_inset);
-      setLocalBlueRotation(sigmoidParams.blue_rotation);
-      setLocalPurity(sigmoidParams.purity);
+    if (params && !draggingRef.current) {
+      setLocalContrast(params.middle_grey_contrast as number);
+      setLocalSkew(params.contrast_skewness as number);
+      setLocalHue(params.hue_preservation as number);
+      setLocalWhite(params.display_white_target as number);
+      setLocalBlack(params.display_black_target as number);
+      setLocalRedInset(params.red_inset as number);
+      setLocalRedRotation(params.red_rotation as number);
+      setLocalGreenInset(params.green_inset as number);
+      setLocalGreenRotation(params.green_rotation as number);
+      setLocalBlueInset(params.blue_inset as number);
+      setLocalBlueRotation(params.blue_rotation as number);
+      setLocalPurity(params.purity as number);
     }
-  }, [sigmoidParams, draggingRef]);
+  }, [params, draggingRef]);
 
-  if (!sigmoidParams) {
+  if (!params) {
     return (
       <p className="text-xs" style={{ color: "var(--disabled-fg-color)" }}>
         loading sigmoid params…
@@ -93,7 +93,7 @@ export default function SigmoidModule() {
     );
   }
 
-  const isPerChannel = sigmoidParams.color_processing === 0;
+  const isPerChannel = params.color_processing === 0;
 
   return (
     <>
@@ -171,7 +171,7 @@ export default function SigmoidModule() {
           <BauhausCombo
             label="base primaries"
             options={["working profile", "Rec2020", "Display P3", "Adobe RGB", "sRGB"]}
-            value={["working profile", "Rec2020", "Display P3", "Adobe RGB", "sRGB"][sigmoidParams.base_primaries] ?? "working profile"}
+            value={["working profile", "Rec2020", "Display P3", "Adobe RGB", "sRGB"][params.base_primaries as number] ?? "working profile"}
             onChange={(v) => {
               const idx = ["working profile", "Rec2020", "Display P3", "Adobe RGB", "sRGB"].indexOf(v);
               setModuleParam("sigmoid", { base_primaries: idx >= 0 ? idx : 0 });

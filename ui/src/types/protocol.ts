@@ -127,101 +127,10 @@ export interface HistoryResult {
   items: HistoryItem[];
 }
 
-export interface TemperatureParams {
-  red: number;
-  green: number;
-  blue: number;
-  various: number;
-  preset: number;
-  temperature_k?: number;
-  tint?: number;
-}
-
-export interface FlipParams {
-  orientation: number; // dt_image_orientation_t bitmask
-}
-
-export interface ExposureParams {
-  mode: number;
-  exposure: number;
-  black: number;
-  compensate_exposure_bias: boolean;
-  compensate_hilite_pres: boolean;
-  deflicker_percentile: number;
-  deflicker_target_level: number;
-  exposure_bias_ev: number;
-  highlight_bias_ev: number;
-  deflicker_computed_exposure?: number;
-}
-
-export interface SigmoidParams {
-  middle_grey_contrast: number;
-  contrast_skewness: number;
-  color_processing: number; // 0 = per channel, 1 = RGB ratio
-  hue_preservation: number;
-  display_white_target: number;
-  display_black_target: number;
-  base_primaries: number; // 0=working profile, 1=Rec2020, 2=Display P3, 3=Adobe RGB, 4=sRGB
-  red_inset: number;
-  red_rotation: number;
-  green_inset: number;
-  green_rotation: number;
-  blue_inset: number;
-  blue_rotation: number;
-  purity: number;
-}
-
 export interface ColorProfileEntry {
   type: number;
   name: string;
   filename: string;
-}
-
-export interface ColorinParams {
-  type: number;
-  filename: string;
-  intent: number;
-  normalize: number;
-  type_work: number;
-  filename_work: string;
-  input_profile_name: string;
-  work_profile_name: string;
-  input_profiles: ColorProfileEntry[];
-  work_profiles: ColorProfileEntry[];
-}
-
-export interface ColoroutParams {
-  type: number;
-  filename: string;
-  intent: number;
-  output_profile_name: string;
-  output_profiles: ColorProfileEntry[];
-}
-
-export interface RawprepareParams {
-  raw_black_level_separate: [number, number, number, number];
-  raw_white_point: number;
-  flat_field: number;
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-export interface DemosaicParams {
-  demosaicing_method: number;
-  green_eq: number;
-  median_thrs: number;
-  color_smoothing: number;
-  lmmse_refine: number;
-  dual_thrs: number;
-  cs_enabled: boolean;
-  cs_radius: number;
-  cs_thrs: number;
-  cs_boost: number;
-  cs_iter: number;
-  cs_center: number;
-  sensor_type: "bayer" | "xtrans" | "bayer4" | "mono";
 }
 
 export interface PixelSampleResult {
