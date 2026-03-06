@@ -144,7 +144,7 @@ export const LIB_MODULES: LibModuleDef[] = [
     component: lazy(() => import("./lib/ScriptsModule")),
     views: VIEW_LIGHTTABLE,
     container: PANEL_LEFT_CENTER,
-    position: 599,
+    position: 0,
   },
 
   // -- Lighttable right sidebar --
@@ -777,7 +777,7 @@ export function getLibModules(
 ): LibModuleDef[] {
   return LIB_MODULES.filter(
     (m) => (m.views & view) !== 0 && m.container === container,
-  ).sort((a, b) => Math.abs(a.position) - Math.abs(b.position));
+  ).sort((a, b) => Math.abs(b.position) - Math.abs(a.position));
 }
 
 /** Get IOP modules matching a group bitmask */
