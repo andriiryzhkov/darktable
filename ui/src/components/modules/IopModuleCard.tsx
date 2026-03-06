@@ -57,7 +57,7 @@ interface Props {
 }
 
 export default function IopModuleCard({ module }: Props) {
-  const { open, setOpen } = useModuleExpanded("darkroom", module.op);
+  const { open, setOpen } = useModuleExpanded("darkroom", module.op, false, "iop");
   const historyItems = useDevelopStore((s) => s.historyItems);
   const enableModule = useDevelopStore((s) => s.enableModule);
   const resetModule = useDevelopStore((s) => s.resetModule);
