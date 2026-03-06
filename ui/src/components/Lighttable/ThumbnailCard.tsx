@@ -31,6 +31,7 @@ interface ThumbnailCardProps {
   altered: boolean;
   onSelect: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
+  onHover: (hovering: boolean) => void;
 }
 
 export default function ThumbnailCard({
@@ -45,6 +46,7 @@ export default function ThumbnailCard({
   altered,
   onSelect,
   onDoubleClick,
+  onHover,
 }: ThumbnailCardProps) {
   const [src, setSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
@@ -90,6 +92,8 @@ export default function ThumbnailCard({
       data-selected={selected}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
     >
       <div className="thumb-back">
         {ext && <span className="thumb-ext">{ext}</span>}

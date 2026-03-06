@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function LighttableView({ onOpenImage }: Props) {
-  const { images, loading, selectedIds, selectImage } = useCatalogStore();
+  const { images, loading, selectedIds, selectImage, setHoverImageId } = useCatalogStore();
   const grouping = useFilterStore((s) => s.grouping);
   const thumbnailSize = useUIStore((s) => s.thumbnailSize);
   const setGridColumns = useUIStore((s) => s.setGridColumns);
@@ -78,6 +78,7 @@ export default function LighttableView({ onOpenImage }: Props) {
                 altered={img.altered ?? false}
                 onSelect={(e) => handleSelect(img.id, e)}
                 onDoubleClick={() => onOpenImage(img.id)}
+                onHover={(h) => setHoverImageId(h ? img.id : null)}
               />
             ))}
           </div>

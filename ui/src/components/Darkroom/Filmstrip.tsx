@@ -15,6 +15,7 @@ export default function Filmstrip({ onSelectImage }: Props) {
   const images = useCatalogStore((s) => s.images);
   const selectedIds = useCatalogStore((s) => s.selectedIds);
   const selectImage = useCatalogStore((s) => s.selectImage);
+  const setHoverImageId = useCatalogStore((s) => s.setHoverImageId);
   const darkroomImgId = useUIStore((s) => s.darkroomImgId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -65,6 +66,7 @@ export default function Filmstrip({ onSelectImage }: Props) {
             processing={img.id === darkroomImgId}
             onClick={() => handleClick(img.id)}
             onDoubleClick={() => handleDoubleClick(img.id)}
+            onHover={(h) => setHoverImageId(h ? img.id : null)}
           />
         ))}
       </div>
@@ -78,12 +80,14 @@ function FilmstripThumb({
   processing,
   onClick,
   onDoubleClick,
+  onHover,
 }: {
   image: ImageInfo;
   selected: boolean;
   processing: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
+  onHover: (hovering: boolean) => void;
 }) {
   const [src, setSrc] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -114,6 +118,8 @@ function FilmstripThumb({
       data-processing={processing}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
       style={{ width: THUMB_WIDTH }}
     >
       {src && <img src={src} alt={image.filename} draggable={false} />}

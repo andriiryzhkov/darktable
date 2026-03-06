@@ -22,6 +22,7 @@ interface CatalogState {
   loading: boolean;
   selectedIds: Set<number>;
   lastSelectedId: number | null;
+  hoverImageId: number | null;
 
   fetchAll: () => Promise<void>;
   selectImage: (id: number, e?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
@@ -30,6 +31,7 @@ interface CatalogState {
   invertSelection: () => void;
   selectFilmRoll: () => void;
   selectUntouched: () => void;
+  setHoverImageId: (id: number | null) => void;
 }
 
 export const useCatalogStore = create<CatalogState>((set, get) => ({
@@ -38,6 +40,7 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   loading: false,
   selectedIds: new Set<number>(),
   lastSelectedId: null,
+  hoverImageId: null,
 
   fetchAll: async () => {
     set({ loading: true });
@@ -147,6 +150,8 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
     }
     set({ selectedIds: untouched, lastSelectedId: null });
   },
+
+  setHoverImageId: (id) => set({ hoverImageId: id }),
 }));
 
 // React to events — reload collection when it changes
