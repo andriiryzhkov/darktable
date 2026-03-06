@@ -1,4 +1,5 @@
 import CollapsibleModule from "../CollapsibleModule";
+import BauhausTooltip from "../../controls/BauhausTooltip";
 import {
   Trash2,
   Move,
@@ -71,28 +72,30 @@ export default function ActionsModule() {
 
         {/* Rotation */}
         <div className="flex gap-1">
-          <button
-            className="flex-1 flex items-center justify-center py-1 rounded"
-            style={{
-              backgroundColor: "var(--button-bg)",
-              color: "var(--button-fg)",
-              border: "1px solid var(--button-border)",
-            }}
-            title="Rotate counter-clockwise"
-          >
-            <RotateCcw size={12} />
-          </button>
-          <button
-            className="flex-1 flex items-center justify-center py-1 rounded"
-            style={{
-              backgroundColor: "var(--button-bg)",
-              color: "var(--button-fg)",
-              border: "1px solid var(--button-border)",
-            }}
-            title="Rotate clockwise"
-          >
-            <RotateCw size={12} />
-          </button>
+          <BauhausTooltip content="rotate counter-clockwise">
+            <button
+              className="flex-1 flex items-center justify-center py-1 rounded"
+              style={{
+                backgroundColor: "var(--button-bg)",
+                color: "var(--button-fg)",
+                border: "1px solid var(--button-border)",
+              }}
+            >
+              <RotateCcw size={12} />
+            </button>
+          </BauhausTooltip>
+          <BauhausTooltip content="rotate clockwise">
+            <button
+              className="flex-1 flex items-center justify-center py-1 rounded"
+              style={{
+                backgroundColor: "var(--button-bg)",
+                color: "var(--button-fg)",
+                border: "1px solid var(--button-border)",
+              }}
+            >
+              <RotateCw size={12} />
+            </button>
+          </BauhausTooltip>
         </div>
         <div className="text-xs text-center" style={{ color: "var(--plugin-label-color)" }}>
           reset rotation

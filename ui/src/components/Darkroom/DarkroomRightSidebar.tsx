@@ -10,6 +10,7 @@ import {
 } from "./moduleGroupPresets";
 import ProcessingModuleCard from "../modules/ProcessingModuleCard";
 import ScopeWidget from "./ScopeWidget";
+import BauhausTooltip from "../controls/BauhausTooltip";
 import { useDevelopStore } from "../../stores/developStore";
 
 function getPreset(name: string): ModuleGroupPreset {
@@ -115,25 +116,26 @@ export default function DarkroomRightSidebar() {
       {/* Module group tabs */}
       <div className="darkroom-group-tabs">
         {groupTabs.map((group) => (
-          <button
-            key={group.id}
-            className="darkroom-group-tab"
-            data-active={activeTab === group.id}
-            title={group.label}
-            onClick={() => setActiveTab(group.id)}
-          >
-            {group.icon}
-          </button>
+          <BauhausTooltip key={group.id} content={group.label}>
+            <button
+              className="darkroom-group-tab"
+              data-active={activeTab === group.id}
+              onClick={() => setActiveTab(group.id)}
+            >
+              {group.icon}
+            </button>
+          </BauhausTooltip>
         ))}
-        <button
-          ref={btnRef}
-          className="darkroom-group-presets"
-          title="presets"
-          data-active={presetsOpen}
-          onClick={togglePresets}
-        >
-          <Menu size={14} />
-        </button>
+        <BauhausTooltip content="presets">
+          <button
+            ref={btnRef}
+            className="darkroom-group-presets"
+            data-active={presetsOpen}
+            onClick={togglePresets}
+          >
+            <Menu size={14} />
+          </button>
+        </BauhausTooltip>
         {presetsOpen && createPortal(
           <div
             ref={popupRef}

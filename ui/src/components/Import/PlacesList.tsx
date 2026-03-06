@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useImportStore } from "../../stores/importStore";
 import { pickFolder } from "../../api/commands";
 import { Plus, Minus, RotateCcw } from "lucide-react";
+import BauhausTooltip from "../controls/BauhausTooltip";
 
 export default function PlacesList() {
   const places = useImportStore((s) => s.places);
@@ -35,15 +36,21 @@ export default function PlacesList() {
       <div className="import-section-header">
         <span className="module-section-title">places</span>
         <div className="import-section-actions">
-          <button className="module-action-btn" title="add place" onClick={handleAddPlace}>
-            <Plus size={12} />
-          </button>
-          <button className="module-action-btn" title="remove place" onClick={handleRemovePlace}>
-            <Minus size={12} />
-          </button>
-          <button className="module-action-btn" title="reset places" onClick={handleReset}>
-            <RotateCcw size={12} />
-          </button>
+          <BauhausTooltip content="add place">
+            <button className="module-action-btn" onClick={handleAddPlace}>
+              <Plus size={12} />
+            </button>
+          </BauhausTooltip>
+          <BauhausTooltip content="remove place">
+            <button className="module-action-btn" onClick={handleRemovePlace}>
+              <Minus size={12} />
+            </button>
+          </BauhausTooltip>
+          <BauhausTooltip content="reset places">
+            <button className="module-action-btn" onClick={handleReset}>
+              <RotateCcw size={12} />
+            </button>
+          </BauhausTooltip>
         </div>
       </div>
 

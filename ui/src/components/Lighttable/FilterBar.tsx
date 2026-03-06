@@ -12,6 +12,7 @@ import {
 } from "../../stores/filterStore";
 import BauhausCombo from "../controls/BauhausCombo";
 import BauhausButton from "../controls/BauhausButton";
+import BauhausTooltip from "../controls/BauhausTooltip";
 
 const STAR_PATH =
   "M12 2l2.9 6.6L22 9.5l-5 4.8 1.2 7.2L12 18l-6.2 3.5L7 14.3l-5-4.8 7.1-.9z";
@@ -100,10 +101,10 @@ function ColorLabelFilter() {
         active={allActive}
         onClick={toggleAllColors}
       />
+      <BauhausTooltip content={colorMode === "union" ? "union (OR) — click for intersection" : "intersection (AND) — click for union"}>
       <span
         className="filter-color-mode"
         data-disabled={activeColors.size < 2}
-        title={colorMode === "union" ? "Union (OR) — click for intersection" : "Intersection (AND) — click for union"}
         onClick={activeColors.size >= 2 ? toggleColorMode : undefined}
       >
         {colorMode === "union" ? (
@@ -118,6 +119,7 @@ function ColorLabelFilter() {
           </svg>
         )}
       </span>
+      </BauhausTooltip>
     </div>
   );
 }
@@ -320,12 +322,13 @@ function SortControls() {
           onChange={setSortBy}
         />
       </div>
-      <BauhausButton
-        icon={sortDirection === "asc" ? <ArrowUpNarrowWide size={14} /> : <ArrowDownWideNarrow size={14} />}
-        title={sortDirection === "asc" ? "Ascending — click for descending" : "Descending — click for ascending"}
-        transparent
-        onClick={toggleSortDirection}
-      />
+      <BauhausTooltip content={sortDirection === "asc" ? "ascending — click for descending" : "descending — click for ascending"}>
+        <BauhausButton
+          icon={sortDirection === "asc" ? <ArrowUpNarrowWide size={14} /> : <ArrowDownWideNarrow size={14} />}
+          transparent
+          onClick={toggleSortDirection}
+        />
+      </BauhausTooltip>
     </>
   );
 }
@@ -425,14 +428,15 @@ export default function FilterBar() {
   return (
     <div className="filter-bar">
       {/* filter config button */}
-      <button
-        ref={configBtnRef}
-        className="bauhaus-button bauhaus-button-icon-only bauhaus-button-transparent"
-        title="Configure filters"
-        onClick={toggleConfig}
-      >
-        <span className="bauhaus-button-icon"><Filter size={14} /></span>
-      </button>
+      <BauhausTooltip content="configure filters">
+        <button
+          ref={configBtnRef}
+          className="bauhaus-button bauhaus-button-icon-only bauhaus-button-transparent"
+          onClick={toggleConfig}
+        >
+          <span className="bauhaus-button-icon"><Filter size={14} /></span>
+        </button>
+      </BauhausTooltip>
 
       {/* quick filters as pills */}
       {shownFilters.map((type) => {

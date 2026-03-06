@@ -6,6 +6,7 @@ import {
   CircleOff,
 } from "lucide-react";
 import { useUIStore } from "../../stores/uiStore";
+import BauhausTooltip from "../controls/BauhausTooltip";
 
 const COLORS = [
   { key: "red", var: "--colorlabel-red" },
@@ -35,41 +36,53 @@ export default function BottomBar() {
     <div className="bottombar">
       {/* Left: rating + color labels */}
       <div className="flex items-center">
-        <button className="bottombar-btn" title="Reject">
-          <Ban size={12} />
-        </button>
+        <BauhausTooltip content="reject" placement="top">
+          <button className="bottombar-btn">
+            <Ban size={12} />
+          </button>
+        </BauhausTooltip>
 
         {[1, 2, 3, 4, 5].map((n) => (
-          <button key={n} className="bottombar-star" title={`Rate ${n} stars`}>
-            <Star size={12} />
-          </button>
+          <BauhausTooltip key={n} content={`rate ${n} stars`} placement="top">
+            <button className="bottombar-star">
+              <Star size={12} />
+            </button>
+          </BauhausTooltip>
         ))}
 
         <div className="bottombar-spacer" />
 
         {COLORS.map((c) => (
-          <button key={c.key} className="bottombar-color" title={`Color label: ${c.key}`}>
-            <div
-              className="bottombar-color-dot"
-              style={{ backgroundColor: `var(${c.var})` }}
-            />
-          </button>
+          <BauhausTooltip key={c.key} content={`color label: ${c.key}`} placement="top">
+            <button className="bottombar-color">
+              <div
+                className="bottombar-color-dot"
+                style={{ backgroundColor: `var(${c.var})` }}
+              />
+            </button>
+          </BauhausTooltip>
         ))}
 
-        <button className="bottombar-btn" title="Remove color label">
-          <CircleOff size={12} />
-        </button>
+        <BauhausTooltip content="remove color label" placement="top">
+          <button className="bottombar-btn">
+            <CircleOff size={12} />
+          </button>
+        </BauhausTooltip>
       </div>
 
       {/* Center: thumbs per row */}
       <div className="bottombar-pill">
         <span className="bottombar-pill-label">{gridColumns}</span>
-        <button onClick={fewer} className="toolbar-icon-btn" title="Fewer thumbnails per row">
-          <ZoomOut size={12} />
-        </button>
-        <button onClick={more} className="toolbar-icon-btn" title="More thumbnails per row">
-          <ZoomIn size={12} />
-        </button>
+        <BauhausTooltip content="fewer thumbnails per row" placement="top">
+          <button onClick={fewer} className="toolbar-icon-btn">
+            <ZoomOut size={12} />
+          </button>
+        </BauhausTooltip>
+        <BauhausTooltip content="more thumbnails per row" placement="top">
+          <button onClick={more} className="toolbar-icon-btn">
+            <ZoomIn size={12} />
+          </button>
+        </BauhausTooltip>
       </div>
     </div>
   );

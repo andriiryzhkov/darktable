@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { BarChart3, AudioWaveform, ChevronUp, ChevronRight } from "lucide-react";
+import BauhausTooltip from "../controls/BauhausTooltip";
 
 const S = 12;
 const LinearIcon = () => (
@@ -127,46 +128,50 @@ export default function ScopeWidget() {
         {/* Overlay toolbar — visible on hover */}
         <div className="scope-toolbar">
           <div className="scope-toolbar-left">
-            <button
-              className="scope-btn"
-              data-active={mode === "histogram"}
-              title="histogram"
-              onClick={() => setMode("histogram")}
-            >
-              <BarChart3 size={12} />
-            </button>
-            <button
-              className="scope-btn"
-              data-active={mode === "waveform"}
-              title="waveform"
-              onClick={() => setMode("waveform")}
-            >
-              <AudioWaveform size={12} />
-            </button>
+            <BauhausTooltip content="histogram">
+              <button
+                className="scope-btn"
+                data-active={mode === "histogram"}
+                onClick={() => setMode("histogram")}
+              >
+                <BarChart3 size={12} />
+              </button>
+            </BauhausTooltip>
+            <BauhausTooltip content="waveform">
+              <button
+                className="scope-btn"
+                data-active={mode === "waveform"}
+                onClick={() => setMode("waveform")}
+              >
+                <AudioWaveform size={12} />
+              </button>
+            </BauhausTooltip>
           </div>
 
           <div className="scope-toolbar-right">
             {mode === "histogram" ? (
-              <button
-                className="scope-btn"
-                data-active={isLog}
-                title={isLog ? "logarithmic scale" : "linear scale"}
-                onClick={toggleScale}
-              >
-                {isLog ? <LogIcon /> : <LinearIcon />}
-              </button>
+              <BauhausTooltip content={isLog ? "logarithmic scale" : "linear scale"}>
+                <button
+                  className="scope-btn"
+                  data-active={isLog}
+                  onClick={toggleScale}
+                >
+                  {isLog ? <LogIcon /> : <LinearIcon />}
+                </button>
+              </BauhausTooltip>
             ) : (
-              <button
-                className="scope-btn"
-                title={waveOrientation === "vertical" ? "vertical" : "horizontal"}
-                onClick={() => setWaveOrientation((o) => o === "vertical" ? "horizontal" : "vertical")}
-              >
-                {waveOrientation === "horizontal" ? <ChevronUp size={12} /> : <ChevronRight size={12} />}
-              </button>
+              <BauhausTooltip content={waveOrientation === "vertical" ? "vertical" : "horizontal"}>
+                <button
+                  className="scope-btn"
+                  onClick={() => setWaveOrientation((o) => o === "vertical" ? "horizontal" : "vertical")}
+                >
+                  {waveOrientation === "horizontal" ? <ChevronUp size={12} /> : <ChevronRight size={12} />}
+                </button>
+              </BauhausTooltip>
             )}
-            <button className="scope-btn scope-ch-r" data-active={showR} title="red" onClick={() => setShowR((v) => !v)} />
-            <button className="scope-btn scope-ch-g" data-active={showG} title="green" onClick={() => setShowG((v) => !v)} />
-            <button className="scope-btn scope-ch-b" data-active={showB} title="blue" onClick={() => setShowB((v) => !v)} />
+            <BauhausTooltip content="red"><button className="scope-btn scope-ch-r" data-active={showR} onClick={() => setShowR((v) => !v)} /></BauhausTooltip>
+            <BauhausTooltip content="green"><button className="scope-btn scope-ch-g" data-active={showG} onClick={() => setShowG((v) => !v)} /></BauhausTooltip>
+            <BauhausTooltip content="blue"><button className="scope-btn scope-ch-b" data-active={showB} onClick={() => setShowB((v) => !v)} /></BauhausTooltip>
           </div>
         </div>
       </div>

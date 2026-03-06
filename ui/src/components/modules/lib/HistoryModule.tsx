@@ -3,6 +3,7 @@ import CollapsibleModule from "../CollapsibleModule";
 import ConfirmDialog from "../../ConfirmDialog";
 import { useDevelopStore } from "../../../stores/developStore";
 import BauhausButton from "../../controls/BauhausButton";
+import BauhausTooltip from "../../controls/BauhausTooltip";
 import { CircleDot, Power } from "lucide-react";
 
 export default function HistoryModule() {
@@ -120,11 +121,12 @@ export default function HistoryModule() {
               })}
             </div>
             <div className="bauhaus-button-row" style={{ marginTop: 4 }}>
-              <BauhausButton
-                label="compress history stack"
-                title={"compress history stack\nctrl+click to truncate to selected item"}
-                onMouseDown={handleCompressClick}
-              />
+              <BauhausTooltip content={"compress history stack\nctrl+click to truncate to selected item"} placement="top">
+                <BauhausButton
+                  label="compress history stack"
+                  onMouseDown={handleCompressClick}
+                />
+              </BauhausTooltip>
             </div>
           </div>
         ) : (

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, Suspense } from "react";
 import { RotateCcw, Menu, Copy, Power, CircleDot, AlertTriangle } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import BauhausButton from "../controls/BauhausButton";
+import BauhausTooltip from "../controls/BauhausTooltip";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 
 /** Detect pipeline trouble messages for known modules */
@@ -73,9 +74,11 @@ export default function ProcessingModuleCard({ module, defaultOpen }: Props) {
 
         <span className="flex-1">{module.name}</span>
         {trouble && (
-          <span className="module-trouble-icon" title={trouble}>
-            <AlertTriangle size={12} />
-          </span>
+          <BauhausTooltip content={trouble} placement="left">
+            <span className="module-trouble-icon">
+              <AlertTriangle size={12} />
+            </span>
+          </BauhausTooltip>
         )}
 
         <span
