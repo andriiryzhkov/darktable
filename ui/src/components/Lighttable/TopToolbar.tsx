@@ -1,13 +1,16 @@
 import { useMemo } from "react";
-import { Star, HelpCircle, Keyboard, Settings, Group, Ungroup } from "lucide-react";
+import { HelpCircle, Keyboard, Settings, Group, Ungroup } from "lucide-react";
 import { useCatalogStore } from "../../stores/catalogStore";
 import { useFilterStore } from "../../stores/filterStore";
+import { useUIStore } from "../../stores/uiStore";
 import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
+import { OverlayMenu, ThumbTableMode } from "../ThumbTable";
 import FilterBar from "./FilterBar";
 
 export default function TopToolbar() {
   const { images, selectedIds } = useCatalogStore();
+  const activeView = useUIStore((s) => s.activeView);
   const grouping = useFilterStore((s) => s.grouping);
   const toggleGrouping = useFilterStore((s) => s.toggleGrouping);
   const displayedCount = useMemo(
@@ -35,9 +38,7 @@ export default function TopToolbar() {
             onClick={toggleGrouping}
           />
         </BauhausTooltip>
-        <BauhausTooltip content="click to change the type of overlays shown on thumbnails">
-          <BauhausButton icon={<Star size={14} />} transparent />
-        </BauhausTooltip>
+        <OverlayMenu mode={activeView === "darkroom" ? ThumbTableMode.Filmstrip : ThumbTableMode.Filemanager} />
         <BauhausTooltip content="enable this, then click on a control element to see its online help">
           <BauhausButton icon={<HelpCircle size={14} />} transparent />
         </BauhausTooltip>

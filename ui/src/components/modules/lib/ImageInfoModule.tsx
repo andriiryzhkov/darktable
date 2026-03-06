@@ -326,6 +326,7 @@ const EMPTY_IMAGE: ImageInfo = {
   width: 0, height: 0, flags: 0, rating: 0,
   iso: 0, aperture: 0, exposure: 0, focal_length: 0,
   maker: "", model: "", lens: "", datetime_taken: "",
+  aspect_ratio: 0,
 };
 
 const EMPTY_VARIOUS = new Set<string>();

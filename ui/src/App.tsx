@@ -2,16 +2,17 @@ import { useEffect, useCallback } from "react";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useCatalogStore } from "./stores/catalogStore";
 import { useUIStore } from "./stores/uiStore";
+import { useOverlayStore } from "./stores/overlayStore";
 import HeaderBar from "./components/Layout/HeaderBar";
 import Sidebar from "./components/Layout/Sidebar";
 import BottomBar from "./components/Layout/BottomBar";
 import LeftSidebarModules from "./components/Sidebar/LeftSidebarModules";
 import RightSidebarModules from "./components/Sidebar/RightSidebarModules";
-import LighttableView from "./components/Lighttable/LighttableView";
+import TopToolbar from "./components/Lighttable/TopToolbar";
+import { ThumbTable, ThumbTableMode } from "./components/ThumbTable";
 import DarkroomView from "./components/Darkroom/DarkroomView";
 import DarkroomLeftSidebar from "./components/Darkroom/DarkroomLeftSidebar";
 import DarkroomRightSidebar from "./components/Darkroom/DarkroomRightSidebar";
-import Filmstrip from "./components/Darkroom/Filmstrip";
 import ImportDialog from "./components/Import/ImportDialog";
 
 function App() {
@@ -33,7 +34,11 @@ function App() {
   const setDarkroomImgId = useUIStore((s) => s.setDarkroomImgId);
 
   useEffect(() => {
-    connect().then(() => fetchAll());
+    connect().then(() => {
+      fetchAll();
+      useOverlayStore.getState().loadFromConfig();
+      useUIStore.getState().loadFromConfig();
+    });
   }, [connect, fetchAll]);
 
   const openDarkroom = useCallback(
@@ -99,7 +104,13 @@ function App() {
         {/* Center content */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {activeView === "lighttable" && (
-            <LighttableView onOpenImage={openDarkroom} />
+            <>
+              <TopToolbar />
+              <ThumbTable
+                mode={ThumbTableMode.Filemanager}
+                onDoubleClickImage={openDarkroom}
+              />
+            </>
           )}
           {activeView === "darkroom" && darkroomImgId !== null && (
             <DarkroomView imgid={darkroomImgId} />
@@ -121,7 +132,11 @@ function App() {
         </Sidebar>
       </div>
       {activeView === "darkroom" && (
-        <Filmstrip onSelectImage={openDarkroom} />
+        <ThumbTable
+          mode={ThumbTableMode.Filmstrip}
+          processingImgId={darkroomImgId}
+          onDoubleClickImage={openDarkroom}
+        />
       )}
       <ImportDialog />
     </div>

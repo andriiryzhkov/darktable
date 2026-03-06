@@ -1,11 +1,12 @@
 import {
   Star,
-  ZoomIn,
-  ZoomOut,
+  Plus,
+  Minus,
   Ban,
   CircleOff,
 } from "lucide-react";
 import { useUIStore } from "../../stores/uiStore";
+import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
 
 const COLORS = [
@@ -74,14 +75,10 @@ export default function BottomBar() {
       <div className="bottombar-pill">
         <span className="bottombar-pill-label">{gridColumns}</span>
         <BauhausTooltip content="fewer thumbnails per row" placement="top">
-          <button onClick={fewer} className="toolbar-icon-btn">
-            <ZoomOut size={12} />
-          </button>
+          <BauhausButton transparent icon={<Minus size={10} />} onClick={fewer} />
         </BauhausTooltip>
         <BauhausTooltip content="more thumbnails per row" placement="top">
-          <button onClick={more} className="toolbar-icon-btn">
-            <ZoomIn size={12} />
-          </button>
+          <BauhausButton transparent icon={<Plus size={10} />} onClick={more} />
         </BauhausTooltip>
       </div>
     </div>
