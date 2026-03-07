@@ -48,7 +48,7 @@ typedef struct _startup_data_t
 static void usage(const char *progname)
 {
   fprintf(stderr,
-    "darktable-webview — webview UI for darktable\n\n"
+    "darktable-nova — webview UI for darktable\n\n"
     "Usage:\n"
     "  %s [OPTIONS] [--core DARKTABLE_OPTIONS]\n\n"
     "Options:\n"

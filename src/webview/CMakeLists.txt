@@ -77,11 +77,11 @@ else()
   list(APPEND WEBVIEW_HOST_SOURCES platform/titlebar_linux.c)
 endif()
 
-add_executable(darktable-webview ${WEBVIEW_HOST_SOURCES})
+add_executable(darktable-nova ${WEBVIEW_HOST_SOURCES})
 
 # We include C API headers only (api.h, types.h, errors.h) — no C++ in our code.
 # Linking to webview_core_static provides the C++ implementation.
-target_include_directories(darktable-webview PRIVATE
+target_include_directories(darktable-nova PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..        # for "server/server_protocol.h"
   ${GLIB_INCLUDE_DIRS}
   ${JSON_GLIB_INCLUDE_DIRS}
@@ -89,14 +89,14 @@ target_include_directories(darktable-webview PRIVATE
 )
 
 # webview is C++ internally, so we need C++ linker
-set_target_properties(darktable-webview PROPERTIES LINKER_LANGUAGE CXX)
+set_target_properties(darktable-nova PROPERTIES LINKER_LANGUAGE CXX)
 
-target_link_directories(darktable-webview PRIVATE
+target_link_directories(darktable-nova PRIVATE
   ${GLIB_LIBRARY_DIRS}
   ${JSON_GLIB_LIBRARY_DIRS}
 )
 
-target_link_libraries(darktable-webview
+target_link_libraries(darktable-nova
   webview_core_static
   nfd
   ${GLIB_LIBRARIES}
@@ -106,20 +106,20 @@ target_link_libraries(darktable-webview
 )
 
 if(APPLE)
-  target_link_libraries(darktable-webview "-framework WebKit" "-framework Cocoa")
+  target_link_libraries(darktable-nova "-framework WebKit" "-framework Cocoa")
 elseif(WIN32)
-  target_link_libraries(darktable-webview dwmapi user32)
+  target_link_libraries(darktable-nova dwmapi user32)
 else()
   pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-  target_include_directories(darktable-webview PRIVATE ${GTK3_INCLUDE_DIRS})
-  target_link_directories(darktable-webview PRIVATE ${GTK3_LIBRARY_DIRS})
-  target_link_libraries(darktable-webview ${GTK3_LIBRARIES})
+  target_include_directories(darktable-nova PRIVATE ${GTK3_INCLUDE_DIRS})
+  target_link_directories(darktable-nova PRIVATE ${GTK3_LIBRARY_DIRS})
+  target_link_libraries(darktable-nova ${GTK3_LIBRARIES})
 endif()
 
-set_target_properties(darktable-webview
+set_target_properties(darktable-nova
   PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${DARKTABLE_BINDIR}
 )
 
-install(TARGETS darktable-webview DESTINATION ${CMAKE_INSTALL_BINDIR}
+install(TARGETS darktable-nova DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT DTApplication)

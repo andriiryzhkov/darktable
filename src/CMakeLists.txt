@@ -1234,10 +1234,10 @@ if(BUILD_SERVER)
   add_subdirectory(server)
 endif(BUILD_SERVER)
 
-# webview-based desktop UI host
-if(BUILD_WEBVIEW)
+# nova: webview-based desktop UI host
+if(BUILD_NOVA)
   add_subdirectory(webview)
-endif(BUILD_WEBVIEW)
+endif(BUILD_NOVA)
 
 # have a command line utility to generate all the thumbnails
 add_subdirectory(generate-cache)
