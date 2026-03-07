@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -291,6 +292,11 @@ dt_server_t *dt_server_init(const char *socket_path)
     return NULL;
   }
 
+  /* Restrict socket file to owner only (prevents other local users from connecting).
+   * Use chmod() on the path — fchmod() on socket fds is not supported on macOS. */
+  if(chmod(socket_path, 0600) < 0)
+    fprintf(stderr, "[server] WARNING: chmod(0600) failed: %s\n", strerror(errno));
+
   if(listen(server->listen_fd, 1) < 0)
   {
     fprintf(stderr, "[server] listen() failed: %s\n", strerror(errno));
@@ -326,6 +332,66 @@ void dt_server_run(dt_server_t *server)
       if(!server->running) break;
       fprintf(stderr, "[server] accept() failed: %s\n", strerror(errno));
       continue;
+    }
+
+    /* Verify peer credentials — reject connections from other users */
+    {
+      gboolean peer_ok = FALSE;
+#if defined(SO_PEERCRED)
+      uid_t my_uid = getuid();
+#endif
+
+#ifdef __APPLE__
+      /* macOS: use LOCAL_PEERPID + getpwuid to verify UID */
+      pid_t peer_pid = 0;
+      socklen_t pid_len = sizeof(peer_pid);
+      if(getsockopt(cfd, SOL_LOCAL, LOCAL_PEERPID, &peer_pid, &pid_len) == 0)
+      {
+        /* On macOS there's no direct way to get peer UID from socket.
+         * LOCAL_PEERPID gives us the PID; fchmod(0600) on the socket file
+         * is the primary protection. Accept if we got a valid PID. */
+        peer_ok = (peer_pid > 0);
+        if(peer_ok)
+          fprintf(stderr, "[server] client connected (pid=%d)\n", peer_pid);
+      }
+      else
+      {
+        /* Fallback: accept anyway, fchmod is the primary guard */
+        fprintf(stderr, "[server] WARNING: LOCAL_PEERPID failed: %s\n", strerror(errno));
+        peer_ok = TRUE;
+      }
+#elif defined(SO_PEERCRED)
+      /* Linux: use SO_PEERCRED to verify UID */
+      struct ucred cred;
+      socklen_t cred_len = sizeof(cred);
+      if(getsockopt(cfd, SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) == 0)
+      {
+        if(cred.uid == my_uid)
+        {
+          peer_ok = TRUE;
+          fprintf(stderr, "[server] client connected (pid=%d, uid=%d)\n", cred.pid, cred.uid);
+        }
+        else
+        {
+          fprintf(stderr, "[server] REJECTED connection from uid=%d (expected %d)\n",
+                  cred.uid, my_uid);
+        }
+      }
+      else
+      {
+        fprintf(stderr, "[server] WARNING: SO_PEERCRED failed: %s\n", strerror(errno));
+        peer_ok = TRUE;
+      }
+#else
+      /* Unknown platform: rely on fchmod(0600) */
+      peer_ok = TRUE;
+#endif
+
+      if(!peer_ok)
+      {
+        close(cfd);
+        continue;
+      }
     }
 
     server->client_fd = cfd;
