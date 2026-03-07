@@ -40,6 +40,74 @@
 #endif
 #include <unistd.h>
 
+/* ── Thread pool for binding workers ──────────────────────────
+ * Instead of spawning a new pthread per binding call, we maintain
+ * a fixed pool of worker threads and dispatch via GAsyncQueue.
+ */
+#define BINDING_POOL_SIZE 4
+
+typedef struct _pool_work_item_t
+{
+  void *(*func)(void *);  // worker function
+  void *arg;              // argument (typically async_req_t*)
+} _pool_work_item_t;
+
+static GAsyncQueue *_work_queue = NULL;
+static pthread_t _pool_threads[BINDING_POOL_SIZE];
+static int _pool_initialized = 0;
+
+static void *_pool_worker(void *unused)
+{
+  (void)unused;
+  while(1)
+  {
+    _pool_work_item_t *item = g_async_queue_pop(_work_queue);
+    if(!item->func)
+    {
+      /* Sentinel: NULL func means shutdown */
+      g_free(item);
+      break;
+    }
+    item->func(item->arg);
+    g_free(item);
+  }
+  return NULL;
+}
+
+static void _pool_dispatch(void *(*func)(void *), void *arg)
+{
+  _pool_work_item_t *item = g_new(_pool_work_item_t, 1);
+  item->func = func;
+  item->arg = arg;
+  g_async_queue_push(_work_queue, item);
+}
+
+static void _binding_pool_init(void)
+{
+  if(_pool_initialized) return;
+  _work_queue = g_async_queue_new();
+  for(int i = 0; i < BINDING_POOL_SIZE; i++)
+    pthread_create(&_pool_threads[i], NULL, _pool_worker, NULL);
+  _pool_initialized = 1;
+}
+
+void dt_binding_pool_shutdown(void)
+{
+  if(!_pool_initialized) return;
+  /* Push sentinel items to wake and stop each worker */
+  for(int i = 0; i < BINDING_POOL_SIZE; i++)
+  {
+    _pool_work_item_t *sentinel = g_new0(_pool_work_item_t, 1);
+    sentinel->func = NULL;
+    g_async_queue_push(_work_queue, sentinel);
+  }
+  for(int i = 0; i < BINDING_POOL_SIZE; i++)
+    pthread_join(_pool_threads[i], NULL);
+  g_async_queue_unref(_work_queue);
+  _work_queue = NULL;
+  _pool_initialized = 0;
+}
+
 /* async callback infrastructure */
 
 typedef struct async_req_t
@@ -274,18 +342,7 @@ static void _ipc_passthrough(dt_webview_ctx_t *ctx, const char *id,
   pt->method = g_strdup(method);
   pt->params_json = g_strdup(params_json ? params_json : "{}");
 
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _ipc_passthrough_worker, pt) != 0)
-  {
-    fprintf(stderr, "[webview] pthread_create failed for %s: %s\n", method, strerror(errno));
-    _return_error(ctx, id, "internal error: failed to create worker thread");
-    g_free(pt->id);
-    g_free(pt->method);
-    g_free(pt->params_json);
-    g_free(pt);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_ipc_passthrough_worker, pt);
 }
 
 static void on_ping(const char *id, const char *req, void *arg)
@@ -541,15 +598,7 @@ static void *_develop_open_worker(void *arg)
 
 static void on_develop_open(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _develop_open_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_develop_open_worker, _async_req_new(arg, id, req));
 }
 
 static void *_develop_close_worker(void *arg)
@@ -616,15 +665,7 @@ static void *_develop_close_worker(void *arg)
 
 static void on_develop_close(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _develop_close_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_develop_close_worker, _async_req_new(arg, id, req));
 }
 
 static void on_develop_set_params(const char *id, const char *req, void *arg)
@@ -1812,15 +1853,7 @@ static void *_get_preview_frame_worker(void *arg)
 
 static void on_get_preview_frame(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _get_preview_frame_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_get_preview_frame_worker, _async_req_new(arg, id, req));
 }
 
 /* ── Filesystem browsing (cross-platform via GLib) ───────────── */
@@ -1968,15 +2001,7 @@ static void *_list_folders_worker(void *arg)
 
 static void on_list_folders(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _list_folders_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_list_folders_worker, _async_req_new(arg, id, req));
 }
 
 /* Helper to add files from a single directory to the builder array */
@@ -2170,15 +2195,7 @@ static void *_list_files_worker(void *arg)
 
 static void on_list_files(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _list_files_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_list_files_worker, _async_req_new(arg, id, req));
 }
 
 /* ── Environment helpers ─────────────────────────────────────── */
@@ -2359,15 +2376,7 @@ static void *_import_images_worker(void *arg)
 
 static void on_import_images(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _import_images_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_import_images_worker, _async_req_new(arg, id, req));
 }
 
 /* ── Copy & import images via IPC ─────────────────────────────── */
@@ -2451,15 +2460,7 @@ static void *_copy_import_images_worker(void *arg)
 
 static void on_copy_import_images(const char *id, const char *req, void *arg)
 {
-  async_req_t *ar = _async_req_new(arg, id, req);
-  pthread_t thread;
-  if(pthread_create(&thread, NULL, _copy_import_images_worker, ar) != 0)
-  {
-    _return_error(ar->ctx, id, "internal error: failed to create worker thread");
-    _async_req_free(ar);
-    return;
-  }
-  pthread_detach(thread);
+  _pool_dispatch(_copy_import_images_worker, _async_req_new(arg, id, req));
 }
 
 /* ── File thumbnail (embedded EXIF preview) via IPC ───────────── */
@@ -2603,6 +2604,9 @@ static void on_config_set(const char *id, const char *req, void *arg)
 
 void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
 {
+  /* Initialize worker thread pool */
+  _binding_pool_init();
+
   /* Initialize NFD once */
   NFD_Init();
 

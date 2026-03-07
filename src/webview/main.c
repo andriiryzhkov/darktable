@@ -381,6 +381,7 @@ int main(int argc, char *argv[])
 
   // cleanup
   fprintf(stderr, "[webview] shutting down...\n");
+  dt_binding_pool_shutdown();
   webview_destroy(ctx.webview);
 
   // Send graceful shutdown to server (before closing IPC) so it saves config

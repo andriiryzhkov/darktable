@@ -62,3 +62,6 @@ void dt_webview_register_window_bindings(dt_webview_ctx_t *ctx);
 
 // register all JS bindings on the webview (requires server connection)
 void dt_webview_register_bindings(dt_webview_ctx_t *ctx);
+
+// shut down the binding worker thread pool
+void dt_binding_pool_shutdown(void);
