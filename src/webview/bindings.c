@@ -1369,7 +1369,7 @@ static void _send_http_response(int fd, int code, const char *status,
     "Connection: close\r\n"
     "\r\n",
     code, status, content_type, body_len);
-  write(fd, hdr, hlen);
+  if(write(fd, hdr, hlen) < 0) return;
   if(body && body_len > 0)
   {
     size_t written = 0;
@@ -1527,7 +1527,11 @@ static void _handle_raw_request(int client_fd, dt_webview_ctx_t *ctx,
     "Connection: close\r\n"
     "\r\n",
     pixel_size, w, h);
-  write(client_fd, hdr, hlen);
+  if(write(client_fd, hdr, hlen) < 0)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    return;
+  }
 
   /* Stream directly from SHM — no copy, no conversion */
   size_t written = 0;

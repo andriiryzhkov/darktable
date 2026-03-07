@@ -16,6 +16,7 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#define _DEFAULT_SOURCE // for usleep with _XOPEN_SOURCE=700
 #include "bindings.h"
 #include "ipc.h"
 #include "splash.h"
