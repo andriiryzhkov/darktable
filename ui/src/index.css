@@ -601,6 +601,41 @@ body {
   color: var(--fg-color);
 }
 
+/* Tab bar for multi-tab modules (e.g. color calibration) */
+.bauhaus-tab-bar {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bauhaus-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 3px 4px;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--disabled-fg-color);
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bauhaus-tab:hover {
+  color: var(--fg-color);
+}
+
+.bauhaus-tab--active {
+  color: var(--fg-color);
+  border-bottom-color: var(--fg-color);
+}
+
 .bauhaus-button-row {
   display: flex;
   gap: 4px;
