@@ -105,6 +105,73 @@ static JsonArray *_parse_args(const char *req, JsonParser **out_parser)
   return json_node_get_array(root);
 }
 
+/* ── Path validation ──────────────────────────────────────────
+ * Prevent directory traversal / filesystem enumeration from JS.
+ * Allowed roots: user home, common mount points, filesystem root
+ * for folder browsing only.
+ */
+static gboolean _path_is_allowed(const char *path)
+{
+  if(!path || !path[0]) return FALSE;
+
+  /* Resolve symlinks and normalize the path */
+  char resolved[PATH_MAX];
+  if(!realpath(path, resolved))
+  {
+    /* Path doesn't exist — that's fine for listFolders/listFiles,
+     * they'll fail with "cannot open directory" later.
+     * But we still need to validate the *intent*.
+     * Normalize what we can without requiring existence. */
+    const char *r = path;
+
+    /* Reject paths with /../ components */
+    if(strstr(path, "/../") || strstr(path, "/..") == path + strlen(path) - 3)
+      return FALSE;
+
+    /* For non-existent paths, use the path as-is for prefix checks */
+    g_strlcpy(resolved, r, sizeof(resolved));
+  }
+
+  /* Always allowed: user home directory */
+  const char *home = g_get_home_dir();
+  if(home && g_str_has_prefix(resolved, home))
+    return TRUE;
+
+  /* Allow filesystem root itself (for folder browsing navigation) */
+  if(strcmp(resolved, "/") == 0)
+    return TRUE;
+
+  /* Allow common mount points so users can navigate to external drives */
+  static const char *allowed_prefixes[] = {
+#ifdef __APPLE__
+    "/Volumes/",
+#else
+    "/media/",
+    "/mnt/",
+    "/run/media/",
+#endif
+#ifdef _WIN32
+    /* On Windows, all drive letters are allowed */
+#endif
+    NULL
+  };
+
+  for(const char **pfx = allowed_prefixes; *pfx; pfx++)
+  {
+    if(g_str_has_prefix(resolved, *pfx))
+      return TRUE;
+  }
+
+#ifdef _WIN32
+  /* Allow any drive letter path (e.g. C:\, D:\) */
+  if(((resolved[0] >= 'A' && resolved[0] <= 'Z') ||
+      (resolved[0] >= 'a' && resolved[0] <= 'z')) && resolved[1] == ':')
+    return TRUE;
+#endif
+
+  return FALSE;
+}
+
 // Helper: get an owned copy of a string argument from a parsed JSON array.
 // Returns a g_strdup'd string that the caller must g_free.
 // Safe to use after g_object_unref(parser).
@@ -1834,6 +1901,15 @@ static void *_list_folders_worker(void *arg)
   }
 
   const char *path = json_array_get_string_element(args, 0);
+
+  if(!_path_is_allowed(path))
+  {
+    _return_error(ctx, ar->id, "path not allowed");
+    g_object_unref(parser);
+    _async_req_free(ar);
+    return NULL;
+  }
+
   GError *err = NULL;
   GDir *d = g_dir_open(path, 0, &err);
   if(!d)
@@ -2044,6 +2120,15 @@ static void *_list_files_worker(void *arg)
   }
 
   const char *path = json_array_get_string_element(args, 0);
+
+  if(!_path_is_allowed(path))
+  {
+    _return_error(ctx, ar->id, "path not allowed");
+    g_object_unref(parser);
+    _async_req_free(ar);
+    return NULL;
+  }
+
   gboolean recursive = json_array_get_boolean_element(args, 1);
   gboolean ignore_non_raw = json_array_get_boolean_element(args, 2);
 
@@ -2213,6 +2298,19 @@ static void *_import_images_worker(void *arg)
   /* args[0] is an array of fullpath strings */
   JsonArray *paths = json_array_get_array_element(args, 0);
 
+  /* Validate all paths before forwarding */
+  for(guint i = 0; i < json_array_get_length(paths); i++)
+  {
+    const char *p = json_array_get_string_element(paths, i);
+    if(p && !_path_is_allowed(p))
+    {
+      _return_error(ctx, ar->id, "path not allowed");
+      g_object_unref(parser);
+      _async_req_free(ar);
+      return NULL;
+    }
+  }
+
   /* Build params: {"paths":["...", ...]} */
   JsonBuilder *pb = json_builder_new();
   json_builder_begin_object(pb);
@@ -2292,6 +2390,19 @@ static void *_copy_import_images_worker(void *arg)
   /* args[0] is an array of fullpath strings */
   JsonArray *paths = json_array_get_array_element(args, 0);
 
+  /* Validate all paths before forwarding */
+  for(guint i = 0; i < json_array_get_length(paths); i++)
+  {
+    const char *p = json_array_get_string_element(paths, i);
+    if(p && !_path_is_allowed(p))
+    {
+      _return_error(ctx, ar->id, "path not allowed");
+      g_object_unref(parser);
+      _async_req_free(ar);
+      return NULL;
+    }
+  }
+
   /* Build params: {"paths":["...", ...]} */
   JsonBuilder *pb = json_builder_new();
   json_builder_begin_object(pb);
@@ -2366,6 +2477,13 @@ static void on_get_file_thumbnail(const char *id, const char *req, void *arg)
   }
 
   const char *path = json_array_get_string_element(args, 0);
+
+  if(!_path_is_allowed(path))
+  {
+    _return_error(ctx, id, "path not allowed");
+    g_object_unref(parser);
+    return;
+  }
 
   /* Escape path for JSON */
   JsonNode *node = json_node_new(JSON_NODE_VALUE);
