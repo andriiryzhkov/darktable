@@ -1734,101 +1734,29 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   if(!session)
     return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
 
-  // Process the pipeline (synchronous — blocks until done)
-  dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+  // Async preview: bump pipeline_seq and trigger worker thread.
+  // The worker writes to SHM and pushes a develop.preview_ready event on completion.
+  // The server main loop returns immediately so it can keep processing other requests.
+  pthread_mutex_lock(&session->pipeline_mutex);
+  session->pipeline_seq++;
+  pthread_mutex_unlock(&session->pipeline_mutex);
+  _maybe_start_pipeline(server, session);
 
-  fprintf(stderr, "[server] develop.request_preview: session=%s processing...\n",
-          session_id);
+  fprintf(stderr, "[server] develop.request_preview: session=%s queued (seq=%llu)\n",
+          session_id, (unsigned long long)session->pipeline_seq);
 
-  dt_dev_process_image_job(&session->dev, &session->dev.full, pipe, -1, DT_DEVICE_CPU);
-
-  // Lock backbuf_mutex to safely access pipeline output
-  dt_pthread_mutex_lock(&pipe->backbuf_mutex);
-
-  if(!pipe->backbuf || pipe->backbuf_width <= 0 || pipe->backbuf_height <= 0)
-  {
-    dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
-    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL,
-                                 "Pipeline processing failed — no output");
-  }
-
-  const int rendered_width = pipe->backbuf_width;
-  const int rendered_height = pipe->backbuf_height;
-
-  fprintf(stderr, "[server] develop.request_preview: rendered %dx%d\n",
-          rendered_width, rendered_height);
-
-  // Write to back buffer (the one client is NOT reading)
-  const int back = 1 - session->front_buffer;
-  dt_shm_buffer_t *shm = &session->shm_buffers[back];
-
-  session->frame_sequence++;
-
-  // Update SHM header
-  dt_shm_write_header(shm, rendered_width, rendered_height,
-                       DT_SHM_FORMAT_BGRA8, session->frame_sequence);
-
-  // Copy pixel data while holding the lock
-  uint8_t *dst = dt_shm_pixel_data(shm);
-  const size_t copy_size = (size_t)rendered_width * rendered_height * 4;
-  memcpy(dst, pipe->backbuf, copy_size);
-
-  dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
-
-  // Mark buffer as ready and swap
-  __atomic_store_n(&shm->mapped->ready, 1, __ATOMIC_RELEASE);
-  session->front_buffer = back;
-  session->dirty = FALSE;
-
-  // Queue a preview_ready event for the client
-  {
-    JsonBuilder *eb = json_builder_new();
-    json_builder_begin_object(eb);
-
-    json_builder_set_member_name(eb, "session_id");
-    json_builder_add_string_value(eb, session->session_id);
-
-    json_builder_set_member_name(eb, "shm_name");
-    json_builder_add_string_value(eb, shm->name);
-
-    json_builder_set_member_name(eb, "width");
-    json_builder_add_int_value(eb, rendered_width);
-
-    json_builder_set_member_name(eb, "height");
-    json_builder_add_int_value(eb, rendered_height);
-
-    json_builder_set_member_name(eb, "sequence");
-    json_builder_add_int_value(eb, session->frame_sequence);
-
-    json_builder_end_object(eb);
-
-    JsonNode *event_data = json_builder_get_root(eb);
-    dt_server_queue_event(server, "develop.preview_ready", event_data);
-    json_node_unref(event_data);
-    g_object_unref(eb);
-  }
-
-  // Build the direct response (client also gets the event asynchronously)
+  // Respond immediately -- client will receive develop.preview_ready event when done
   JsonBuilder *b = json_builder_new();
   json_builder_begin_object(b);
+
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "queued");
 
   json_builder_set_member_name(b, "session_id");
   json_builder_add_string_value(b, session->session_id);
 
-  json_builder_set_member_name(b, "width");
-  json_builder_add_int_value(b, rendered_width);
-
-  json_builder_set_member_name(b, "height");
-  json_builder_add_int_value(b, rendered_height);
-
-  json_builder_set_member_name(b, "sequence");
-  json_builder_add_int_value(b, session->frame_sequence);
-
-  json_builder_set_member_name(b, "shm_name");
-  json_builder_add_string_value(b, shm->name);
-
-  json_builder_set_member_name(b, "front_buffer");
-  json_builder_add_int_value(b, session->front_buffer);
+  json_builder_set_member_name(b, "pipeline_seq");
+  json_builder_add_int_value(b, session->pipeline_seq);
 
   json_builder_end_object(b);
 

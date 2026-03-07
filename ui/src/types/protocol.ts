@@ -80,12 +80,9 @@ export interface SessionInfo {
 }
 
 export interface PreviewResult {
+  status: string;
   session_id: string;
-  width: number;
-  height: number;
-  sequence: number;
-  shm_name: string;
-  front_buffer: number;
+  pipeline_seq: number;
 }
 
 export interface ModuleDescription {

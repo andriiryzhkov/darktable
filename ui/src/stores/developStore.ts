@@ -218,19 +218,13 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         get().fetchGenericParams("colorout"),
       ]);
 
-      // Render preview (server processes synchronously, SHM is ready when this returns)
-      const preview = await developRequestPreview(result.session_id);
+      // Trigger async preview render — the develop.preview_ready event handler
+      // will update the store and fetch the frame when the pipeline finishes.
+      await developRequestPreview(result.session_id);
       if (gen !== sessionGeneration) return;
 
-      set({
-        frontBuffer: preview.front_buffer,
-        sequence: preview.sequence,
-        previewWidth: preview.width,
-        previewHeight: preview.height,
-      });
-
-      // Fetch the rendered frame + wait for metadata to finish
-      await Promise.all([get().fetchFrame(), metadataPromise]);
+      // Wait for metadata to finish (preview will arrive via event)
+      await metadataPromise;
     } catch (e) {
       if (gen !== sessionGeneration) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -266,13 +260,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     const { sessionId } = get();
     if (!sessionId) return;
     try {
-      const result = await developRequestPreview(sessionId);
-      set({
-        frontBuffer: result.front_buffer,
-        sequence: result.sequence,
-        previewWidth: result.width,
-        previewHeight: result.height,
-      });
+      // Async: server queues the render and responds immediately.
+      // The actual frame arrives via the develop.preview_ready event handler.
+      await developRequestPreview(sessionId);
     } catch (e) {
       console.error("develop.request_preview failed:", e);
     }
