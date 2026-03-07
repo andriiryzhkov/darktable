@@ -1347,6 +1347,11 @@ static void *_preview_pipeline_worker(void *arg)
     const uint64_t start_seq = session->pipeline_seq;
     pthread_mutex_unlock(&session->pipeline_mutex);
 
+    // Clear any pending shutdown flag before (re)processing
+    dt_dev_pixelpipe_t *pipe_check = session->dev.full.pipe;
+    if(pipe_check)
+      dt_atomic_set_int(&pipe_check->shutdown, DT_DEV_PIXELPIPE_STOP_NO);
+
     // Process the pipeline
     const gint64 t_pipe_start = g_get_monotonic_time();
     dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
@@ -1442,7 +1447,11 @@ static void _maybe_start_pipeline(dt_server_t *server, dt_server_session_t *sess
   pthread_mutex_lock(&session->pipeline_mutex);
   if(session->pipeline_busy)
   {
-    // Worker is already running — it will see the bumped pipeline_seq and reprocess
+    // Worker is already running — cancel the in-flight render so it finishes faster.
+    // The worker will see the bumped pipeline_seq and reprocess with latest params.
+    dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+    if(pipe)
+      dt_atomic_set_int(&pipe->shutdown, DT_DEV_PIXELPIPE_STOP_NODES);
     pthread_mutex_unlock(&session->pipeline_mutex);
     return;
   }
@@ -1758,6 +1767,38 @@ char *dt_server_develop_request_preview(dt_server_t *server, const dt_server_req
   json_builder_set_member_name(b, "pipeline_seq");
   json_builder_add_int_value(b, session->pipeline_seq);
 
+  json_builder_end_object(b);
+
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+char *dt_server_develop_cancel_pipeline(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  /* Signal the pipeline to stop at the next IOP boundary */
+  dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+  if(pipe)
+    dt_atomic_set_int(&pipe->shutdown, DT_DEV_PIXELPIPE_STOP_NODES);
+
+  fprintf(stderr, "[server] develop.cancel_pipeline: session=%s\n", session_id);
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "status");
+  json_builder_add_string_value(b, "cancelled");
   json_builder_end_object(b);
 
   JsonNode *result = json_builder_get_root(b);
