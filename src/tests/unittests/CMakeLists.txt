@@ -1,6 +1,7 @@
 add_subdirectory(common)
 add_subdirectory(hdr)
 add_subdirectory(iop)
+add_subdirectory(webview)
 
 if(USE_AI)
   add_subdirectory(ai)

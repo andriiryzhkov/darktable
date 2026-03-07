@@ -18,6 +18,7 @@
 
 #include "bindings.h"
 #include "ipc.h"
+#include "path_validation.h"
 #include "titlebar.h"
 #include "server/server_protocol.h"
 
@@ -173,72 +174,8 @@ static JsonArray *_parse_args(const char *req, JsonParser **out_parser)
   return json_node_get_array(root);
 }
 
-/* ── Path validation ──────────────────────────────────────────
- * Prevent directory traversal / filesystem enumeration from JS.
- * Allowed roots: user home, common mount points, filesystem root
- * for folder browsing only.
- */
-static gboolean _path_is_allowed(const char *path)
-{
-  if(!path || !path[0]) return FALSE;
-
-  /* Resolve symlinks and normalize the path */
-  char resolved[PATH_MAX];
-  if(!realpath(path, resolved))
-  {
-    /* Path doesn't exist — that's fine for listFolders/listFiles,
-     * they'll fail with "cannot open directory" later.
-     * But we still need to validate the *intent*.
-     * Normalize what we can without requiring existence. */
-    const char *r = path;
-
-    /* Reject paths with /../ components */
-    if(strstr(path, "/../") || strstr(path, "/..") == path + strlen(path) - 3)
-      return FALSE;
-
-    /* For non-existent paths, use the path as-is for prefix checks */
-    g_strlcpy(resolved, r, sizeof(resolved));
-  }
-
-  /* Always allowed: user home directory */
-  const char *home = g_get_home_dir();
-  if(home && g_str_has_prefix(resolved, home))
-    return TRUE;
-
-  /* Allow filesystem root itself (for folder browsing navigation) */
-  if(strcmp(resolved, "/") == 0)
-    return TRUE;
-
-  /* Allow common mount points so users can navigate to external drives */
-  static const char *allowed_prefixes[] = {
-#ifdef __APPLE__
-    "/Volumes/",
-#else
-    "/media/",
-    "/mnt/",
-    "/run/media/",
-#endif
-#ifdef _WIN32
-    /* On Windows, all drive letters are allowed */
-#endif
-    NULL
-  };
-
-  for(const char **pfx = allowed_prefixes; *pfx; pfx++)
-  {
-    if(g_str_has_prefix(resolved, *pfx))
-      return TRUE;
-  }
-
-#ifdef _WIN32
-  /* Allow any drive letter path (e.g. C:\, D:\) */
-  if(((resolved[0] >= 'A' && resolved[0] <= 'Z') ||
-      (resolved[0] >= 'a' && resolved[0] <= 'z')) && resolved[1] == ':')
-    return TRUE;
-#endif
-
-  return FALSE;
-}
+/* Path validation is in path_validation.h (shared with tests) */
+#define _path_is_allowed dt_path_is_allowed
 
 // Helper: get an owned copy of a string argument from a parsed JSON array.
 // Returns a g_strdup'd string that the caller must g_free.

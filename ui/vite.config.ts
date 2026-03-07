@@ -12,5 +12,9 @@ export default defineConfig({
     target: "ES2020",
     outDir: "dist",
   },
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/test/setup.ts"],
+  },
   clearScreen: false,
 });
