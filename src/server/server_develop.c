@@ -51,39 +51,6 @@ typedef struct _server_exposure_params_t
   gboolean compensate_hilite_pres;
 } _server_exposure_params_t;
 
-// Mirror of dt_iop_colorin_params_t from iop/colorin.c
-// Must match the struct layout exactly (introspection version 7).
-#define _SERVER_IOP_COLOR_ICC_LEN 512
-
-typedef enum _server_color_normalize_t
-{
-  _NORMALIZE_OFF = 0,
-  _NORMALIZE_SRGB = 1,
-  _NORMALIZE_ADOBE_RGB = 2,
-  _NORMALIZE_LINEAR_REC709_RGB = 3,
-  _NORMALIZE_LINEAR_REC2020_RGB = 4
-} _server_color_normalize_t;
-
-typedef struct _server_colorin_params_t
-{
-  dt_colorspaces_color_profile_type_t type;
-  char filename[_SERVER_IOP_COLOR_ICC_LEN];
-  dt_iop_color_intent_t intent;
-  _server_color_normalize_t normalize;
-  gboolean blue_mapping;
-  dt_colorspaces_color_profile_type_t type_work;
-  char filename_work[_SERVER_IOP_COLOR_ICC_LEN];
-} _server_colorin_params_t;
-
-// Mirror of dt_iop_colorout_params_t from iop/colorout.c
-// Must match the struct layout exactly (introspection version 5).
-typedef struct _server_colorout_params_t
-{
-  dt_colorspaces_color_profile_type_t type;
-  char filename[_SERVER_IOP_COLOR_ICC_LEN];
-  dt_iop_color_intent_t intent;
-} _server_colorout_params_t;
-
 // Mirror of dt_iop_temperature_params_t from iop/temperature.c
 // Must match the struct layout exactly (introspection version 4).
 typedef struct _server_temperature_params_t
@@ -94,6 +61,99 @@ typedef struct _server_temperature_params_t
   float various;
   int preset;
 } _server_temperature_params_t;
+
+// --- Runtime verification of mirror struct layouts against IOP introspection ---
+// The original IOP param types are defined in .c files (not headers), so we
+// can't use _Static_assert. Instead we verify sizeof + field offsets at first
+// use via introspection metadata. Mismatches abort immediately.
+
+static void _verify_field(const dt_introspection_type_struct_t *root,
+                          const char *struct_name,
+                          const char *field_name,
+                          size_t expected_offset,
+                          size_t expected_size)
+{
+  for(size_t i = 0; i < root->entries; i++)
+  {
+    const dt_introspection_field_t *f = root->fields[i];
+    if(!f->header.field_name || strcmp(f->header.field_name, field_name)) continue;
+    if(f->header.offset != expected_offset)
+    {
+      fprintf(stderr, "[server] FATAL: %s.%s offset mismatch: IOP=%zu mirror=%zu\n",
+              struct_name, field_name, f->header.offset, expected_offset);
+      abort();
+    }
+    if(f->header.size != expected_size)
+    {
+      fprintf(stderr, "[server] FATAL: %s.%s size mismatch: IOP=%zu mirror=%zu\n",
+              struct_name, field_name, f->header.size, expected_size);
+      abort();
+    }
+    return;
+  }
+  fprintf(stderr, "[server] FATAL: %s.%s not found in introspection\n", struct_name, field_name);
+  abort();
+}
+
+static void _verify_mirror_structs(void)
+{
+  static gboolean verified = FALSE;
+  if(verified) return;
+  verified = TRUE;
+
+  for(GList *l = darktable.iop; l; l = g_list_next(l))
+  {
+    dt_iop_module_so_t *so = l->data;
+    if(!so->get_introspection) continue;
+    dt_introspection_t *intro = so->get_introspection();
+    if(!intro || !intro->field || intro->field->header.type != DT_INTROSPECTION_TYPE_STRUCT)
+      continue;
+
+    const dt_introspection_type_struct_t *root = &intro->field->Struct;
+
+    if(!strcmp(so->op, "exposure"))
+    {
+      if(intro->size != sizeof(_server_exposure_params_t))
+      {
+        fprintf(stderr, "[server] FATAL: exposure params size mismatch: IOP=%zu mirror=%zu\n",
+                intro->size, sizeof(_server_exposure_params_t));
+        abort();
+      }
+      _verify_field(root, "exposure", "mode",
+                    offsetof(_server_exposure_params_t, mode),
+                    sizeof(((_server_exposure_params_t *)0)->mode));
+      _verify_field(root, "exposure", "exposure",
+                    offsetof(_server_exposure_params_t, exposure),
+                    sizeof(((_server_exposure_params_t *)0)->exposure));
+      _verify_field(root, "exposure", "black",
+                    offsetof(_server_exposure_params_t, black),
+                    sizeof(((_server_exposure_params_t *)0)->black));
+      fprintf(stderr, "[server] exposure mirror struct verified (size=%zu)\n", intro->size);
+    }
+    else if(!strcmp(so->op, "temperature"))
+    {
+      if(intro->size != sizeof(_server_temperature_params_t))
+      {
+        fprintf(stderr, "[server] FATAL: temperature params size mismatch: IOP=%zu mirror=%zu\n",
+                intro->size, sizeof(_server_temperature_params_t));
+        abort();
+      }
+      _verify_field(root, "temperature", "red",
+                    offsetof(_server_temperature_params_t, red),
+                    sizeof(((_server_temperature_params_t *)0)->red));
+      _verify_field(root, "temperature", "green",
+                    offsetof(_server_temperature_params_t, green),
+                    sizeof(((_server_temperature_params_t *)0)->green));
+      _verify_field(root, "temperature", "blue",
+                    offsetof(_server_temperature_params_t, blue),
+                    sizeof(((_server_temperature_params_t *)0)->blue));
+      _verify_field(root, "temperature", "preset",
+                    offsetof(_server_temperature_params_t, preset),
+                    sizeof(((_server_temperature_params_t *)0)->preset));
+      fprintf(stderr, "[server] temperature mirror struct verified (size=%zu)\n", intro->size);
+    }
+  }
+}
 
 // --- Spectral conversion copied from iop/temperature.c (exact same logic) ---
 
@@ -745,8 +805,14 @@ static void _introspection_serialize_field(JsonBuilder *b, const dt_introspectio
     }
     case DT_INTROSPECTION_TYPE_ARRAY:
     {
-      json_builder_begin_array(b);
       const dt_introspection_type_array_t *arr = &field->Array;
+      // char arrays → JSON string shorthand
+      if(arr->field->header.type == DT_INTROSPECTION_TYPE_CHAR)
+      {
+        json_builder_add_string_value(b, (const char *)ptr);
+        break;
+      }
+      json_builder_begin_array(b);
       for(size_t i = 0; i < arr->count; i++)
       {
         // Create a temporary field descriptor with adjusted offset for each element
@@ -855,9 +921,16 @@ static void _introspection_deserialize_field(const dt_introspection_field_t *fie
       break;
     case DT_INTROSPECTION_TYPE_ARRAY:
     {
+      const dt_introspection_type_array_t *a = &field->Array;
+      // String → char array shorthand
+      if(a->field->header.type == DT_INTROSPECTION_TYPE_CHAR && JSON_NODE_HOLDS_VALUE(node))
+      {
+        const char *s = json_node_get_string(node);
+        if(s) g_strlcpy((char *)ptr, s, a->count);
+        break;
+      }
       if(!JSON_NODE_HOLDS_ARRAY(node)) break;
       JsonArray *arr = json_node_get_array(node);
-      const dt_introspection_type_array_t *a = &field->Array;
       const guint len = MIN(json_array_get_length(arr), (guint)a->count);
       for(guint i = 0; i < len; i++)
       {
@@ -1088,6 +1161,8 @@ static float _deflicker_applied_exposure(const dt_dev_pixelpipe_t *pipe,
 
 char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_t *req)
 {
+  _verify_mirror_structs();
+
   if(!req->params || !json_object_has_member(req->params, "session_id")
      || !json_object_has_member(req->params, "op"))
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
@@ -1216,16 +1291,23 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   }
   else if(!strcmp(op, "colorin"))
   {
-    // Use introspection for base params
+    // Use introspection for base params (no mirror struct needed)
     _introspection_serialize_params(b, target);
 
-    const _server_colorin_params_t *p = (const _server_colorin_params_t *)target->params;
+    // Look up fields via introspection for computed values
+    dt_introspection_t *intro = target->so->get_introspection();
+    const int *ci_type = dt_introspection_get_child(intro->field, target->params, "type", NULL);
+    const char *ci_filename = dt_introspection_get_child(intro->field, target->params, "filename", NULL);
+    const int *ci_type_work = dt_introspection_get_child(intro->field, target->params, "type_work", NULL);
+    const char *ci_filename_work = dt_introspection_get_child(intro->field, target->params, "filename_work", NULL);
 
     // Computed: current profile display names
     json_builder_set_member_name(b, "input_profile_name");
-    json_builder_add_string_value(b, dt_colorspaces_get_name(p->type, p->filename));
+    json_builder_add_string_value(b, dt_colorspaces_get_name(ci_type ? *ci_type : 0,
+                                                              ci_filename ? ci_filename : ""));
     json_builder_set_member_name(b, "work_profile_name");
-    json_builder_add_string_value(b, dt_colorspaces_get_name(p->type_work, p->filename_work));
+    json_builder_add_string_value(b, dt_colorspaces_get_name(ci_type_work ? *ci_type_work : 0,
+                                                              ci_filename_work ? ci_filename_work : ""));
 
     // Computed: available input profiles list
     json_builder_set_member_name(b, "input_profiles");
@@ -1269,14 +1351,18 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   }
   else if(!strcmp(op, "colorout"))
   {
-    // Use introspection for base params
+    // Use introspection for base params (no mirror struct needed)
     _introspection_serialize_params(b, target);
 
-    const _server_colorout_params_t *p = (const _server_colorout_params_t *)target->params;
+    // Look up fields via introspection for computed values
+    dt_introspection_t *intro_co = target->so->get_introspection();
+    const int *co_type = dt_introspection_get_child(intro_co->field, target->params, "type", NULL);
+    const char *co_filename = dt_introspection_get_child(intro_co->field, target->params, "filename", NULL);
 
     // Computed: current profile display name
     json_builder_set_member_name(b, "output_profile_name");
-    json_builder_add_string_value(b, dt_colorspaces_get_name(p->type, p->filename));
+    json_builder_add_string_value(b, dt_colorspaces_get_name(co_type ? *co_type : 0,
+                                                              co_filename ? co_filename : ""));
 
     // Computed: available output profiles
     json_builder_set_member_name(b, "output_profiles");
@@ -1645,34 +1731,6 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
                 new_temp_k, new_tint);
       }
     }
-  }
-  else if(!strcmp(op, "colorin"))
-  {
-    _server_colorin_params_t *p = (_server_colorin_params_t *)target->params;
-
-    if(json_object_has_member(new_params, "type"))
-      p->type = (dt_colorspaces_color_profile_type_t)json_object_get_int_member(new_params, "type");
-    if(json_object_has_member(new_params, "filename"))
-      g_strlcpy(p->filename, json_object_get_string_member(new_params, "filename"), _SERVER_IOP_COLOR_ICC_LEN);
-    if(json_object_has_member(new_params, "intent"))
-      p->intent = (dt_iop_color_intent_t)json_object_get_int_member(new_params, "intent");
-    if(json_object_has_member(new_params, "normalize"))
-      p->normalize = (_server_color_normalize_t)json_object_get_int_member(new_params, "normalize");
-    if(json_object_has_member(new_params, "type_work"))
-      p->type_work = (dt_colorspaces_color_profile_type_t)json_object_get_int_member(new_params, "type_work");
-    if(json_object_has_member(new_params, "filename_work"))
-      g_strlcpy(p->filename_work, json_object_get_string_member(new_params, "filename_work"), _SERVER_IOP_COLOR_ICC_LEN);
-  }
-  else if(!strcmp(op, "colorout"))
-  {
-    _server_colorout_params_t *p = (_server_colorout_params_t *)target->params;
-
-    if(json_object_has_member(new_params, "type"))
-      p->type = (dt_colorspaces_color_profile_type_t)json_object_get_int_member(new_params, "type");
-    if(json_object_has_member(new_params, "filename"))
-      g_strlcpy(p->filename, json_object_get_string_member(new_params, "filename"), _SERVER_IOP_COLOR_ICC_LEN);
-    if(json_object_has_member(new_params, "intent"))
-      p->intent = (dt_iop_color_intent_t)json_object_get_int_member(new_params, "intent");
   }
   else if(target->so->have_introspection && _introspection_deserialize_params(target, new_params))
   {
