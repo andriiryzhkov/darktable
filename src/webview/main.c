@@ -21,6 +21,7 @@
 #include "ipc.h"
 #include "splash.h"
 #include "titlebar.h"
+#include "transport.h"
 
 #include <errno.h>
 #include <glib.h>
@@ -53,10 +54,14 @@ static void usage(const char *progname)
     "Usage:\n"
     "  %s [OPTIONS] [--core DARKTABLE_OPTIONS]\n\n"
     "Options:\n"
+    "  --server           Use IPC transport (connect to darktable-server)\n"
     "  --dev              Connect to Vite dev server at http://localhost:5173\n"
     "  --frontend-dir DIR Load production build from DIR (default: ui/dist)\n"
-    "  --server-bin PATH  Path to darktable-server binary\n"
+    "  --server-bin PATH  Path to darktable-server binary (implies --server)\n"
     "  -h, --help         Show this help\n\n"
+    "Transport modes:\n"
+    "  Default:           Direct mode (in-process libdarktable)\n"
+    "  --server:          IPC mode (spawns darktable-server, communicates via socket)\n\n"
     "darktable options (after --core):\n"
     "  --configdir DIR    Config directory (default: ~/.config/darktable/)\n"
     "  --library FILE     Use specific library.db file\n"
@@ -248,6 +253,7 @@ static void *_startup_thread(void *arg)
 int main(int argc, char *argv[])
 {
   int dev_mode = 0;
+  int server_mode = 0;
   const char *frontend_dir = NULL;
   const char *server_bin = NULL;
 
@@ -263,12 +269,17 @@ int main(int argc, char *argv[])
       core_argc = argc - (i + 1);
       break;
     }
+    else if(!strcmp(argv[i], "--server"))
+      server_mode = 1;
     else if(!strcmp(argv[i], "--dev"))
       dev_mode = 1;
     else if(!strcmp(argv[i], "--frontend-dir") && i + 1 < argc)
       frontend_dir = argv[++i];
     else if(!strcmp(argv[i], "--server-bin") && i + 1 < argc)
+    {
       server_bin = argv[++i];
+      server_mode = 1; // --server-bin implies --server
+    }
     else if(!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h"))
     {
       usage(argv[0]);
@@ -279,19 +290,22 @@ int main(int argc, char *argv[])
   // resolve binary directory (for finding server binary and splash assets)
   char *binary_dir = _get_binary_dir();
 
-  // resolve server binary path
-  if(!server_bin)
-    server_bin = g_getenv("DT_SERVER_BIN");
-  if(!server_bin && binary_dir)
+  // resolve server binary path (only needed in server mode)
+  if(server_mode)
   {
-    char *candidate = g_build_filename(binary_dir, "darktable-server", NULL);
-    if(g_file_test(candidate, G_FILE_TEST_IS_EXECUTABLE))
-      server_bin = candidate;
-    else
-      g_free(candidate);
+    if(!server_bin)
+      server_bin = g_getenv("DT_SERVER_BIN");
+    if(!server_bin && binary_dir)
+    {
+      char *candidate = g_build_filename(binary_dir, "darktable-server", NULL);
+      if(g_file_test(candidate, G_FILE_TEST_IS_EXECUTABLE))
+        server_bin = candidate;
+      else
+        g_free(candidate);
+    }
+    if(!server_bin)
+      server_bin = "darktable-server";
   }
-  if(!server_bin)
-    server_bin = "darktable-server";
 
   // resolve frontend directory and URL
   if(!frontend_dir && !dev_mode)
@@ -355,21 +369,43 @@ int main(int argc, char *argv[])
   // register window drag/zoom bindings early so splash is draggable
   dt_webview_register_window_bindings(&ctx);
 
-  // show splash screen while server starts
+  // show splash screen during startup
   dt_splash_show(ctx.webview, binary_dir);
   g_free(binary_dir);
 
-  // spawn server and connect in a background thread
-  _startup_data_t startup = {
-    .ctx = &ctx,
-    .server_bin = server_bin,
-    .core_args = core_args,
-    .core_argc = core_argc,
-    .frontend_url = frontend_url,
-  };
+  fprintf(stderr, "[webview] transport mode: %s\n", server_mode ? "IPC (server)" : "direct");
 
-  pthread_t startup_thread;
-  pthread_create(&startup_thread, NULL, _startup_thread, &startup);
+  pthread_t startup_thread = 0;
+  _startup_data_t startup = { 0 };
+
+  if(server_mode)
+  {
+    // IPC mode: spawn server and connect in a background thread
+    startup = (_startup_data_t){
+      .ctx = &ctx,
+      .server_bin = server_bin,
+      .core_args = core_args,
+      .core_argc = core_argc,
+      .frontend_url = frontend_url,
+    };
+    pthread_create(&startup_thread, NULL, _startup_thread, &startup);
+  }
+  else
+  {
+    // Direct mode: create in-process transport
+    ctx.transport = dt_transport_direct_new();
+    if(!ctx.transport)
+    {
+      fprintf(stderr, "ERROR: direct transport not yet implemented\n");
+      fprintf(stderr, "Use --server flag to run with darktable-server\n");
+      webview_destroy(ctx.webview);
+      g_free(frontend_url);
+      return 1;
+    }
+    fprintf(stderr, "[webview] direct transport ready\n");
+    dt_webview_register_bindings(&ctx);
+    webview_navigate(ctx.webview, frontend_url);
+  }
 
   // run event loop (blocks until window is closed)
   webview_run(ctx.webview);
@@ -378,7 +414,8 @@ int main(int argc, char *argv[])
   if(ctx.server_pid > 0)
     kill(ctx.server_pid, SIGTERM);
 
-  pthread_join(startup_thread, NULL);
+  if(server_mode)
+    pthread_join(startup_thread, NULL);
 
   // cleanup
   fprintf(stderr, "[webview] shutting down...\n");
@@ -386,15 +423,10 @@ int main(int argc, char *argv[])
   webview_destroy(ctx.webview);
 
   // Send graceful shutdown to server (before closing IPC) so it saves config
-  if(ctx.server_pid > 0 && ctx.socket_fd >= 0)
+  if(ctx.server_pid > 0 && ctx.transport)
   {
     char *error = NULL;
-    char *resp = NULL;
-    if(ctx.ipc_ctx)
-      resp = dt_ipc_request2(ctx.ipc_ctx, "system.shutdown", "{}", &error);
-    else
-      resp = dt_ipc_request(ctx.socket_fd, &ctx.ipc_mutex,
-                            "system.shutdown", "{}", &error);
+    char *resp = dt_transport_call(ctx.transport, "system.shutdown", "{}", &error);
     g_free(resp);
     g_free(error);
   }
@@ -404,6 +436,12 @@ int main(int argc, char *argv[])
     dt_frame_server_stop(ctx.frame_server);
   if(ctx.ipc_ctx)
     dt_ipc_context_free(ctx.ipc_ctx);
+
+  if(ctx.transport)
+  {
+    dt_transport_destroy(ctx.transport);
+    ctx.transport = NULL;
+  }
 
   if(ctx.socket_fd >= 0)
     close(ctx.socket_fd);

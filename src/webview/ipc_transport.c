@@ -166,3 +166,12 @@ pthread_mutex_t *dt_transport_ipc_get_mutex(dt_webview_transport_t *t)
   dt_ipc_transport_data_t *d = t->data;
   return &d->legacy_mutex;
 }
+
+
+/* ── Direct transport stub ──────────────────────────────────────── */
+
+dt_webview_transport_t *dt_transport_direct_new(void)
+{
+  /* Not yet implemented — requires in-process libdarktable integration. */
+  return NULL;
+}
