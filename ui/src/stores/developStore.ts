@@ -32,6 +32,12 @@ import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, Pre
 // Cached frame server port (resolved once, never changes)
 let _cachedFramePort: number | undefined;
 
+// Adaptive JPEG quality: lower quality during drag for faster feedback,
+// full quality on release. Set to false to always use full quality.
+const ADAPTIVE_JPEG = true;
+const JPEG_QUALITY_FULL = 92;
+const JPEG_QUALITY_INTERACTIVE = 60;
+
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 
@@ -67,6 +73,9 @@ interface DevelopState {
 
   // Focus module (shift+click history item → scroll to & expand module in sidebar)
   focusModuleOp: string | null;
+
+  // Interactive editing state (true during slider drag)
+  interacting: boolean;
 
   // Zoom & pan
   zoom: ZoomLevel;
@@ -150,6 +159,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   loading: false,
   previewError: null,
   focusModuleOp: null,
+  interacting: false,
   zoom: "fit" as ZoomLevel,
   panX: 0.5,
   panY: 0.5,
@@ -273,10 +283,11 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   },
 
   fetchFrame: async () => {
-    const { sessionId, frontBuffer, sequence } = get();
+    const { sessionId, frontBuffer, sequence, interacting } = get();
     if (!sessionId) return;
     if (_cachedFramePort === undefined) _cachedFramePort = await getFramePort();
     const port = _cachedFramePort;
+    const jpegQuality = (ADAPTIVE_JPEG && interacting) ? JPEG_QUALITY_INTERACTIVE : JPEG_QUALITY_FULL;
     if (port) {
       try {
         // Fetch raw BGRA pixels over HTTP — no JPEG encoding, no base64
@@ -299,10 +310,26 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         });
         console.log(`[perf] fetchFrame: fetch=${(t1-t0).toFixed(1)}ms read=${(t2-t1).toFixed(1)}ms total=${(t2-t0).toFixed(1)}ms ${w}x${h}`);
       } catch (e) {
-        console.error("[fetchFrame] raw fetch failed:", e);
+        console.error("[fetchFrame] raw fetch failed, falling back to JPEG:", e);
+        // Fallback: use /frame (JPEG) endpoint with adaptive quality
+        try {
+          const resp = await fetch(
+            `http://localhost:${port}/frame?s=${sessionId}&b=${frontBuffer}&q=${jpegQuality}`
+          );
+          if (!resp.ok) throw new Error(`frame server JPEG: ${resp.status}`);
+          const blob = await resp.blob();
+          const url = URL.createObjectURL(blob);
+          set({
+            previewSrc: url,
+            frameData: null,
+            previewError: null,
+          });
+        } catch (e2) {
+          console.error("[fetchFrame] JPEG fallback also failed:", e2);
+        }
       }
     } else {
-      // Fallback: IPC + base64 JPEG
+      // Fallback: IPC + base64 JPEG (always full quality — no adaptive control via binding)
       const result = await getPreviewFrame(sessionId, frontBuffer);
       set({
         previewSrc: `data:image/jpeg;base64,${result.data}`,
@@ -397,6 +424,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   applyParam: async (op: string, params: Record<string, unknown>) => {
     const { sessionId, historyItems } = get();
     if (!sessionId) return;
+    if (!get().interacting) set({ interacting: true });
     try {
       // Auto-enable module if it's currently off
       if (!getEnabledOps(historyItems).has(op)) {
@@ -414,6 +442,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   commitParam: async (op: string) => {
     const { sessionId } = get();
     if (!sessionId) return;
+    set({ interacting: false });
     try {
       await developCommitParams(sessionId, op);
     } catch (e) {

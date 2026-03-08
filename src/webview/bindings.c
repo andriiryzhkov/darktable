@@ -42,6 +42,17 @@
 #endif
 #include <unistd.h>
 
+/* ── Adaptive JPEG quality ────────────────────────────────────
+ * When enabled, the frame server accepts a `q=` query parameter
+ * to control JPEG quality.  During interactive editing (slider
+ * drag) the client requests lower quality for faster feedback;
+ * on release it requests full quality for the final preview.
+ * Set to 0 to always use JPEG_QUALITY_FULL.
+ */
+#define ADAPTIVE_JPEG          1
+#define JPEG_QUALITY_FULL      92
+#define JPEG_QUALITY_INTERACTIVE 60
+
 /* ── Thread pool for binding workers ──────────────────────────
  * Instead of spawning a new pthread per binding call, we maintain
  * a fixed pool of worker threads and dispatch via GAsyncQueue.
@@ -1372,7 +1383,8 @@ static void *_ensure_shm_mapped(dt_webview_shm_t *s, int buf_idx)
 }
 
 static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
-                                  const char *session_id, int buffer_idx)
+                                  const char *session_id, int buffer_idx,
+                                  int jpeg_quality)
 {
   pthread_mutex_lock(&ctx->session_mutex);
   dt_webview_shm_t *session = NULL;
@@ -1425,7 +1437,7 @@ static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
     /* JPEG encode */
     size_t jpeg_buf_size = pixel_size + 1024;
     uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
-    const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+    const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, jpeg_quality);
     g_free(rgba);
 
     if(jpeg_size > 0)
@@ -1480,7 +1492,7 @@ static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
   /* JPEG encode */
   size_t jpeg_buf_size = pixel_size + 1024;
   uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
-  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, jpeg_quality);
   g_free(rgba);
 
   if(jpeg_size > 0)
@@ -1656,13 +1668,22 @@ static void *_frame_server_loop(void *arg)
       {
         char sid[128] = {0};
         char bidx_str[16] = {0};
+        char q_str[8] = {0};
         if(_qs_param(query, "s", sid, sizeof(sid))
            && _qs_param(query, "b", bidx_str, sizeof(bidx_str)))
         {
+          /* Parse optional quality parameter (default: full quality) */
+          int jpeg_quality = JPEG_QUALITY_FULL;
+          if(ADAPTIVE_JPEG && _qs_param(query, "q", q_str, sizeof(q_str)))
+          {
+            int q = atoi(q_str);
+            if(q >= 10 && q <= 100) jpeg_quality = q;
+          }
+
           if(is_raw)
             _handle_raw_request(client, fs->ctx, sid, atoi(bidx_str));
           else
-            _handle_frame_request(client, fs->ctx, sid, atoi(bidx_str));
+            _handle_frame_request(client, fs->ctx, sid, atoi(bidx_str), jpeg_quality);
         }
         else
         {
@@ -1824,7 +1845,7 @@ static void *_get_preview_frame_worker(void *arg)
 
     size_t jpeg_buf_size = pixel_size + 1024;
     uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
-    const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+    const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, JPEG_QUALITY_FULL);
     g_free(rgba);
 
     if(jpeg_size > 0)
@@ -1899,7 +1920,7 @@ static void *_get_preview_frame_worker(void *arg)
 
   size_t jpeg_buf_size = pixel_size + 1024;
   uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
-  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+  const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, JPEG_QUALITY_FULL);
   g_free(rgba);
 
   gchar *b64;
