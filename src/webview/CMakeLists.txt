@@ -64,6 +64,19 @@ set(WEBVIEW_HOST_SOURCES
   ../server/server_protocol.c
 )
 
+# Direct transport: in-process mode linking against libdarktable + server handlers
+option(BUILD_WEBVIEW_DIRECT "Build webview with direct (in-process) transport support" ON)
+if(BUILD_WEBVIEW_DIRECT)
+  list(APPEND WEBVIEW_HOST_SOURCES
+    direct_transport.c
+    ../server/server.c
+    ../server/server_catalog.c
+    ../server/server_develop.c
+    ../server/server_export.c
+    ../server/server_events.c
+  )
+endif()
+
 # Platform-specific titlebar implementation
 if(APPLE)
   list(APPEND WEBVIEW_HOST_SOURCES platform/titlebar_macos.m)
@@ -105,6 +118,12 @@ target_link_libraries(darktable-nova
   ${JPEG_LIBRARIES}
   pthread
 )
+
+if(BUILD_WEBVIEW_DIRECT)
+  target_compile_definitions(darktable-nova PRIVATE HAVE_DIRECT_TRANSPORT)
+  target_include_directories(darktable-nova PRIVATE ${DARKTABLE_BINDIR})
+  target_link_libraries(darktable-nova lib_darktable)
+endif()
 
 if(APPLE)
   target_link_libraries(darktable-nova "-framework WebKit" "-framework Cocoa")

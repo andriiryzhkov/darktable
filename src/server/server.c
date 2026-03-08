@@ -168,7 +168,7 @@ static const dt_server_route_t _routes[] = {
   { NULL, NULL }
 };
 
-static char *_dispatch(dt_server_t *server, const dt_server_request_t *req)
+char *dt_server_dispatch(dt_server_t *server, const dt_server_request_t *req)
 {
   for(int i = 0; _routes[i].method; i++)
   {
@@ -244,7 +244,7 @@ static void _handle_client(dt_server_t *server)
 
     fprintf(stderr, "[server] <- %s (id=%s)\n", req->method, req->id);
 
-    char *response = _dispatch(server, req);
+    char *response = dt_server_dispatch(server, req);
     dt_server_free_request(req);
 
     if(response)
@@ -263,60 +263,70 @@ static void _handle_client(dt_server_t *server)
 dt_server_t *dt_server_init(const char *socket_path)
 {
   dt_server_t *server = g_new0(dt_server_t, 1);
-  g_strlcpy(server->socket_path, socket_path, sizeof(server->socket_path));
   server->listen_fd = -1;
   server->client_fd = -1;
+  server->running = TRUE;
   server->event_queue = g_async_queue_new();
 
-  // Create Unix domain socket
-  server->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if(server->listen_fd < 0)
+  // Initialize event bridge (connects to darktable signals)
+  dt_server_events_init(server);
+
+  if(socket_path)
   {
-    fprintf(stderr, "[server] socket() failed: %s\n", strerror(errno));
-    g_free(server);
-    return NULL;
-  }
+    // Socket mode: bind and listen
+    g_strlcpy(server->socket_path, socket_path, sizeof(server->socket_path));
 
-  // Remove any stale socket file
-  g_unlink(socket_path);
+    server->listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if(server->listen_fd < 0)
+    {
+      fprintf(stderr, "[server] socket() failed: %s\n", strerror(errno));
+      g_free(server);
+      return NULL;
+    }
 
-  struct sockaddr_un addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  g_strlcpy(addr.sun_path, socket_path, sizeof(addr.sun_path));
-
-  if(bind(server->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-  {
-    fprintf(stderr, "[server] bind(%s) failed: %s\n", socket_path, strerror(errno));
-    close(server->listen_fd);
-    g_free(server);
-    return NULL;
-  }
-
-  /* Restrict socket file to owner only (prevents other local users from connecting).
-   * Use chmod() on the path — fchmod() on socket fds is not supported on macOS. */
-  if(chmod(socket_path, 0600) < 0)
-    fprintf(stderr, "[server] WARNING: chmod(0600) failed: %s\n", strerror(errno));
-
-  if(listen(server->listen_fd, 1) < 0)
-  {
-    fprintf(stderr, "[server] listen() failed: %s\n", strerror(errno));
-    close(server->listen_fd);
+    // Remove any stale socket file
     g_unlink(socket_path);
-    g_free(server);
-    return NULL;
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    g_strlcpy(addr.sun_path, socket_path, sizeof(addr.sun_path));
+
+    if(bind(server->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+      fprintf(stderr, "[server] bind(%s) failed: %s\n", socket_path, strerror(errno));
+      close(server->listen_fd);
+      g_free(server);
+      return NULL;
+    }
+
+    /* Restrict socket file to owner only (prevents other local users from connecting).
+     * Use chmod() on the path — fchmod() on socket fds is not supported on macOS. */
+    if(chmod(socket_path, 0600) < 0)
+      fprintf(stderr, "[server] WARNING: chmod(0600) failed: %s\n", strerror(errno));
+
+    if(listen(server->listen_fd, 1) < 0)
+    {
+      fprintf(stderr, "[server] listen() failed: %s\n", strerror(errno));
+      close(server->listen_fd);
+      g_unlink(socket_path);
+      g_free(server);
+      return NULL;
+    }
+
+    fprintf(stderr, "[server] listening on %s\n", socket_path);
+  }
+  else
+  {
+    // Embedded mode: no socket, dispatch calls directly
+    fprintf(stderr, "[server] embedded server initialized\n");
   }
 
-  fprintf(stderr, "[server] listening on %s\n", socket_path);
   return server;
 }
 
 void dt_server_run(dt_server_t *server)
 {
-  server->running = TRUE;
-
-  // Initialize event bridge (connects to darktable signals)
-  dt_server_events_init(server);
 
   // Accept loop: one client at a time (v1 simplicity)
   while(server->running)

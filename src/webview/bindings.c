@@ -2512,15 +2512,19 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   /* Initialize NFD once */
   NFD_Init();
 
-  /* Create IPC transport wrapping the socket */
-  ctx->transport = dt_transport_ipc_new(ctx->socket_fd);
+  /* Set up transport: if not already created (direct mode sets it before calling us),
+   * create an IPC transport wrapping the socket */
+  if(!ctx->transport)
+  {
+    ctx->transport = dt_transport_ipc_new(ctx->socket_fd);
 
-  /* Create event-aware IPC context with reader thread */
-  ctx->ipc_ctx = dt_ipc_context_new(ctx->socket_fd, _on_server_event, ctx);
-  if(!ctx->ipc_ctx)
-    fprintf(stderr, "[webview] WARNING: failed to create IPC context, falling back to legacy IPC\n");
-  else
-    dt_transport_ipc_set_context(ctx->transport, ctx->ipc_ctx);
+    /* Create event-aware IPC context with reader thread */
+    ctx->ipc_ctx = dt_ipc_context_new(ctx->socket_fd, _on_server_event, ctx);
+    if(!ctx->ipc_ctx)
+      fprintf(stderr, "[webview] WARNING: failed to create IPC context, falling back to legacy IPC\n");
+    else
+      dt_transport_ipc_set_context(ctx->transport, ctx->ipc_ctx);
+  }
 
   /* Start local HTTP server for zero-copy JPEG frame delivery */
   ctx->frame_server = _frame_server_start(ctx);

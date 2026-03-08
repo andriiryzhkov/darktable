@@ -33,6 +33,13 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifdef HAVE_DIRECT_TRANSPORT
+#include "common/darktable.h"
+#ifdef __APPLE__
+#include "osx/osx.h"
+#endif
+#endif
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -388,16 +395,49 @@ int main(int argc, char *argv[])
       .core_argc = core_argc,
       .frontend_url = frontend_url,
     };
+#ifdef HAVE_DIRECT_TRANSPORT
+    dt_pthread_create(&startup_thread, _startup_thread, &startup);
+#else
     pthread_create(&startup_thread, NULL, _startup_thread, &startup);
+#endif
   }
   else
   {
-    // Direct mode: create in-process transport
+#ifdef HAVE_DIRECT_TRANSPORT
+    // Direct mode: initialize darktable in-process (headless)
+    dt_splash_update(ctx.webview, "initializing darktable...");
+
+#ifdef __APPLE__
+    dt_osx_prepare_environment();
+#endif
+
+    // Build args for dt_init: program name + everything after --core
+    int dt_argc = 1 + core_argc;
+    char **dt_argv = g_new0(char *, dt_argc + 1);
+    dt_argv[0] = "darktable-nova";
+    for(int i = 0; i < core_argc; i++)
+      dt_argv[1 + i] = core_args[i];
+
+    fprintf(stderr, "[webview] initializing darktable (headless)...\n");
+    if(dt_init(dt_argc, dt_argv, FALSE, TRUE, NULL))
+    {
+      fprintf(stderr, "ERROR: failed to initialize darktable\n");
+      g_free(dt_argv);
+      webview_destroy(ctx.webview);
+      g_free(frontend_url);
+      return 1;
+    }
+    g_free(dt_argv);
+    fprintf(stderr, "[webview] darktable initialized successfully\n");
+
+    dt_splash_update(ctx.webview, "loading interface...");
+
+    // Create in-process transport (routes through server dispatch table)
     ctx.transport = dt_transport_direct_new();
     if(!ctx.transport)
     {
-      fprintf(stderr, "ERROR: direct transport not yet implemented\n");
-      fprintf(stderr, "Use --server flag to run with darktable-server\n");
+      fprintf(stderr, "ERROR: failed to create direct transport\n");
+      dt_cleanup();
       webview_destroy(ctx.webview);
       g_free(frontend_url);
       return 1;
@@ -405,6 +445,13 @@ int main(int argc, char *argv[])
     fprintf(stderr, "[webview] direct transport ready\n");
     dt_webview_register_bindings(&ctx);
     webview_navigate(ctx.webview, frontend_url);
+#else
+    fprintf(stderr, "ERROR: direct transport not available (built without HAVE_DIRECT_TRANSPORT)\n");
+    fprintf(stderr, "Use --server flag to run with darktable-server\n");
+    webview_destroy(ctx.webview);
+    g_free(frontend_url);
+    return 1;
+#endif
   }
 
   // run event loop (blocks until window is closed)
@@ -479,6 +526,11 @@ server_done:
   pthread_mutex_destroy(&ctx.ipc_mutex);
   pthread_mutex_destroy(&ctx.session_mutex);
   g_free(frontend_url);
+
+#ifdef HAVE_DIRECT_TRANSPORT
+  if(!server_mode)
+    dt_cleanup();
+#endif
 
   fprintf(stderr, "[webview] done\n");
   return 0;

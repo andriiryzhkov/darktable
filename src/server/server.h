@@ -86,10 +86,14 @@ struct dt_server_t
 };
 
 // Lifecycle
-dt_server_t *dt_server_init(const char *socket_path);
+dt_server_t *dt_server_init(const char *socket_path); // NULL = embedded (no socket)
 void dt_server_run(dt_server_t *server);       // blocking
 void dt_server_shutdown(dt_server_t *server);
 void dt_server_cleanup(dt_server_t *server);
+
+// Dispatch a parsed request through the route table and return a JSON-RPC response.
+// The returned string must be g_free'd by the caller.
+char *dt_server_dispatch(dt_server_t *server, const dt_server_request_t *req);
 
 // Send an event to the connected client (thread-safe via event queue)
 void dt_server_queue_event(dt_server_t *server, const char *event_name, JsonNode *data);
