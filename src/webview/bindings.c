@@ -473,7 +473,7 @@ static void *_develop_open_worker(void *arg)
         s->width = (uint32_t)pw;
         s->height = (uint32_t)ph;
 
-        // Map SHM buffers if available (IPC mode)
+        // Store SHM names for lazy mapping (server allocates SHM on first render)
         if(shm_names && json_array_get_length(shm_names) >= 2)
         {
           const char *name0 = json_array_get_string_element(shm_names, 0);
@@ -484,26 +484,7 @@ static void *_develop_open_worker(void *arg)
           g_strlcpy(s->shm_names[1], name1, sizeof(s->shm_names[1]));
           s->shm_size[0] = shm_size;
           s->shm_size[1] = shm_size;
-
-          for(int b = 0; b < 2; b++)
-          {
-            int fd = shm_open(s->shm_names[b], O_RDONLY, 0);
-            if(fd >= 0)
-            {
-              s->shm_ptr[b] = mmap(NULL, shm_size, PROT_READ, MAP_SHARED, fd, 0);
-              close(fd);
-              if(s->shm_ptr[b] == MAP_FAILED)
-              {
-                fprintf(stderr, "[webview] mmap(%s) failed: %s\n", s->shm_names[b], strerror(errno));
-                s->shm_ptr[b] = NULL;
-              }
-            }
-            else
-            {
-              fprintf(stderr, "[webview] shm_open(%s) failed: %s\n", s->shm_names[b], strerror(errno));
-              s->shm_ptr[b] = NULL;
-            }
-          }
+          // shm_ptr[0..1] remain NULL — mapped lazily on first frame read
         }
         // else: direct mode — no SHM, frame server uses transport->get_preview_frame()
 
@@ -1364,6 +1345,32 @@ static void _send_http_response(int fd, int code, const char *status,
   }
 }
 
+// Lazily map a SHM buffer for a session.  Called with session_mutex held.
+// Returns the mapped pointer, or NULL on failure.
+static void *_ensure_shm_mapped(dt_webview_shm_t *s, int buf_idx)
+{
+  if(s->shm_ptr[buf_idx])
+    return s->shm_ptr[buf_idx];
+
+  if(!s->shm_names[buf_idx][0])
+    return NULL;  // no SHM name (direct mode)
+
+  int fd = shm_open(s->shm_names[buf_idx], O_RDONLY, 0);
+  if(fd < 0)
+    return NULL;  // server hasn't created SHM yet
+
+  void *ptr = mmap(NULL, s->shm_size[buf_idx], PROT_READ, MAP_SHARED, fd, 0);
+  close(fd);
+  if(ptr == MAP_FAILED)
+  {
+    fprintf(stderr, "[webview] mmap(%s) failed: %s\n", s->shm_names[buf_idx], strerror(errno));
+    return NULL;
+  }
+
+  s->shm_ptr[buf_idx] = ptr;
+  return ptr;
+}
+
 static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
                                   const char *session_id, int buffer_idx)
 {
@@ -1386,7 +1393,7 @@ static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
   }
 
   int buf_idx = (buffer_idx == 0) ? 0 : 1;
-  void *ptr = session->shm_ptr[buf_idx];
+  void *ptr = _ensure_shm_mapped(session, buf_idx);
 
   /* Direct mode: no SHM — use transport->get_preview_frame() */
   if(!ptr && ctx->transport)
@@ -1508,7 +1515,7 @@ static void _handle_raw_request(int client_fd, dt_webview_ctx_t *ctx,
   }
 
   int buf_idx = (buffer_idx == 0) ? 0 : 1;
-  void *ptr = session->shm_ptr[buf_idx];
+  void *ptr = _ensure_shm_mapped(session, buf_idx);
 
   /* Direct mode: no SHM — use transport->get_preview_frame() */
   if(!ptr && ctx->transport)
@@ -1780,7 +1787,7 @@ static void *_get_preview_frame_worker(void *arg)
   }
 
   int buf_idx = (front_buffer == 0) ? 0 : 1;
-  void *ptr = session->shm_ptr[buf_idx];
+  void *ptr = _ensure_shm_mapped(session, buf_idx);
 
   fprintf(stderr, "[webview] getPreviewFrame: session=%s buf=%d ptr=%p\n",
           session_id, buf_idx, ptr);

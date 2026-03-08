@@ -50,10 +50,11 @@ typedef struct dt_server_session_t
   dt_develop_t dev;
   dt_dev_pixelpipe_t *preview_pipe;
 
-  // Double-buffered shared memory for preview frames
+  // Double-buffered shared memory for preview frames (lazy — allocated on first render)
   dt_shm_buffer_t shm_buffers[2];
   int front_buffer;       // index client reads from (0 or 1)
   uint64_t frame_sequence;
+  gboolean shm_allocated; // TRUE after SHM buffers have been created
 
   int preview_width;
   int preview_height;

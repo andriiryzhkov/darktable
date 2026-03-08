@@ -26,6 +26,10 @@
 // Maximum message size: 16 MB (thumbnails can be large as base64)
 #define DT_SERVER_MAX_MESSAGE_SIZE (16 * 1024 * 1024)
 
+// Default preview resolution cap — covers 95% of displays and saves ~50 MB vs 4K
+#define DT_SERVER_MAX_PREVIEW_WIDTH  1920
+#define DT_SERVER_MAX_PREVIEW_HEIGHT 1080
+
 #define DT_SHM_MAGIC 0x44545348   // "DTSH"
 #define DT_SHM_VERSION 1
 #define DT_SHM_HEADER_SIZE 64

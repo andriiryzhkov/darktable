@@ -324,6 +324,37 @@ typedef struct _server_exposure_data_t
   dt_dev_histogram_stats_t deflicker_histogram_stats;
 } _server_exposure_data_t;
 
+// Lazily allocate SHM buffers for a session (IPC mode only).
+// Called from pipeline worker on first render — avoids allocating memory
+// until the preview is actually needed.
+static gboolean _ensure_shm_allocated(dt_server_t *server, dt_server_session_t *session)
+{
+  if(server->embedded || session->shm_allocated)
+    return TRUE;
+
+  char shm_name0[32], shm_name1[32];
+  snprintf(shm_name0, sizeof(shm_name0), "/dt-prev-%s-0", session->session_id);
+  snprintf(shm_name1, sizeof(shm_name1), "/dt-prev-%s-1", session->session_id);
+
+  const int w = session->preview_width;
+  const int h = session->preview_height;
+
+  if(!dt_shm_create(&session->shm_buffers[0], shm_name0, w, h)
+     || !dt_shm_create(&session->shm_buffers[1], shm_name1, w, h))
+  {
+    dt_shm_destroy(&session->shm_buffers[0]);
+    dt_shm_destroy(&session->shm_buffers[1]);
+    fprintf(stderr, "[server] SHM allocation failed for session %s\n", session->session_id);
+    return FALSE;
+  }
+
+  session->shm_allocated = TRUE;
+  const size_t total_bytes = (size_t)w * h * 4 * 2;
+  fprintf(stderr, "[server] SHM allocated: session=%s %dx%d (%.1f MB)\n",
+          session->session_id, w, h, total_bytes / (1024.0 * 1024.0));
+  return TRUE;
+}
+
 static dt_server_session_t *_find_free_session_slot(dt_server_t *server)
 {
   if(server->session_count >= DT_SERVER_MAX_SESSIONS)
@@ -352,11 +383,11 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
   if(json_object_has_member(req->params, "height"))
     preview_height = (int)json_object_get_int_member(req->params, "height");
 
-  // Clamp preview dimensions
+  // Clamp preview dimensions to screen-friendly caps
   if(preview_width < 320) preview_width = 320;
-  if(preview_width > 4096) preview_width = 4096;
+  if(preview_width > DT_SERVER_MAX_PREVIEW_WIDTH) preview_width = DT_SERVER_MAX_PREVIEW_WIDTH;
   if(preview_height < 240) preview_height = 240;
-  if(preview_height > 4096) preview_height = 4096;
+  if(preview_height > DT_SERVER_MAX_PREVIEW_HEIGHT) preview_height = DT_SERVER_MAX_PREVIEW_HEIGHT;
 
   // Single-client model: close all existing sessions before opening a new one.
   // This prevents orphaned sessions from accumulating when the client rapidly
@@ -367,10 +398,11 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
     {
       dt_server_session_t *old = server->sessions[i];
       fprintf(stderr, "[server] develop.open: auto-closing session %s\n", old->session_id);
-      if(!server->embedded)
+      if(old->shm_allocated)
       {
         dt_shm_destroy(&old->shm_buffers[0]);
         dt_shm_destroy(&old->shm_buffers[1]);
+        fprintf(stderr, "[server] SHM freed: session=%s\n", old->session_id);
       }
       pthread_mutex_destroy(&old->pipeline_mutex);
       dt_dev_cleanup(&old->dev);
@@ -436,31 +468,20 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
   session->dev.full.dev = &session->dev;
   session->dev.full.pipe = pipe;
 
-  // Create double-buffered SHM for preview frames (IPC mode only)
+  // SHM buffers are allocated lazily on first pipeline render (_ensure_shm_allocated).
+  // This saves memory when sessions are opened but preview is not immediately needed.
+  session->shm_allocated = FALSE;
+  session->front_buffer = 0;
+
+  // Pre-compute SHM names for the response (client maps them after first render)
   char shm_name0[32] = {0}, shm_name1[32] = {0};
   if(!server->embedded)
   {
     snprintf(shm_name0, sizeof(shm_name0), "/dt-prev-%s-0", session->session_id);
     snprintf(shm_name1, sizeof(shm_name1), "/dt-prev-%s-1", session->session_id);
-
-    if(!dt_shm_create(&session->shm_buffers[0], shm_name0, preview_width, preview_height)
-       || !dt_shm_create(&session->shm_buffers[1], shm_name1, preview_width, preview_height))
-    {
-      dt_shm_destroy(&session->shm_buffers[0]);
-      dt_shm_destroy(&session->shm_buffers[1]);
-      dt_dev_cleanup(&session->dev);
-      // Remove session from slot
-      server->sessions[server->session_count - 1] = NULL;
-      server->session_count--;
-      g_free(session);
-      return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL,
-                                   "Failed to create shared memory buffers");
-    }
   }
 
-  session->front_buffer = 0;
-
-  fprintf(stderr, "[server] develop.open: session=%s imgid=%d preview=%dx%d embedded=%d\n",
+  fprintf(stderr, "[server] develop.open: session=%s imgid=%d preview=%dx%d embedded=%d (SHM deferred)\n",
           session->session_id, imgid, preview_width, preview_height, server->embedded);
 
   // Build response
@@ -515,11 +536,12 @@ char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *re
   if(session->dirty)
     dt_dev_write_history(&session->dev);
 
-  // Destroy SHM buffers (IPC mode only)
-  if(!server->embedded)
+  // Destroy SHM buffers if they were allocated
+  if(session->shm_allocated)
   {
     dt_shm_destroy(&session->shm_buffers[0]);
     dt_shm_destroy(&session->shm_buffers[1]);
+    fprintf(stderr, "[server] SHM freed: session=%s\n", session->session_id);
   }
 
   // Cleanup pipeline mutex
@@ -1484,7 +1506,7 @@ static void *_preview_pipeline_worker(void *arg)
 
     session->frame_sequence++;
 
-    if(!server->embedded)
+    if(!server->embedded && _ensure_shm_allocated(server, session))
     {
       // IPC mode: copy backbuf to SHM double-buffer
       const int back = 1 - session->front_buffer;
