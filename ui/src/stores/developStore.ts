@@ -38,10 +38,14 @@ const ADAPTIVE_JPEG = true;
 const JPEG_QUALITY_FULL = 92;
 const JPEG_QUALITY_INTERACTIVE = 60;
 
-export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
-export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+export const ZOOM_PRESETS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
+export type ZoomPreset = (typeof ZOOM_PRESETS)[number];
+// ZoomLevel: named modes or any numeric percentage (50–1600)
+export type ZoomLevel = ZoomPreset | number;
+// Keep ZOOM_LEVELS as alias for combo box options
+export const ZOOM_LEVELS = ZOOM_PRESETS;
 
-export const ZOOM_LABELS: Record<ZoomLevel, string> = {
+export const ZOOM_LABELS: Record<ZoomPreset, string> = {
   small: "small",
   fit: "fit",
   fill: "fill",
@@ -52,6 +56,85 @@ export const ZOOM_LABELS: Record<ZoomLevel, string> = {
   "800": "800%",
   "1600": "1600%",
 };
+
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 1600;
+
+/** Get the numeric zoom factor (1.0 = 100%) for CSS transform */
+export function getZoomFactor(zoom: ZoomLevel): number {
+  if (typeof zoom === "number") return zoom / 100;
+  return 1;
+}
+
+/** Check if zoom is a magnified/numeric mode (not fit/fill/small) */
+export function isZoomedIn(zoom: ZoomLevel): boolean {
+  return typeof zoom === "number";
+}
+
+/** Get display label for current zoom level */
+export function getZoomLabel(zoom: ZoomLevel): string {
+  if (typeof zoom === "number") {
+    // Snap to preset label if close enough
+    const preset = `${Math.round(zoom)}` as ZoomPreset;
+    if (preset in ZOOM_LABELS) return ZOOM_LABELS[preset];
+    return `${Math.round(zoom)}%`;
+  }
+  return ZOOM_LABELS[zoom] ?? String(zoom);
+}
+
+// Key levels that the scroll zoom snaps to when crossing (matches GTK darktable)
+const SNAP_LEVELS = [50, 100, 200];
+// Above 200%, GTK uses 2x jumps between these levels
+const HIGH_ZOOM_STEPS = [200, 400, 800, 1600];
+
+/**
+ * Apply scroll zoom delta, matching GTK darktable behavior:
+ * - Below 200%: continuous 1.1x per scroll step with snapping to key levels
+ * - At/above 200%: discrete 2x jumps (200→400→800→1600)
+ * - deltaY: raw wheel deltaY (positive = scroll down = zoom out)
+ */
+export function applyZoomDelta(zoom: ZoomLevel, deltaY: number): ZoomLevel {
+  // Convert named modes to a starting percentage
+  let current: number;
+  if (typeof zoom === "number") {
+    current = zoom;
+  } else {
+    current = ZOOM_MIN;
+  }
+
+  const zoomingIn = deltaY < 0;
+
+  // Above 200%: discrete 2x steps (like GTK closeup levels)
+  if (current >= 200) {
+    // Only step on sufficient delta
+    if (Math.abs(deltaY) < 20) return zoom;
+    const idx = HIGH_ZOOM_STEPS.indexOf(current);
+    if (idx >= 0) {
+      const next = zoomingIn ? idx + 1 : idx - 1;
+      if (next >= 0 && next < HIGH_ZOOM_STEPS.length) return HIGH_ZOOM_STEPS[next];
+      return current;
+    }
+    // Between steps — snap to nearest
+    const nearest = HIGH_ZOOM_STEPS.reduce((a, b) =>
+      Math.abs(b - current) < Math.abs(a - current) ? b : a);
+    return nearest;
+  }
+
+  // Below 200%: continuous with 1.1x per ~100px of delta (matches GTK's 10% per step)
+  // 1.1^(1/100) ≈ 1.000953 per deltaY unit
+  const factor = Math.pow(1.000953, -deltaY);
+  let next = Math.round(current * factor);
+  next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next));
+
+  // Snap to key levels when crossing them
+  for (const snap of SNAP_LEVELS) {
+    if ((current < snap && next > snap) || (current > snap && next < snap)) {
+      return snap;
+    }
+  }
+
+  return next;
+}
 
 interface DevelopState {
   sessionId: string | null;

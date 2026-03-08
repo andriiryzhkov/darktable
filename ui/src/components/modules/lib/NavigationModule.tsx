@@ -1,16 +1,17 @@
-import { useRef, useCallback } from "react";
-import { useDevelopStore, ZOOM_LEVELS, ZOOM_LABELS, type ZoomLevel } from "../../../stores/developStore";
+import { useRef, useCallback, useEffect } from "react";
+import { useDevelopStore, ZOOM_LEVELS, ZOOM_LABELS, isZoomedIn, getZoomFactor, getZoomLabel, type ZoomPreset } from "../../../stores/developStore";
 import BauhausCombo from "../../controls/BauhausCombo";
 
 const ZOOM_OPTIONS = ZOOM_LEVELS.map((l) => ZOOM_LABELS[l]);
 const LABEL_TO_ZOOM = Object.fromEntries(
   ZOOM_LEVELS.map((l) => [ZOOM_LABELS[l], l]),
-) as Record<string, ZoomLevel>;
+) as Record<string, ZoomPreset>;
 
 const NAV_MAX_HEIGHT = 150;
 
 export default function NavigationModule() {
   const previewSrc = useDevelopStore((s) => s.previewSrc);
+  const frameData = useDevelopStore((s) => s.frameData);
   const previewWidth = useDevelopStore((s) => s.previewWidth);
   const previewHeight = useDevelopStore((s) => s.previewHeight);
   const zoom = useDevelopStore((s) => s.zoom);
@@ -20,10 +21,34 @@ export default function NavigationModule() {
   const setPan = useDevelopStore((s) => s.setPan);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Render raw BGRA frameData onto canvas when previewSrc is not available
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !frameData || previewSrc || previewWidth <= 0 || previewHeight <= 0) return;
+
+    canvas.width = previewWidth;
+    canvas.height = previewHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const imageData = ctx.createImageData(previewWidth, previewHeight);
+    const dst = imageData.data;
+    const src = frameData;
+    // BGRA → RGBA swap
+    for (let i = 0, len = previewWidth * previewHeight * 4; i < len; i += 4) {
+      dst[i] = src[i + 2];     // R ← B
+      dst[i + 1] = src[i + 1]; // G ← G
+      dst[i + 2] = src[i];     // B ← R
+      dst[i + 3] = 255;        // A
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }, [frameData, previewSrc, previewWidth, previewHeight]);
 
   // Whether we show the viewport rectangle
-  const showRect = zoom !== "fit" && zoom !== "fill" && zoom !== "small";
-  const zoomNumeric = showRect ? parseInt(zoom) / 100 : 1;
+  const showRect = isZoomedIn(zoom);
+  const zoomNumeric = showRect ? getZoomFactor(zoom) : 1;
   const viewW = Math.min(1, 1 / zoomNumeric);
   const viewH = Math.min(1, 1 / zoomNumeric);
 
@@ -61,8 +86,11 @@ export default function NavigationModule() {
 
   const handleZoomChange = useCallback(
     (label: string) => {
-      const level = LABEL_TO_ZOOM[label];
-      if (level) setZoom(level);
+      const preset = LABEL_TO_ZOOM[label];
+      if (!preset) return;
+      // Named modes stay as strings; numeric presets become numbers
+      const num = parseInt(preset);
+      setZoom(isNaN(num) ? preset : num);
     },
     [setZoom],
   );
@@ -70,6 +98,8 @@ export default function NavigationModule() {
   // Viewport rect position (clamped)
   const rectLeft = Math.max(0, Math.min(1 - viewW, panX - viewW / 2));
   const rectTop = Math.max(0, Math.min(1 - viewH, panY - viewH / 2));
+
+  const hasPreview = previewSrc || frameData;
 
   return (
     <div className="nav-module">
@@ -92,6 +122,17 @@ export default function NavigationModule() {
             }}
           />
         ) : (
+          <canvas
+            ref={canvasRef}
+            className="nav-module-image"
+            style={{
+              maxHeight: NAV_MAX_HEIGHT,
+              aspectRatio: `${previewWidth} / ${previewHeight}`,
+              display: frameData ? "block" : "none",
+            }}
+          />
+        )}
+        {!hasPreview && (
           <div
             className="nav-module-placeholder"
             style={{
@@ -123,7 +164,7 @@ export default function NavigationModule() {
           <BauhausCombo
             hideLabel
             options={[...ZOOM_OPTIONS]}
-            value={ZOOM_LABELS[zoom]}
+            value={getZoomLabel(zoom)}
             onChange={handleZoomChange}
           />
         </div>

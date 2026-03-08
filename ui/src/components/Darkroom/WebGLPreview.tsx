@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
-import { useDevelopStore, ZOOM_LEVELS } from "../../stores/developStore";
+import { useDevelopStore, isZoomedIn, getZoomFactor, applyZoomDelta } from "../../stores/developStore";
 import GuidesOverlay from "./GuidesOverlay";
 import PickerOverlay from "./PickerOverlay";
 
@@ -163,7 +163,7 @@ export default function WebGLPreview() {
   // Drag to pan
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
-  const isZoomed = zoom !== "fit" && zoom !== "fill" && zoom !== "small";
+  const isZoomed = isZoomedIn(zoom);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -182,10 +182,10 @@ export default function WebGLPreview() {
       const container = containerRef.current;
       if (!container) return;
 
-      const zoomFactor = parseInt(zoom) / 100;
+      const zf = getZoomFactor(zoom);
       const rect = container.getBoundingClientRect();
-      const dx = (e.clientX - dragRef.current.startX) / (rect.width * zoomFactor);
-      const dy = (e.clientY - dragRef.current.startY) / (rect.height * zoomFactor);
+      const dx = (e.clientX - dragRef.current.startX) / (rect.width * zf);
+      const dy = (e.clientY - dragRef.current.startY) / (rect.height * zf);
       setPan(
         Math.max(0, Math.min(1, dragRef.current.startPanX - dx)),
         Math.max(0, Math.min(1, dragRef.current.startPanY - dy)),
@@ -201,17 +201,12 @@ export default function WebGLPreview() {
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       e.preventDefault();
-      const idx = ZOOM_LEVELS.indexOf(zoom);
-      if (e.deltaY < 0 && idx < ZOOM_LEVELS.length - 1) {
-        setZoom(ZOOM_LEVELS[idx + 1]);
-      } else if (e.deltaY > 0 && idx > 0) {
-        setZoom(ZOOM_LEVELS[idx - 1]);
-      }
+      setZoom(applyZoomDelta(zoom, e.deltaY));
     },
     [zoom, setZoom],
   );
 
-  const zoomFactor = isZoomed ? parseInt(zoom) / 100 : 1;
+  const zoomFactor = isZoomed ? getZoomFactor(zoom) : 1;
   const transformStyle = isZoomed
     ? {
         transform: `scale(${zoomFactor})`,
