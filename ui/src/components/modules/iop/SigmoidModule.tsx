@@ -1,46 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useDevelopStore } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausSection from "../../controls/BauhausSection";
 
 const RAD_2_DEG = 180 / Math.PI;
-
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: number) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
 
 export default function SigmoidModule() {
   const params = useDevelopStore((s) => s.genericParams["sigmoid"]);
@@ -60,7 +25,7 @@ export default function SigmoidModule() {
   const [localBlueRotation, setLocalBlueRotation] = useState(0);
   const [localPurity, setLocalPurity] = useState(0);
 
-  const { apply: throttledApply, draggingRef } = useThrottledParam("sigmoid");
+  const { apply: throttledApply, release: throttledRelease, draggingRef } = useThrottledParam("sigmoid");
 
   useEffect(() => {
     if (!params) {
@@ -106,6 +71,7 @@ export default function SigmoidModule() {
         defaultValue={1.5}
         format={(v) => v.toFixed(3)}
         onChange={(v) => { setLocalContrast(v); throttledApply("middle_grey_contrast", v); }}
+        onRelease={throttledRelease}
       />
 
       <BauhausSlider
@@ -118,6 +84,7 @@ export default function SigmoidModule() {
         origin={0}
         format={(v) => v.toFixed(3)}
         onChange={(v) => { setLocalSkew(v); throttledApply("contrast_skewness", v); }}
+        onRelease={throttledRelease}
       />
 
       <BauhausCombo
@@ -139,6 +106,7 @@ export default function SigmoidModule() {
           defaultValue={100}
           format={(v) => `${v.toFixed(2)}%`}
           onChange={(v) => { setLocalHue(v); throttledApply("hue_preservation", v); }}
+          onRelease={throttledRelease}
         />
       )}
 
@@ -152,6 +120,7 @@ export default function SigmoidModule() {
           defaultValue={0.0152}
           format={(v) => `${v.toFixed(4)}%`}
           onChange={(v) => { setLocalBlack(v); throttledApply("display_black_target", v); }}
+          onRelease={throttledRelease}
         />
 
         <BauhausSlider
@@ -163,6 +132,7 @@ export default function SigmoidModule() {
           defaultValue={100}
           format={(v) => `${v.toFixed(1)}%`}
           onChange={(v) => { setLocalWhite(v); throttledApply("display_white_target", v); }}
+          onRelease={throttledRelease}
         />
       </BauhausSection>
 
@@ -188,6 +158,7 @@ export default function SigmoidModule() {
             color="rgb(204,51,51)"
             format={(v) => `${v.toFixed(1)}%`}
             onChange={(v) => { const raw = v / 100; setLocalRedInset(raw); throttledApply("red_inset", raw); }}
+            onRelease={throttledRelease}
           />
           <BauhausSlider
             label="red rotation"
@@ -200,6 +171,7 @@ export default function SigmoidModule() {
             color="rgb(204,51,51)"
             format={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`}
             onChange={(v) => { const raw = v / RAD_2_DEG; setLocalRedRotation(raw); throttledApply("red_rotation", raw); }}
+            onRelease={throttledRelease}
           />
 
           <BauhausSlider
@@ -212,6 +184,7 @@ export default function SigmoidModule() {
             color="rgb(51,204,51)"
             format={(v) => `${v.toFixed(1)}%`}
             onChange={(v) => { const raw = v / 100; setLocalGreenInset(raw); throttledApply("green_inset", raw); }}
+            onRelease={throttledRelease}
           />
           <BauhausSlider
             label="green rotation"
@@ -224,6 +197,7 @@ export default function SigmoidModule() {
             color="rgb(51,204,51)"
             format={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`}
             onChange={(v) => { const raw = v / RAD_2_DEG; setLocalGreenRotation(raw); throttledApply("green_rotation", raw); }}
+            onRelease={throttledRelease}
           />
 
           <BauhausSlider
@@ -236,6 +210,7 @@ export default function SigmoidModule() {
             color="rgb(51,51,204)"
             format={(v) => `${v.toFixed(1)}%`}
             onChange={(v) => { const raw = v / 100; setLocalBlueInset(raw); throttledApply("blue_inset", raw); }}
+            onRelease={throttledRelease}
           />
           <BauhausSlider
             label="blue rotation"
@@ -248,6 +223,7 @@ export default function SigmoidModule() {
             color="rgb(51,51,204)"
             format={(v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}°`}
             onChange={(v) => { const raw = v / RAD_2_DEG; setLocalBlueRotation(raw); throttledApply("blue_rotation", raw); }}
+            onRelease={throttledRelease}
           />
 
           <BauhausSlider
@@ -259,6 +235,7 @@ export default function SigmoidModule() {
             defaultValue={0}
             format={(v) => `${v.toFixed(0)}%`}
             onChange={(v) => { const raw = v / 100; setLocalPurity(raw); throttledApply("purity", raw); }}
+            onRelease={throttledRelease}
           />
         </BauhausSection>
       )}

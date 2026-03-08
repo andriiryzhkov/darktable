@@ -1,45 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useDevelopStore } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
 import type { IntrospectionField } from "../../../types/protocol";
-
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: unknown) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
 
 function humanize(name: string): string {
   return name.replace(/_/g, " ");
@@ -76,9 +41,10 @@ interface FieldControlProps {
   value: unknown;
   onApply: (field: string, v: unknown) => void;
   onSet: (field: string, v: unknown) => void;
+  onRelease?: () => void;
 }
 
-function FieldControl({ field, value, onApply, onSet }: FieldControlProps) {
+function FieldControl({ field, value, onApply, onSet, onRelease }: FieldControlProps) {
   const [local, setLocal] = useState<number>(typeof value === "number" ? value : 0);
 
   useEffect(() => {
@@ -127,6 +93,7 @@ function FieldControl({ field, value, onApply, onSet }: FieldControlProps) {
         defaultValue={defaultVal}
         format={(v) => isInt ? String(Math.round(v)) : v.toFixed(step < 0.01 ? 3 : step < 0.1 ? 2 : 1)}
         onChange={(v) => { setLocal(v); onApply(field.name, isInt ? Math.round(v) : v); }}
+        onRelease={onRelease}
       />
     );
   }
@@ -141,7 +108,7 @@ export default function GenericIopModule({ op }: { op: string }) {
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
   const schema = useDevelopStore((s) => s.introspectionSchemas[op]);
   const params = useDevelopStore((s) => s.genericParams[op]);
-  const { apply: throttledApply } = useThrottledParam(op);
+  const { apply: throttledApply, release: throttledRelease } = useThrottledParam(op);
 
   useEffect(() => {
     fetchIntrospection(op);
@@ -177,6 +144,7 @@ export default function GenericIopModule({ op }: { op: string }) {
           value={params[field.name]}
           onApply={throttledApply}
           onSet={(name, v) => setModuleParam(op, { [name]: v })}
+          onRelease={throttledRelease}
         />
       ))}
     </>

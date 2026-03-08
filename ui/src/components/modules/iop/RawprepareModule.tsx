@@ -1,43 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useDevelopStore } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
-
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: number | number[]) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
 
 const FLAT_FIELD_OPTIONS = ["disabled", "embedded GainMap"];
 
@@ -49,7 +14,7 @@ export default function RawprepareModule() {
   const [localBlack, setLocalBlack] = useState([0, 0, 0, 0]);
   const [localWhite, setLocalWhite] = useState(0);
 
-  const { apply: throttledApply, draggingRef } = useThrottledParam("rawprepare");
+  const { apply: throttledApply, release: throttledRelease, draggingRef } = useThrottledParam("rawprepare");
 
   useEffect(() => {
     if (!params) {
@@ -90,6 +55,7 @@ export default function RawprepareModule() {
         defaultValue={0}
         format={(v) => `${Math.round(v)}`}
         onChange={(v) => handleBlackChange(0, Math.round(v))}
+        onRelease={throttledRelease}
       />
       <BauhausSlider
         label="black level 1"
@@ -100,6 +66,7 @@ export default function RawprepareModule() {
         defaultValue={0}
         format={(v) => `${Math.round(v)}`}
         onChange={(v) => handleBlackChange(1, Math.round(v))}
+        onRelease={throttledRelease}
       />
       <BauhausSlider
         label="black level 2"
@@ -110,6 +77,7 @@ export default function RawprepareModule() {
         defaultValue={0}
         format={(v) => `${Math.round(v)}`}
         onChange={(v) => handleBlackChange(2, Math.round(v))}
+        onRelease={throttledRelease}
       />
       <BauhausSlider
         label="black level 3"
@@ -120,6 +88,7 @@ export default function RawprepareModule() {
         defaultValue={0}
         format={(v) => `${Math.round(v)}`}
         onChange={(v) => handleBlackChange(3, Math.round(v))}
+        onRelease={throttledRelease}
       />
       <BauhausSlider
         label="white point"
@@ -134,6 +103,7 @@ export default function RawprepareModule() {
           setLocalWhite(rounded);
           throttledApply("raw_white_point", rounded);
         }}
+        onRelease={throttledRelease}
       />
       <BauhausCombo
         label="flat field correction"

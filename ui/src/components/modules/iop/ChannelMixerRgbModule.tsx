@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useDevelopStore } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
@@ -70,43 +71,7 @@ const VERSION_LABELS = [
 const TAB_NAMES = ["CAT", "R", "G", "B", "colorfulness", "brightness", "gray"] as const;
 type TabName = (typeof TAB_NAMES)[number];
 
-// --- Throttled param hook (same pattern as other modules) ---
-
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: number | number[]) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
+// --- Throttled param hook ---
 
 // Helper: update one element of a float[4] array param
 function arrSet(arr: number[], idx: number, v: number): number[] {
@@ -134,7 +99,7 @@ export default function ChannelMixerRgbModule() {
   const [localLight, setLocalLight] = useState([0, 0, 0, 0]);
   const [localGrey, setLocalGrey] = useState([0, 0, 0, 0]);
 
-  const { apply: throttledApply, draggingRef } = useThrottledParam("channelmixerrgb");
+  const { apply: throttledApply, release: throttledRelease, draggingRef } = useThrottledParam("channelmixerrgb");
 
   useEffect(() => {
     if (!params) fetchGenericParams("channelmixerrgb");
@@ -197,6 +162,7 @@ export default function ChannelMixerRgbModule() {
               setArr(next);
               throttledApply(field, next);
             }}
+            onRelease={throttledRelease}
           />
         );
       })}
@@ -269,6 +235,7 @@ export default function ChannelMixerRgbModule() {
               defaultValue={5003}
               format={(v) => `${Math.round(v)} K`}
               onChange={(v) => { setLocalTemp(v); throttledApply("temperature", v); }}
+              onRelease={throttledRelease}
             />
           )}
 
@@ -283,6 +250,7 @@ export default function ChannelMixerRgbModule() {
                 defaultValue={0.333}
                 format={(v) => v.toFixed(4)}
                 onChange={(v) => setModuleParam("channelmixerrgb", { x: v })}
+                onRelease={throttledRelease}
               />
               <BauhausSlider
                 label="chromaticity y"
@@ -293,6 +261,7 @@ export default function ChannelMixerRgbModule() {
                 defaultValue={0.333}
                 format={(v) => v.toFixed(4)}
                 onChange={(v) => setModuleParam("channelmixerrgb", { y: v })}
+                onRelease={throttledRelease}
               />
             </>
           )}
@@ -306,6 +275,7 @@ export default function ChannelMixerRgbModule() {
             defaultValue={1.0}
             format={(v) => v.toFixed(2)}
             onChange={(v) => { setLocalGamut(v); throttledApply("gamut", v); }}
+            onRelease={throttledRelease}
           />
 
           <BauhausCheckbox

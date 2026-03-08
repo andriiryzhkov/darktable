@@ -12,6 +12,7 @@ interface BauhausSliderProps {
   color?: string;
   format?: (v: number) => string;
   onChange?: (value: number) => void;
+  onRelease?: () => void;
   actionIcon?: ReactNode;
   onAction?: () => void;
 }
@@ -33,6 +34,7 @@ export default function BauhausSlider({
   color,
   format = defaultFormat,
   onChange,
+  onRelease,
   actionIcon,
   onAction,
 }: BauhausSliderProps) {
@@ -79,8 +81,9 @@ export default function BauhausSlider({
     const el = e.currentTarget as HTMLElement;
     if (el.hasPointerCapture(e.pointerId)) {
       el.releasePointerCapture(e.pointerId);
+      onRelease?.();
     }
-  }, []);
+  }, [onRelease]);
 
   const range = max - min;
   const orig = origin ?? min;

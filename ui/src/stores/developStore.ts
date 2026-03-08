@@ -433,7 +433,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       }
       const t0 = performance.now();
       await developSetParams(sessionId, op, params, true);
-      console.log(`[perf] applyParam IPC: ${(performance.now() - t0).toFixed(1)}ms`);
+      console.log(`[perf] applyParam: ${(performance.now() - t0).toFixed(1)}ms`);
     } catch (e) {
       console.error(`apply ${op} param failed:`, e);
     }

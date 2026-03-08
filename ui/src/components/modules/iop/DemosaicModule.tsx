@@ -1,45 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useDevelopStore } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
 import BauhausSection from "../../controls/BauhausSection";
-
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: number) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
 
 // Demosaic method enum values (must match server-side)
 const DEMOSAIC_DUAL = 2048;
@@ -108,7 +73,7 @@ export default function DemosaicModule() {
   const [localCsIter, setLocalCsIter] = useState(8);
   const [localCsCenter, setLocalCsCenter] = useState(0);
 
-  const { apply: throttledApply, draggingRef } = useThrottledParam("demosaic");
+  const { apply: throttledApply, release: throttledRelease, draggingRef } = useThrottledParam("demosaic");
 
   useEffect(() => {
     if (!params) {
@@ -184,6 +149,7 @@ export default function DemosaicModule() {
           defaultValue={0}
           format={(v) => v.toFixed(3)}
           onChange={(v) => { setLocalMedianThrs(v); throttledApply("median_thrs", v); }}
+          onRelease={throttledRelease}
         />
       )}
 
@@ -197,6 +163,7 @@ export default function DemosaicModule() {
           defaultValue={0.2}
           format={(v) => v.toFixed(2)}
           onChange={(v) => { setLocalDualThrs(v); throttledApply("dual_thrs", v); }}
+          onRelease={throttledRelease}
         />
       )}
 
@@ -256,6 +223,7 @@ export default function DemosaicModule() {
             defaultValue={8}
             format={(v) => `${Math.round(v)}`}
             onChange={(v) => { setLocalCsIter(v); throttledApply("cs_iter", v); }}
+            onRelease={throttledRelease}
           />
           <BauhausSlider
             label="radius"
@@ -266,6 +234,7 @@ export default function DemosaicModule() {
             defaultValue={0}
             format={(v) => `${v.toFixed(2)} px`}
             onChange={(v) => { setLocalCsRadius(v); throttledApply("cs_radius", v); }}
+            onRelease={throttledRelease}
           />
           <BauhausSlider
             label="contrast sensitivity"
@@ -276,6 +245,7 @@ export default function DemosaicModule() {
             defaultValue={0.4}
             format={(v) => v.toFixed(3)}
             onChange={(v) => { setLocalCsThrs(v); throttledApply("cs_thrs", v); }}
+            onRelease={throttledRelease}
           />
           <BauhausSlider
             label="corner boost"
@@ -286,6 +256,7 @@ export default function DemosaicModule() {
             defaultValue={0}
             format={(v) => `${v.toFixed(2)} px`}
             onChange={(v) => { setLocalCsBoost(v); throttledApply("cs_boost", v); }}
+            onRelease={throttledRelease}
           />
           {(params.cs_boost as number) > 0 && (
             <BauhausSlider
@@ -297,6 +268,7 @@ export default function DemosaicModule() {
               defaultValue={0}
               format={(v) => `${Math.round(v * 100)}%`}
               onChange={(v) => { setLocalCsCenter(v); throttledApply("cs_center", v); }}
+              onRelease={throttledRelease}
             />
           )}
         </BauhausSection>

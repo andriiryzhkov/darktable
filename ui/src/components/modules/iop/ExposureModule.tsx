@@ -1,52 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useDevelopStore } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausLabel from "../../controls/BauhausLabel";
 import BauhausPicker from "../../controls/BauhausPicker";
 import { usePickerStore } from "../../../stores/pickerStore";
-
-/**
- * Throttled param applicator: sends set_params as fast as the IPC allows.
- * The server processes the pipeline asynchronously and pushes preview_ready
- * events when SHM is written — the store event listener handles frame fetch.
- */
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: number) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
 
 /** Convert sRGB 0-1 to linear */
 function srgbToLinear(c: number): number {
@@ -64,7 +24,7 @@ export default function ExposureModule() {
   const [localPercentile, setLocalPercentile] = useState(50);
   const [localTarget, setLocalTarget] = useState(-4);
 
-  const { apply: throttledApply, draggingRef } = useThrottledParam("exposure");
+  const { apply: throttledApply, release: throttledRelease, draggingRef } = useThrottledParam("exposure");
   const pickerActive = usePickerStore((s) => s.active);
   const pickerBox = usePickerStore((s) => s.box);
   const deactivatePicker = usePickerStore((s) => s.deactivate);
@@ -183,6 +143,7 @@ export default function ExposureModule() {
             origin={0}
             format={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(3)} EV`}
             onChange={(v) => { setLocalExposure(v); throttledApply("exposure", v); }}
+            onRelease={throttledRelease}
             actionIcon={<BauhausPicker id="exposure-picker" module="exposure" mode="area" />}
           />
         </>
@@ -197,6 +158,7 @@ export default function ExposureModule() {
             defaultValue={50}
             format={(v) => `${v.toFixed(2)}%`}
             onChange={(v) => { setLocalPercentile(v); throttledApply("deflicker_percentile", v); }}
+            onRelease={throttledRelease}
           />
 
           <BauhausLabel
@@ -217,6 +179,7 @@ export default function ExposureModule() {
             defaultValue={-4}
             format={(v) => `${v.toFixed(2)} EV`}
             onChange={(v) => { setLocalTarget(v); throttledApply("deflicker_target_level", v); }}
+            onRelease={throttledRelease}
           />
         </>
       )}
@@ -231,6 +194,7 @@ export default function ExposureModule() {
         origin={0}
         format={(v) => v.toFixed(4)}
         onChange={(v) => { setLocalBlack(v); throttledApply("black", v); }}
+        onRelease={throttledRelease}
       />
     </>
   );

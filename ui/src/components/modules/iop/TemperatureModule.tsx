@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Aperture, Pipette, Pen, Camera, SwitchCamera } from "lucide-react";
 import { useDevelopStore, getEnabledOps } from "../../../stores/developStore";
+import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import { usePickerStore } from "../../../stores/pickerStore";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausButton from "../../controls/BauhausButton";
@@ -14,42 +15,6 @@ const PRESET_OPTIONS = [
   "camera reference",
   "as shot to reference",
 ];
-
-function useThrottledParam(op: string) {
-  const applyParam = useDevelopStore((s) => s.applyParam);
-  const commitParam = useDevelopStore((s) => s.commitParam);
-  const fetchHistory = useDevelopStore((s) => s.fetchHistory);
-  const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
-  const busyRef = useRef(false);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
-  const draggingRef = useRef(false);
-
-  const apply = useCallback(
-    async (field: string, v: number) => {
-      draggingRef.current = true;
-      pendingRef.current = { [field]: v };
-      if (busyRef.current) return;
-
-      busyRef.current = true;
-      try {
-        while (pendingRef.current) {
-          const params = pendingRef.current;
-          pendingRef.current = null;
-          await applyParam(op, params);
-        }
-      } finally {
-        busyRef.current = false;
-        draggingRef.current = false;
-        await commitParam(op);
-        fetchHistory();
-        fetchGenericParams(op);
-      }
-    },
-    [op, applyParam, commitParam, fetchHistory, fetchGenericParams],
-  );
-
-  return { apply, draggingRef };
-}
 
 /** Convert sRGB 0-1 to linear */
 function srgbToLinear(c: number): number {
@@ -153,7 +118,7 @@ export default function TemperatureModule() {
   const [localTempK, setLocalTempK] = useState(5000);
   const [localTint, setLocalTint] = useState(1);
 
-  const { apply: throttledApply, draggingRef } = useThrottledParam("temperature");
+  const { apply: throttledApply, release: throttledRelease, draggingRef } = useThrottledParam("temperature");
 
   // Callback ref: when the trouble banner mounts, scroll parent to compensate
   const troubleRefCb = useCallback((el: HTMLParagraphElement | null) => {
@@ -328,6 +293,7 @@ export default function TemperatureModule() {
         gradient={tempGradient}
         format={(v) => `${Math.round(v)} K`}
         onChange={(v) => { setLocalTempK(v); throttledApply("temperature_k", v); }}
+        onRelease={throttledRelease}
       />
 
       <BauhausSlider
@@ -340,6 +306,7 @@ export default function TemperatureModule() {
         gradient={tintGradient}
         format={(v) => v.toFixed(3)}
         onChange={(v) => { setLocalTint(v); throttledApply("tint", v); }}
+        onRelease={throttledRelease}
       />
 
       <BauhausSection title="channel coefficients">
@@ -353,6 +320,7 @@ export default function TemperatureModule() {
           color="#ff4040"
           format={(v) => v.toFixed(4)}
           onChange={(v) => { setLocalRed(v); throttledApply("red", v); }}
+          onRelease={throttledRelease}
         />
 
         <BauhausSlider
@@ -365,6 +333,7 @@ export default function TemperatureModule() {
           color="#40c040"
           format={(v) => v.toFixed(4)}
           onChange={(v) => { setLocalGreen(v); throttledApply("green", v); }}
+          onRelease={throttledRelease}
         />
 
         <BauhausSlider
@@ -377,6 +346,7 @@ export default function TemperatureModule() {
           color="#4060ff"
           format={(v) => v.toFixed(4)}
           onChange={(v) => { setLocalBlue(v); throttledApply("blue", v); }}
+          onRelease={throttledRelease}
         />
       </BauhausSection>
     </>
