@@ -390,9 +390,14 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   },
 
   applyParam: async (op: string, params: Record<string, unknown>) => {
-    const { sessionId } = get();
+    const { sessionId, historyItems } = get();
     if (!sessionId) return;
     try {
+      // Auto-enable module if it's currently off
+      if (!getEnabledOps(historyItems).has(op)) {
+        await developSetParams(sessionId, op, { enabled: true });
+        await get().fetchHistory();
+      }
       const t0 = performance.now();
       await developSetParams(sessionId, op, params, true);
       console.log(`[perf] applyParam IPC: ${(performance.now() - t0).toFixed(1)}ms`);
@@ -412,9 +417,13 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   },
 
   setModuleParam: async (op: string, params: Record<string, unknown>) => {
-    const { sessionId } = get();
+    const { sessionId, historyItems } = get();
     if (!sessionId) return;
     try {
+      // Auto-enable module if it's currently off
+      if (!getEnabledOps(historyItems).has(op)) {
+        await developSetParams(sessionId, op, { enabled: true });
+      }
       await developSetParams(sessionId, op, params);
       await get().requestPreview();
       await get().fetchFrame();
