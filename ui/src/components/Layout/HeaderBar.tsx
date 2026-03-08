@@ -16,7 +16,7 @@ export default function HeaderBar() {
 
   return (
     <div
-      className={`headerbar${platform === "macos" ? " headerbar--mac" : ""}`}
+      className={`headerbar${platform === "macos" ? " headerbar--mac" : platform === "linux" ? " headerbar--linux" : ""}`}
       onMouseDown={(e) => {
         if (e.button === 0 && !isInteractive(e.target)) windowStartDrag();
       }}

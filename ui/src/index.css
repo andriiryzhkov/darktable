@@ -1221,6 +1221,11 @@ body {
   padding-left: 80px;
 }
 
+/* Reserve space for Linux window controls (top-right overlay) */
+.headerbar--linux {
+  padding-right: 140px;
+}
+
 .headerbar-logo {
   width: 36px;
   height: 36px;
