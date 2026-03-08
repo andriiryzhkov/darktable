@@ -77,6 +77,10 @@ struct dt_server_t
   int client_fd;
   char socket_path[PATH_MAX];
 
+  // Authentication
+  char auth_token[65];     // 64 hex chars + null (256-bit token)
+  gboolean auth_required;  // TRUE for socket mode, FALSE for embedded
+
   // Event loop
   gboolean running;
   GMainLoop *main_loop;

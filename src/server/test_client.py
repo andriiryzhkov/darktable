@@ -278,15 +278,35 @@ def test_shutdown(s):
     print(f"  OK: {resp['result']}")
 
 
+def authenticate(s, token):
+    """Send auth handshake. Returns True on success."""
+    print(f"--- auth (token={token[:8]}...) ---")
+    send_request(s, "auth", {"token": token}, req_id="auth-0")
+    resp = recv_response(s)
+    if "error" in resp and resp["error"]:
+        print(f"  FAILED: {resp['error']['message']}")
+        return False
+    print(f"  OK: {resp.get('result', {})}")
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <socket_path>")
+        print(f"Usage: {sys.argv[0]} <socket_path> [token]")
         sys.exit(1)
 
     sock_path = sys.argv[1]
+    token = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("DARKTABLE_SERVER_TOKEN", "")
+
     print(f"Connecting to {sock_path}...")
     s = connect(sock_path)
     print("Connected!\n")
+
+    if token:
+        if not authenticate(s, token):
+            s.close()
+            sys.exit(1)
+        print()
 
     try:
         test_ping(s)

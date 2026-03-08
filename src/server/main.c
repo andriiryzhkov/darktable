@@ -136,9 +136,13 @@ int main(int argc, char *argv[])
     exit(1);
   }
 
-  // Print socket path AFTER the socket is listening so the client can connect immediately
+  // Print socket path and auth token so the client can connect and authenticate immediately
   fprintf(stdout, "SOCKET=%s\n", socket_path);
+  fprintf(stdout, "TOKEN=%s\n", server->auth_token);
   fflush(stdout);
+
+  // Also display token on stderr for manual pairing
+  fprintf(stderr, "[server] auth token: %s\n", server->auth_token);
 
   // Install SIGTERM handler for clean shutdown (saves config to disk)
   _g_server = server;

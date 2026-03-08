@@ -25,6 +25,9 @@
 // Connect to darktable-server Unix socket. Returns fd >= 0 on success, -1 on error.
 int dt_ipc_connect(const char *socket_path);
 
+// Send auth handshake after connecting. Returns TRUE on success, FALSE on auth failure.
+gboolean dt_ipc_authenticate(int fd, const char *token);
+
 // Send a JSON-RPC request and wait for the response.
 // Thread-safe when protected by mutex.
 // Returns the "result" field as a JSON string (caller must g_free), or NULL on error.

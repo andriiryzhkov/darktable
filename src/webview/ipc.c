@@ -54,6 +54,52 @@ int dt_ipc_connect(const char *socket_path)
   return fd;
 }
 
+gboolean dt_ipc_authenticate(int fd, const char *token)
+{
+  // Send auth handshake: {"id":"auth-0","method":"auth","params":{"token":"..."}}
+  char *request = g_strdup_printf(
+    "{\"id\":\"auth-0\",\"method\":\"auth\",\"params\":{\"token\":\"%s\"}}", token);
+
+  gboolean ok = dt_server_write_frame(fd, request, strlen(request));
+  g_free(request);
+  if(!ok)
+  {
+    fprintf(stderr, "[webview] failed to send auth handshake\n");
+    return FALSE;
+  }
+
+  // Read auth response
+  char *frame = NULL;
+  size_t frame_len = 0;
+  if(!dt_server_read_frame(fd, &frame, &frame_len))
+  {
+    fprintf(stderr, "[webview] failed to read auth response\n");
+    return FALSE;
+  }
+
+  // Check for error
+  JsonParser *parser = json_parser_new();
+  gboolean auth_ok = FALSE;
+  if(json_parser_load_from_data(parser, frame, frame_len, NULL))
+  {
+    JsonObject *obj = json_node_get_object(json_parser_get_root(parser));
+    if(json_object_has_member(obj, "error") && !json_object_get_null_member(obj, "error"))
+    {
+      JsonObject *err = json_object_get_object_member(obj, "error");
+      fprintf(stderr, "[webview] auth failed: %s\n",
+              json_object_get_string_member(err, "message"));
+    }
+    else
+    {
+      auth_ok = TRUE;
+      fprintf(stderr, "[webview] authenticated successfully\n");
+    }
+  }
+  g_free(frame);
+  g_object_unref(parser);
+  return auth_ok;
+}
+
 char *dt_ipc_request(int fd, pthread_mutex_t *mutex,
                      const char *method, const char *params_json,
                      char **out_error)

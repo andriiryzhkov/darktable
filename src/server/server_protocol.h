@@ -72,6 +72,7 @@ uint8_t *dt_shm_pixel_data(dt_shm_buffer_t *buf);
 #define DT_SERVER_ERR_INTERNAL    -32603
 #define DT_SERVER_ERR_NOT_FOUND   -1
 #define DT_SERVER_ERR_BUSY        -2
+#define DT_SERVER_ERR_AUTH        -3
 
 typedef struct dt_server_request_t
 {

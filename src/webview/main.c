@@ -103,11 +103,12 @@ static char *_get_binary_dir(void)
   return NULL;
 }
 
-// spawn darktable-server and read SOCKET= from its stdout
+// spawn darktable-server and read SOCKET= and TOKEN= from its stdout
 // core_args is a NULL-terminated array of darktable options (passed after --core)
-// returns PID on success, -1 on error; socket_path is filled in
+// returns PID on success, -1 on error; socket_path and auth_token are filled in
 static pid_t spawn_server(const char *server_bin, char **core_args, int core_argc,
-                          char *socket_path, size_t path_size)
+                          char *socket_path, size_t path_size,
+                          char *auth_token, size_t token_size)
 {
   int pipefd[2];
   if(pipe(pipefd) < 0)
@@ -168,7 +169,9 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
   }
 
   char line[1024];
-  gboolean found = FALSE;
+  gboolean found_socket = FALSE;
+  gboolean found_token = FALSE;
+  auth_token[0] = '\0';
   while(fgets(line, sizeof(line), fp))
   {
     size_t len = strlen(line);
@@ -177,20 +180,33 @@ static pid_t spawn_server(const char *server_bin, char **core_args, int core_arg
     if(g_str_has_prefix(line, "SOCKET="))
     {
       g_strlcpy(socket_path, line + 7, path_size);
-      found = TRUE;
-      break;
+      found_socket = TRUE;
     }
-    // forward non-SOCKET lines to stderr
-    fprintf(stderr, "[server] %s\n", line);
+    else if(g_str_has_prefix(line, "TOKEN="))
+    {
+      g_strlcpy(auth_token, line + 6, token_size);
+      found_token = TRUE;
+    }
+    else
+    {
+      // forward other lines to stderr
+      fprintf(stderr, "[server] %s\n", line);
+    }
+
+    if(found_socket && found_token) break;
   }
   fclose(fp);
 
-  if(!found)
+  if(!found_socket)
   {
     fprintf(stderr, "[webview] server exited without printing SOCKET= line\n");
     kill(pid, SIGTERM);
     waitpid(pid, NULL, 0);
     return -1;
+  }
+  if(!found_token)
+  {
+    fprintf(stderr, "[webview] WARNING: server did not provide TOKEN=, auth may fail\n");
   }
 
   fprintf(stderr, "[webview] server started (pid=%d), socket: %s\n", pid, socket_path);
@@ -231,7 +247,8 @@ static void *_startup_thread(void *arg)
 
   fprintf(stderr, "[webview] starting server: %s\n", data->server_bin);
   ctx->server_pid = spawn_server(data->server_bin, data->core_args, data->core_argc,
-                                 ctx->socket_path, sizeof(ctx->socket_path));
+                                 ctx->socket_path, sizeof(ctx->socket_path),
+                                 ctx->auth_token, sizeof(ctx->auth_token));
   if(ctx->server_pid < 0)
   {
     webview_dispatch(ctx->webview, _on_startup_error,
@@ -249,6 +266,19 @@ static void *_startup_thread(void *arg)
     ctx->server_pid = -1;
     webview_dispatch(ctx->webview, _on_startup_error,
                      g_strdup("failed to connect to server"));
+    return NULL;
+  }
+
+  // Authenticate with the server
+  if(ctx->auth_token[0] && !dt_ipc_authenticate(ctx->socket_fd, ctx->auth_token))
+  {
+    close(ctx->socket_fd);
+    ctx->socket_fd = -1;
+    kill(ctx->server_pid, SIGTERM);
+    waitpid(ctx->server_pid, NULL, 0);
+    ctx->server_pid = -1;
+    webview_dispatch(ctx->webview, _on_startup_error,
+                     g_strdup("server authentication failed"));
     return NULL;
   }
 

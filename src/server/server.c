@@ -20,6 +20,7 @@
 #include "control/conf.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -108,6 +109,12 @@ static char *_handle_config_set(dt_server_t *server, const dt_server_request_t *
   if(!key || !value)
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "missing 'key' or 'value'");
 
+  if(!dt_conf_key_exists(key))
+  {
+    fprintf(stderr, "[server] config.set REJECTED: key '%s' not in config system\n", key);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "config key not allowed");
+  }
+
   dt_conf_set_string(key, value);
   fprintf(stderr, "[server] config.set '%s' = '%s'\n", key, value);
 
@@ -179,9 +186,142 @@ char *dt_server_dispatch(dt_server_t *server, const dt_server_request_t *req)
                                "Unknown method");
 }
 
+/** Generate a cryptographically random 256-bit token as 64 hex chars.
+ *  If DARKTABLE_SERVER_TOKEN is set, use that instead. */
+static void _generate_auth_token(dt_server_t *server)
+{
+  const char *env_token = g_getenv("DARKTABLE_SERVER_TOKEN");
+  if(env_token && strlen(env_token) >= 8)
+  {
+    g_strlcpy(server->auth_token, env_token, sizeof(server->auth_token));
+    fprintf(stderr, "[server] using auth token from DARKTABLE_SERVER_TOKEN\n");
+    return;
+  }
+
+  // Read 32 random bytes from /dev/urandom
+  uint8_t random_bytes[32];
+#ifdef _WIN32
+  // TODO: use CryptGenRandom or BCryptGenRandom
+  for(int i = 0; i < 32; i++)
+    random_bytes[i] = (uint8_t)g_random_int_range(0, 256);
+#else
+  int fd = open("/dev/urandom", O_RDONLY);
+  if(fd >= 0)
+  {
+    ssize_t n = read(fd, random_bytes, sizeof(random_bytes));
+    close(fd);
+    if(n != sizeof(random_bytes))
+    {
+      // Fallback to GLib random
+      for(int i = 0; i < 32; i++)
+        random_bytes[i] = (uint8_t)g_random_int_range(0, 256);
+    }
+  }
+  else
+  {
+    for(int i = 0; i < 32; i++)
+      random_bytes[i] = (uint8_t)g_random_int_range(0, 256);
+  }
+#endif
+
+  // Encode as hex
+  for(int i = 0; i < 32; i++)
+    snprintf(server->auth_token + i * 2, 3, "%02x", random_bytes[i]);
+  server->auth_token[64] = '\0';
+}
+
+/** Wait for the client to send an auth handshake within timeout_sec seconds.
+ *  Expected: {"id":"...","method":"auth","params":{"token":"<token>"}}
+ *  Returns TRUE if authenticated, FALSE if rejected (connection should be closed). */
+static gboolean _authenticate_client(dt_server_t *server, int timeout_sec)
+{
+  if(!server->auth_required) return TRUE;
+
+  struct pollfd pfd = { .fd = server->client_fd, .events = POLLIN };
+  int timeout_ms = timeout_sec * 1000;
+
+  int ready = poll(&pfd, 1, timeout_ms);
+  if(ready <= 0)
+  {
+    fprintf(stderr, "[server] auth timeout: no handshake within %d seconds\n", timeout_sec);
+    char *err = dt_server_make_error("", DT_SERVER_ERR_AUTH, "Authentication timeout");
+    dt_server_write_frame(server->client_fd, err, strlen(err));
+    g_free(err);
+    return FALSE;
+  }
+
+  char *frame_buf = NULL;
+  size_t frame_len = 0;
+  if(!dt_server_read_frame(server->client_fd, &frame_buf, &frame_len))
+  {
+    fprintf(stderr, "[server] auth failed: could not read handshake frame\n");
+    return FALSE;
+  }
+
+  dt_server_request_t *req = dt_server_parse_request(frame_buf, frame_len);
+  g_free(frame_buf);
+
+  if(!req)
+  {
+    char *err = dt_server_make_error("", DT_SERVER_ERR_AUTH, "Invalid handshake");
+    dt_server_write_frame(server->client_fd, err, strlen(err));
+    g_free(err);
+    return FALSE;
+  }
+
+  gboolean ok = FALSE;
+  if(strcmp(req->method, "auth") == 0)
+  {
+    const char *token = json_object_get_string_member(req->params, "token");
+    if(token && strcmp(token, server->auth_token) == 0)
+    {
+      ok = TRUE;
+      fprintf(stderr, "[server] client authenticated successfully\n");
+
+      JsonBuilder *b = json_builder_new();
+      json_builder_begin_object(b);
+      json_builder_set_member_name(b, "status");
+      json_builder_add_string_value(b, "ok");
+      json_builder_end_object(b);
+      JsonNode *result = json_builder_get_root(b);
+      char *resp = dt_server_make_response(req->id, result);
+      json_node_unref(result);
+      g_object_unref(b);
+
+      dt_server_write_frame(server->client_fd, resp, strlen(resp));
+      g_free(resp);
+    }
+    else
+    {
+      fprintf(stderr, "[server] auth REJECTED: invalid token\n");
+      char *err = dt_server_make_error(req->id, DT_SERVER_ERR_AUTH, "Invalid token");
+      dt_server_write_frame(server->client_fd, err, strlen(err));
+      g_free(err);
+    }
+  }
+  else
+  {
+    fprintf(stderr, "[server] auth REJECTED: expected 'auth' method, got '%s'\n", req->method);
+    char *err = dt_server_make_error(req->id, DT_SERVER_ERR_AUTH,
+                                      "Authentication required — send auth method first");
+    dt_server_write_frame(server->client_fd, err, strlen(err));
+    g_free(err);
+  }
+
+  dt_server_free_request(req);
+  return ok;
+}
+
 static void _handle_client(dt_server_t *server)
 {
   fprintf(stderr, "[server] client connected\n");
+
+  // Require auth handshake before processing any requests
+  if(!_authenticate_client(server, 5))
+  {
+    fprintf(stderr, "[server] client rejected (auth failed)\n");
+    return;
+  }
 
   while(server->running)
   {
@@ -273,11 +413,16 @@ dt_server_t *dt_server_init(const char *socket_path)
 
   if(!socket_path)
   {
-    // Embedded mode: no socket, dispatch calls directly
+    // Embedded mode: no socket, no auth needed
     server->embedded = TRUE;
+    server->auth_required = FALSE;
     fprintf(stderr, "[server] embedded server initialized\n");
     return server;
   }
+
+  // Socket mode: generate auth token
+  server->auth_required = TRUE;
+  _generate_auth_token(server);
 
   {
     // Socket mode: bind and listen

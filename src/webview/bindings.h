@@ -48,6 +48,7 @@ typedef struct dt_webview_ctx_t
   int socket_fd;
   pid_t server_pid;
   char socket_path[PATH_MAX];
+  char auth_token[65];                // server auth token (64 hex + null)
   pthread_mutex_t ipc_mutex;          // legacy: used by dt_ipc_request()
   dt_ipc_context_t *ipc_ctx;         // event-aware IPC context (reader thread)
   dt_webview_transport_t *transport;  // transport vtable (owns IPC call dispatch)
