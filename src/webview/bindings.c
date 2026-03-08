@@ -21,6 +21,7 @@
 #include "path_validation.h"
 #include "titlebar.h"
 #include "transport.h"
+#include "control/conf.h"
 #include "server/server_protocol.h"
 
 #include <errno.h>
@@ -2642,6 +2643,9 @@ static void on_config_get(const char *id, const char *req, void *arg)
   g_free(ipc_params);
 }
 
+/* ── Config key validation ─────────────────────────────────────── */
+
+
 static void on_config_set(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -2657,6 +2661,15 @@ static void on_config_set(const char *id, const char *req, void *arg)
   char *key = _get_string_arg(args, 0);
   char *value = _get_string_arg(args, 1);
   g_object_unref(parser);
+
+  if(!dt_conf_key_exists(key))
+  {
+    fprintf(stderr, "[webview] configSet REJECTED: key '%s' not in config system\n", key);
+    _return_error(ctx, id, "config key not allowed");
+    g_free(key);
+    g_free(value);
+    return;
+  }
 
   char *ipc_params = g_strdup_printf("{\"key\":\"%s\",\"value\":\"%s\"}", key, value);
   g_free(key);
