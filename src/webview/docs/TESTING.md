@@ -845,107 +845,66 @@ This setup is too heavy for per-commit CI but suitable for nightly runs.
 
 ## 7. Layer 5: Performance Tests
 
-### 7.1 Latency Benchmark
+### 7.1 Running Benchmarks Locally
+
+**Build** (benchmarks are built alongside the main project):
+
+```bash
+cmake -B build -DBUILD_TESTING=ON
+cmake --build build --target bench_transport
+```
+
+**Run latency benchmark**:
+
+```bash
+# Default: 10000 iterations, human-readable table
+./build/bin/tests/perf/bench_transport
+
+# With options
+./build/bin/tests/perf/bench_transport --iterations 50000
+./build/bin/tests/perf/bench_transport --json                         # JSON output
+./build/bin/tests/perf/bench_transport --baseline src/tests/perf/baseline.json  # regression check
+./build/bin/tests/perf/bench_transport --baseline src/tests/perf/baseline.json --threshold 10
+```
+
+**Run memory benchmark**:
+
+```bash
+src/tests/perf/bench_memory.sh
+src/tests/perf/bench_memory.sh --json
+src/tests/perf/bench_memory.sh --baseline src/tests/perf/baseline.json
+```
+
+**Via CTest** (labeled so benchmarks run separately from unit tests):
+
+```bash
+cd build && ctest -L perf --output-on-failure
+```
+
+### 7.2 Latency Benchmark
 
 **File**: `src/tests/perf/bench_transport.c`
 
-Measures the critical path: param update → commit → pipeline trigger.
+Measures transport vtable `call()` round-trip latency using two implementations:
 
-```c
-#include <time.h>
+- **Null transport** — `call()` returns a static JSON string. Measures vtable dispatch overhead (the floor).
+- **Loopback transport** — `socketpair` with an echo responder thread using the real frame I/O protocol (`dt_server_read_frame` / `dt_server_write_frame`). Measures Unix socket round-trip without server logic.
 
-static double _measure_set_param(dt_nova_transport_t *t, int iterations)
-{
-    struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+When `dt_transport_ipc_new()` and `dt_transport_direct_new()` are implemented, they can be added as additional benchmark cases with no structural changes.
 
-    for(int i = 0; i < iterations; i++) {
-        float value = (float)i * 0.01f;
-        t->set_param(t, test_imgid, "exposure", 0,
-                     "exposure", &value, sizeof(float));
-    }
+Reports: min, p50, p95, p99, max latency (microseconds) and throughput (requests/sec).
 
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    double elapsed = (end.tv_sec - start.tv_sec) +
-                     (end.tv_nsec - start.tv_nsec) / 1e9;
-    return elapsed / iterations;
-}
-
-int main(void)
-{
-    /* Direct transport */
-    dt_nova_transport_t *direct = dt_nova_transport_direct_new();
-    double direct_us = _measure_set_param(direct, 10000) * 1e6;
-
-    /* IPC transport (requires running server) */
-    dt_nova_transport_t *ipc = dt_nova_transport_ipc_new(socket_path);
-    double ipc_us = _measure_set_param(ipc, 1000) * 1e6;
-
-    printf("%-20s %10.1f us/call\n", "Direct transport:", direct_us);
-    printf("%-20s %10.1f us/call\n", "IPC transport:", ipc_us);
-    printf("%-20s %10.1fx\n", "Overhead ratio:", ipc_us / direct_us);
-
-    /* Target: direct < 10 us, IPC < 10000 us, ratio < 1000 */
-    assert(direct_us < 10.0);
-    assert(ipc_us < 10000.0);
-
-    direct->destroy(direct);
-    ipc->destroy(ipc);
-    return 0;
-}
-```
-
-### 7.2 Memory Benchmark
+### 7.3 Memory Benchmark
 
 **File**: `src/tests/perf/bench_memory.sh`
 
-```bash
-#!/bin/bash
-# Measure RSS of NOVA in direct vs IPC mode
+Measures RSS of darktable-nova in direct mode and darktable-server + host in IPC mode. Supports `--json` output and `--baseline` comparison.
 
-echo "=== Direct Mode ==="
-./build/bin/darktable-nova --configdir /tmp/dt-bench &
-PID=$!
-sleep 5
-RSS_DIRECT=$(ps -o rss= -p $PID)
-kill $PID
-wait $PID 2>/dev/null
+### 7.4 Performance Regression Detection
 
-echo "=== IPC Mode ==="
-./build/bin/darktable-server --socket /tmp/dt-bench.sock &
-SRV_PID=$!
-sleep 2
-./build/bin/darktable-nova --server --socket /tmp/dt-bench.sock --configdir /tmp/dt-bench &
-PID=$!
-sleep 5
-RSS_HOST=$(ps -o rss= -p $PID)
-RSS_SERVER=$(ps -o rss= -p $SRV_PID)
-kill $PID $SRV_PID
-wait $PID $SRV_PID 2>/dev/null
+**File**: `src/tests/perf/baseline.json`
 
-echo "Direct mode:  $((RSS_DIRECT / 1024)) MB"
-echo "IPC host:     $((RSS_HOST / 1024)) MB"
-echo "IPC server:   $((RSS_SERVER / 1024)) MB"
-echo "IPC total:    $(( (RSS_HOST + RSS_SERVER) / 1024 )) MB"
-```
-
-### 7.3 Performance Regression Detection
-
-Store benchmark results as JSON. Compare against baseline on each run.
-
-```json
-{
-  "baseline": {
-    "direct_set_param_us": 3.2,
-    "ipc_set_param_us": 5800,
-    "direct_rss_mb": 340,
-    "ipc_total_rss_mb": 450
-  },
-  "threshold_pct": 20
-}
-```
-
-Fail if any metric regresses by more than 20% from baseline.
+Reference values for automated regression checks. Both benchmarks support `--baseline PATH --threshold PCT` to compare current results against stored baselines. Exit code 1 if any metric regresses beyond the threshold (default: 20%).
 
 ---
 

@@ -12,3 +12,4 @@ if(WIN32)
 endif(WIN32)
 
 add_subdirectory(unittests)
+add_subdirectory(perf)

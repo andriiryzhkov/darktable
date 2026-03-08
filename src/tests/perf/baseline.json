@@ -1,0 +1,12 @@
+{
+  "null": {
+    "p99_us": 2.0,
+    "throughput_rps": 20000000
+  },
+  "loopback": {
+    "p99_us": 50.0,
+    "throughput_rps": 50000
+  },
+  "direct_rss_kb": 350000,
+  "ipc_total_rss_kb": 500000
+}
