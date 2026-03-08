@@ -143,7 +143,8 @@ static void _ipc_shutdown(dt_webview_transport_t *self)
     {
       pid_t ret = waitpid(d->server_pid, &status, WNOHANG);
       if(ret != 0) goto server_done;
-      usleep(100000); // 100ms
+      struct timespec ts = { .tv_sec = 0, .tv_nsec = 100000000 }; // 100ms
+      nanosleep(&ts, NULL);
     }
     fprintf(stderr, "[ipc_transport] server did not exit, sending SIGTERM\n");
     kill(d->server_pid, SIGTERM);
