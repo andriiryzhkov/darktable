@@ -31,6 +31,7 @@
  */
 
 #include "transport.h"
+#include "common/darktable.h"
 #include "server/server.h"
 
 #include <json-glib/json-glib.h>
@@ -225,9 +226,9 @@ static void _direct_set_event_callback(dt_webview_transport_t *self,
 }
 
 
-/* ── destroy ──────────────────────────────────────────────────── */
+/* ── shutdown: clean up embedded server and darktable core ──────── */
 
-static void _direct_destroy(dt_webview_transport_t *self)
+static void _direct_shutdown(dt_webview_transport_t *self)
 {
   dt_direct_transport_data_t *d = self->data;
 
@@ -236,6 +237,17 @@ static void _direct_destroy(dt_webview_transport_t *self)
     dt_server_cleanup(d->server);
     d->server = NULL;
   }
+
+  /* Save config and free darktable resources */
+  dt_cleanup();
+}
+
+
+/* ── destroy ──────────────────────────────────────────────────── */
+
+static void _direct_destroy(dt_webview_transport_t *self)
+{
+  dt_direct_transport_data_t *d = self->data;
 
   pthread_mutex_destroy(&d->mutex);
   g_free(d);
@@ -265,6 +277,7 @@ dt_webview_transport_t *dt_transport_direct_new(void)
   t->call = _direct_call;
   t->get_preview_frame = _direct_get_preview_frame;
   t->set_event_callback = _direct_set_event_callback;
+  t->shutdown = _direct_shutdown;
   t->destroy = _direct_destroy;
 
   fprintf(stderr, "[direct_transport] ready (in-process, no IPC)\n");

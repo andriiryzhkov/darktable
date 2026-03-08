@@ -416,7 +416,6 @@ int main(int argc, char *argv[])
   // init context
   dt_webview_ctx_t ctx;
   memset(&ctx, 0, sizeof(ctx));
-  pthread_mutex_init(&ctx.ipc_mutex, NULL);
   pthread_mutex_init(&ctx.session_mutex, NULL);
   ctx.socket_fd = -1;
 
@@ -527,36 +526,25 @@ int main(int argc, char *argv[])
   if(server_mode)
     pthread_join(startup_thread, NULL);
 
-  // cleanup
+  // cleanup — unified for both transport modes
   fprintf(stderr, "[webview] shutting down...\n");
   dt_binding_pool_shutdown();
   webview_destroy(ctx.webview);
 
-  // Send graceful shutdown to server (before closing IPC) so it saves config
-  if(ctx.server_pid > 0 && ctx.transport)
-  {
-    char *error = NULL;
-    char *resp = dt_transport_call(ctx.transport, "system.shutdown", "{}", &error);
-    g_free(resp);
-    g_free(error);
-  }
-
-  // Shut down frame server and IPC reader thread before closing the socket
   if(ctx.frame_server)
     dt_frame_server_stop(ctx.frame_server);
-  if(ctx.ipc_ctx)
-    dt_ipc_context_free(ctx.ipc_ctx);
 
+  // transport shutdown handles mode-specific cleanup:
+  //   IPC:    system.shutdown RPC → free IPC context → close socket → wait for server
+  //   Direct: server cleanup → dt_cleanup() (saves config, frees resources)
   if(ctx.transport)
   {
+    dt_transport_shutdown(ctx.transport);
     dt_transport_destroy(ctx.transport);
     ctx.transport = NULL;
   }
 
-  if(ctx.socket_fd >= 0)
-    close(ctx.socket_fd);
-
-  // close any open SHM handles
+  // close any open SHM handles (IPC mode only, no-op in direct mode)
   for(int i = 0; i < DT_WEBVIEW_MAX_SESSIONS; i++)
   {
     if(ctx.sessions[i].active)
@@ -569,31 +557,8 @@ int main(int argc, char *argv[])
     }
   }
 
-  // wait for server to exit cleanly, force kill if needed
-  if(ctx.server_pid > 0)
-  {
-    int status;
-    for(int i = 0; i < 30; i++)
-    {
-      pid_t ret = waitpid(ctx.server_pid, &status, WNOHANG);
-      if(ret != 0) goto server_done;
-      usleep(100000); // 100ms
-    }
-    fprintf(stderr, "[webview] server did not exit, sending SIGTERM\n");
-    kill(ctx.server_pid, SIGTERM);
-    waitpid(ctx.server_pid, &status, 0);
-server_done:
-    fprintf(stderr, "[webview] server stopped\n");
-  }
-
-  pthread_mutex_destroy(&ctx.ipc_mutex);
   pthread_mutex_destroy(&ctx.session_mutex);
   g_free(frontend_url);
-
-#ifdef HAVE_DIRECT_TRANSPORT
-  if(!server_mode)
-    dt_cleanup();
-#endif
 
   fprintf(stderr, "[webview] done\n");
   return 0;

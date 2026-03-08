@@ -22,22 +22,26 @@
  * Wraps the existing dt_ipc_request2() / dt_ipc_request() dual-path
  * dispatch pattern behind the dt_webview_transport_t interface.
  *
- * This is a pure refactoring — the IPC behavior is identical to what
- * bindings.c did before, just moved behind the vtable.
+ * Owns the socket, IPC context, and server process lifecycle.
+ * shutdown() handles graceful server termination.
  */
 
 #include "transport.h"
 #include "ipc.h"
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 typedef struct dt_ipc_transport_data_t
 {
-  int socket_fd;                  /* connected Unix socket (NOT owned — main.c manages lifecycle) */
+  int socket_fd;                  /* connected Unix socket (owned) */
   pthread_mutex_t legacy_mutex;   /* mutex for legacy dt_ipc_request() */
-  dt_ipc_context_t *ipc_ctx;     /* event-aware IPC context (NOT owned — main.c manages lifecycle) */
+  dt_ipc_context_t *ipc_ctx;     /* event-aware IPC context (owned) */
+  pid_t server_pid;               /* server process PID (owned, -1 if none) */
 } dt_ipc_transport_data_t;
 
 
@@ -101,17 +105,61 @@ static void _ipc_set_event_callback(dt_webview_transport_t *self,
 }
 
 
+/* ── shutdown: graceful server termination ──────────────────────── */
+
+static void _ipc_shutdown(dt_webview_transport_t *self)
+{
+  dt_ipc_transport_data_t *d = self->data;
+
+  /* Send graceful shutdown RPC so the server saves config */
+  if(d->socket_fd >= 0)
+  {
+    fprintf(stderr, "[ipc_transport] sending system.shutdown to server\n");
+    char *error = NULL;
+    char *resp = self->call(self, "system.shutdown", "{}", &error);
+    g_free(resp);
+    g_free(error);
+  }
+
+  /* Stop IPC reader thread */
+  if(d->ipc_ctx)
+  {
+    dt_ipc_context_free(d->ipc_ctx);
+    d->ipc_ctx = NULL;
+  }
+
+  /* Close socket */
+  if(d->socket_fd >= 0)
+  {
+    close(d->socket_fd);
+    d->socket_fd = -1;
+  }
+
+  /* Wait for server to exit cleanly, force kill if needed */
+  if(d->server_pid > 0)
+  {
+    int status;
+    for(int i = 0; i < 30; i++)
+    {
+      pid_t ret = waitpid(d->server_pid, &status, WNOHANG);
+      if(ret != 0) goto server_done;
+      usleep(100000); // 100ms
+    }
+    fprintf(stderr, "[ipc_transport] server did not exit, sending SIGTERM\n");
+    kill(d->server_pid, SIGTERM);
+    waitpid(d->server_pid, &status, 0);
+server_done:
+    fprintf(stderr, "[ipc_transport] server stopped\n");
+    d->server_pid = -1;
+  }
+}
+
+
 /* ── destroy ────────────────────────────────────────────────────── */
 
 static void _ipc_destroy(dt_webview_transport_t *self)
 {
   dt_ipc_transport_data_t *d = self->data;
-
-  /* NOTE: socket_fd and ipc_ctx are NOT owned by the transport.
-   * main.c manages their lifecycle (ipc_context_free, close).
-   * We only clean up our own resources. */
-  d->ipc_ctx = NULL;
-  d->socket_fd = -1;
 
   pthread_mutex_destroy(&d->legacy_mutex);
   g_free(d);
@@ -127,6 +175,7 @@ dt_webview_transport_t *dt_transport_ipc_new(int socket_fd)
 
   dt_ipc_transport_data_t *d = g_new0(dt_ipc_transport_data_t, 1);
   d->socket_fd = socket_fd;
+  d->server_pid = -1;
   pthread_mutex_init(&d->legacy_mutex, NULL);
   d->ipc_ctx = NULL; /* caller sets up via dt_transport_ipc_set_context() */
 
@@ -135,12 +184,13 @@ dt_webview_transport_t *dt_transport_ipc_new(int socket_fd)
   t->call = _ipc_call;
   t->get_preview_frame = _ipc_get_preview_frame;
   t->set_event_callback = _ipc_set_event_callback;
+  t->shutdown = _ipc_shutdown;
   t->destroy = _ipc_destroy;
   return t;
 }
 
 
-/* ── Accessor for wiring up the event-aware IPC context ─────────── */
+/* ── Accessors ──────────────────────────────────────────────────── */
 
 void dt_transport_ipc_set_context(dt_webview_transport_t *t,
                                   dt_ipc_context_t *ipc_ctx)
@@ -155,6 +205,12 @@ dt_ipc_context_t *dt_transport_ipc_get_context(dt_webview_transport_t *t)
   return d->ipc_ctx;
 }
 
+void dt_transport_ipc_set_server_pid(dt_webview_transport_t *t, pid_t pid)
+{
+  dt_ipc_transport_data_t *d = t->data;
+  d->server_pid = pid;
+}
+
 int dt_transport_ipc_get_fd(dt_webview_transport_t *t)
 {
   dt_ipc_transport_data_t *d = t->data;
@@ -166,6 +222,3 @@ pthread_mutex_t *dt_transport_ipc_get_mutex(dt_webview_transport_t *t)
   dt_ipc_transport_data_t *d = t->data;
   return &d->legacy_mutex;
 }
-
-
-/* dt_transport_direct_new() is implemented in direct_transport.c */

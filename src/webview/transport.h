@@ -149,8 +149,18 @@ struct dt_webview_transport_t
 
   /* ── Lifecycle ─────────────────────────────────────────────
    *
-   * destroy: release all resources, close connections, free self.
-   * After destroy(), the pointer is invalid.
+   * shutdown: graceful shutdown of transport-specific resources.
+   * Called once before destroy(). Handles mode-specific cleanup:
+   *   - IPC: sends system.shutdown RPC, frees IPC context, closes
+   *          socket, waits for server process to exit
+   *   - Direct: calls dt_cleanup() to save config and free resources
+   *
+   * After shutdown(), the transport is no longer usable for calls.
+   */
+  void (*shutdown)(dt_webview_transport_t *self);
+
+  /* destroy: release the transport struct itself.
+   * Must be called after shutdown().
    */
   void (*destroy)(dt_webview_transport_t *self);
 };
@@ -167,6 +177,9 @@ struct dt_webview_transport_t
 #define dt_transport_set_event_callback(t, cb, ud) \
   ((t)->set_event_callback((t), (cb), (ud)))
 
+#define dt_transport_shutdown(t) \
+  ((t)->shutdown((t)))
+
 #define dt_transport_destroy(t) \
   ((t)->destroy((t)))
 
@@ -174,7 +187,7 @@ struct dt_webview_transport_t
 /* ── Factory functions (implemented in transport_ipc.c / transport_direct.c) ── */
 
 /* Create an IPC transport connected to a darktable-server via Unix socket.
- * socket_fd: connected socket file descriptor (borrowed, caller retains ownership)
+ * socket_fd: connected socket file descriptor (owned — transport closes on shutdown)
  * Returns NULL on failure. */
 dt_webview_transport_t *dt_transport_ipc_new(int socket_fd);
 
@@ -184,17 +197,20 @@ dt_webview_transport_t *dt_transport_ipc_new(int socket_fd);
 dt_webview_transport_t *dt_transport_direct_new(void);
 
 
-/* ── IPC transport accessors (for migration; allow bindings.c to
- *    access internals during the transition period) ──────────────── */
+/* ── IPC transport accessors ─────────────────────────────────────── */
 
 #include <pthread.h>
+#include <sys/types.h>
 
 typedef struct dt_ipc_context_t dt_ipc_context_t;
 
-/* Set/get the event-aware IPC context on an IPC transport. */
+/* Set/get the event-aware IPC context (owned — transport frees on shutdown). */
 void dt_transport_ipc_set_context(dt_webview_transport_t *t,
                                   dt_ipc_context_t *ipc_ctx);
 dt_ipc_context_t *dt_transport_ipc_get_context(dt_webview_transport_t *t);
+
+/* Set the server process PID (owned — transport waits on shutdown). */
+void dt_transport_ipc_set_server_pid(dt_webview_transport_t *t, pid_t pid);
 
 /* Get the raw socket fd (for SHM setup, legacy fallback, etc.) */
 int dt_transport_ipc_get_fd(dt_webview_transport_t *t);

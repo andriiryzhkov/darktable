@@ -2709,12 +2709,22 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   {
     ctx->transport = dt_transport_ipc_new(ctx->socket_fd);
 
-    /* Create event-aware IPC context with reader thread */
-    ctx->ipc_ctx = dt_ipc_context_new(ctx->socket_fd, _on_server_event, ctx);
-    if(!ctx->ipc_ctx)
+    /* Transfer server process ownership to transport (for unified shutdown) */
+    if(ctx->server_pid > 0)
+    {
+      dt_transport_ipc_set_server_pid(ctx->transport, ctx->server_pid);
+      ctx->server_pid = -1;  /* transport owns it now */
+    }
+
+    /* Create event-aware IPC context with reader thread (owned by transport) */
+    dt_ipc_context_t *ipc_ctx = dt_ipc_context_new(ctx->socket_fd, _on_server_event, ctx);
+    if(!ipc_ctx)
       fprintf(stderr, "[webview] WARNING: failed to create IPC context, falling back to legacy IPC\n");
     else
-      dt_transport_ipc_set_context(ctx->transport, ctx->ipc_ctx);
+      dt_transport_ipc_set_context(ctx->transport, ipc_ctx);
+
+    /* Socket is now owned by the transport */
+    ctx->socket_fd = -1;
   }
   else
   {
