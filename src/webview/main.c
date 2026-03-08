@@ -32,6 +32,11 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
 
 #ifdef HAVE_DIRECT_TRANSPORT
 #include "common/darktable.h"
@@ -321,6 +326,34 @@ int main(int argc, char *argv[])
     {
       usage(argv[0]);
       return 0;
+    }
+  }
+
+  // Check system RAM — warn if below recommended minimum
+  {
+    int64_t ram_bytes = -1;
+#ifdef __APPLE__
+    size_t len = sizeof(ram_bytes);
+    sysctlbyname("hw.memsize", &ram_bytes, &len, NULL, 0);
+#elif defined(_WIN32)
+    MEMORYSTATUSEX mem = { .dwLength = sizeof(mem) };
+    if(GlobalMemoryStatusEx(&mem))
+      ram_bytes = (int64_t)mem.ullTotalPhys;
+#elif defined(_SC_PHYS_PAGES) && defined(_SC_PAGESIZE)
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_size = sysconf(_SC_PAGESIZE);
+    if(pages > 0 && page_size > 0)
+      ram_bytes = (int64_t)pages * page_size;
+#endif
+    if(ram_bytes > 0)
+    {
+      double ram_gb = ram_bytes / (1024.0 * 1024.0 * 1024.0);
+      fprintf(stderr, "[webview] system RAM: %.1f GB\n", ram_gb);
+      if(ram_gb < 8.0)
+        fprintf(stderr, "WARNING: darktable NOVA recommends at least 8 GB RAM (detected %.1f GB).\n"
+                        "  You may experience slowdowns or out-of-memory errors.\n"
+                        "  Tips: close other applications, reduce preview resolution,\n"
+                        "  or use standard darktable (GTK) which has lower requirements.\n", ram_gb);
     }
   }
 
