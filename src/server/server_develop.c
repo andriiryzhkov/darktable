@@ -307,8 +307,11 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
     {
       dt_server_session_t *old = server->sessions[i];
       fprintf(stderr, "[server] develop.open: auto-closing session %s\n", old->session_id);
-      dt_shm_destroy(&old->shm_buffers[0]);
-      dt_shm_destroy(&old->shm_buffers[1]);
+      if(!server->embedded)
+      {
+        dt_shm_destroy(&old->shm_buffers[0]);
+        dt_shm_destroy(&old->shm_buffers[1]);
+      }
       pthread_mutex_destroy(&old->pipeline_mutex);
       dt_dev_cleanup(&old->dev);
       g_free(old);
@@ -373,29 +376,32 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
   session->dev.full.dev = &session->dev;
   session->dev.full.pipe = pipe;
 
-  // Create double-buffered SHM for preview frames
-  char shm_name0[32], shm_name1[32];
-  snprintf(shm_name0, sizeof(shm_name0), "/dt-prev-%s-0", session->session_id);
-  snprintf(shm_name1, sizeof(shm_name1), "/dt-prev-%s-1", session->session_id);
-
-  if(!dt_shm_create(&session->shm_buffers[0], shm_name0, preview_width, preview_height)
-     || !dt_shm_create(&session->shm_buffers[1], shm_name1, preview_width, preview_height))
+  // Create double-buffered SHM for preview frames (IPC mode only)
+  char shm_name0[32] = {0}, shm_name1[32] = {0};
+  if(!server->embedded)
   {
-    dt_shm_destroy(&session->shm_buffers[0]);
-    dt_shm_destroy(&session->shm_buffers[1]);
-    dt_dev_cleanup(&session->dev);
-    // Remove session from slot
-    server->sessions[server->session_count - 1] = NULL;
-    server->session_count--;
-    g_free(session);
-    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL,
-                                 "Failed to create shared memory buffers");
+    snprintf(shm_name0, sizeof(shm_name0), "/dt-prev-%s-0", session->session_id);
+    snprintf(shm_name1, sizeof(shm_name1), "/dt-prev-%s-1", session->session_id);
+
+    if(!dt_shm_create(&session->shm_buffers[0], shm_name0, preview_width, preview_height)
+       || !dt_shm_create(&session->shm_buffers[1], shm_name1, preview_width, preview_height))
+    {
+      dt_shm_destroy(&session->shm_buffers[0]);
+      dt_shm_destroy(&session->shm_buffers[1]);
+      dt_dev_cleanup(&session->dev);
+      // Remove session from slot
+      server->sessions[server->session_count - 1] = NULL;
+      server->session_count--;
+      g_free(session);
+      return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL,
+                                   "Failed to create shared memory buffers");
+    }
   }
 
   session->front_buffer = 0;
 
-  fprintf(stderr, "[server] develop.open: session=%s imgid=%d preview=%dx%d\n",
-          session->session_id, imgid, preview_width, preview_height);
+  fprintf(stderr, "[server] develop.open: session=%s imgid=%d preview=%dx%d embedded=%d\n",
+          session->session_id, imgid, preview_width, preview_height, server->embedded);
 
   // Build response
   JsonBuilder *b = json_builder_new();
@@ -415,8 +421,11 @@ char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req
 
   json_builder_set_member_name(b, "shm_names");
   json_builder_begin_array(b);
-  json_builder_add_string_value(b, shm_name0);
-  json_builder_add_string_value(b, shm_name1);
+  if(!server->embedded)
+  {
+    json_builder_add_string_value(b, shm_name0);
+    json_builder_add_string_value(b, shm_name1);
+  }
   json_builder_end_array(b);
 
   json_builder_end_object(b);
@@ -446,9 +455,12 @@ char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *re
   if(session->dirty)
     dt_dev_write_history(&session->dev);
 
-  // Destroy SHM buffers
-  dt_shm_destroy(&session->shm_buffers[0]);
-  dt_shm_destroy(&session->shm_buffers[1]);
+  // Destroy SHM buffers (IPC mode only)
+  if(!server->embedded)
+  {
+    dt_shm_destroy(&session->shm_buffers[0]);
+    dt_shm_destroy(&session->shm_buffers[1]);
+  }
 
   // Cleanup pipeline mutex
   pthread_mutex_destroy(&session->pipeline_mutex);
@@ -1371,7 +1383,7 @@ static void *_preview_pipeline_worker(void *arg)
     }
     pthread_mutex_unlock(&session->pipeline_mutex);
 
-    // Pipeline is current — write to SHM and send event
+    // Pipeline is current — write to SHM (IPC) or just signal (embedded) and send event
     dt_pthread_mutex_lock(&pipe->backbuf_mutex);
 
     if(!pipe->backbuf || pipe->backbuf_width <= 0 || pipe->backbuf_height <= 0)
@@ -1384,23 +1396,31 @@ static void *_preview_pipeline_worker(void *arg)
     const int rendered_width = pipe->backbuf_width;
     const int rendered_height = pipe->backbuf_height;
 
-    const int back = 1 - session->front_buffer;
-    dt_shm_buffer_t *shm = &session->shm_buffers[back];
-
     session->frame_sequence++;
 
-    dt_shm_write_header(shm, rendered_width, rendered_height,
-                         DT_SHM_FORMAT_BGRA8, session->frame_sequence);
+    if(!server->embedded)
+    {
+      // IPC mode: copy backbuf to SHM double-buffer
+      const int back = 1 - session->front_buffer;
+      dt_shm_buffer_t *shm = &session->shm_buffers[back];
 
-    uint8_t *dst = dt_shm_pixel_data(shm);
-    const size_t copy_size = (size_t)rendered_width * rendered_height * 4;
-    memcpy(dst, pipe->backbuf, copy_size);
+      dt_shm_write_header(shm, rendered_width, rendered_height,
+                           DT_SHM_FORMAT_BGRA8, session->frame_sequence);
+
+      uint8_t *dst = dt_shm_pixel_data(shm);
+      const size_t copy_size = (size_t)rendered_width * rendered_height * 4;
+      memcpy(dst, pipe->backbuf, copy_size);
+
+      __atomic_store_n(&shm->mapped->ready, 1, __ATOMIC_RELEASE);
+      session->front_buffer = back;
+    }
+    // Embedded mode: backbuf stays in pipe, frame server reads it directly
+
+    session->preview_width = rendered_width;
+    session->preview_height = rendered_height;
+    session->dirty = FALSE;
 
     dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
-
-    __atomic_store_n(&shm->mapped->ready, 1, __ATOMIC_RELEASE);
-    session->front_buffer = back;
-    session->dirty = FALSE;
 
     // Queue preview_ready event
     {

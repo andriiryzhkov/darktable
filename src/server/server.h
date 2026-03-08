@@ -65,6 +65,11 @@ typedef struct dt_server_session_t
   pthread_mutex_t pipeline_mutex;
 } dt_server_session_t;
 
+// Event callback for embedded mode (called from worker threads)
+typedef void (*dt_server_event_cb_t)(const char *event_name,
+                                     const char *json_data,
+                                     void *user_data);
+
 struct dt_server_t
 {
   // Socket
@@ -75,6 +80,7 @@ struct dt_server_t
   // Event loop
   gboolean running;
   GMainLoop *main_loop;
+  gboolean embedded;  // TRUE when running in-process (no socket)
 
   // Develop sessions
   dt_server_session_t *sessions[DT_SERVER_MAX_SESSIONS];
@@ -83,6 +89,10 @@ struct dt_server_t
 
   // Event queue (signal callbacks push here, event loop drains to socket)
   GAsyncQueue *event_queue;
+
+  // Event callback for embedded mode (replaces socket-based event delivery)
+  dt_server_event_cb_t event_cb;
+  void *event_cb_data;
 };
 
 // Lifecycle
@@ -95,8 +105,12 @@ void dt_server_cleanup(dt_server_t *server);
 // The returned string must be g_free'd by the caller.
 char *dt_server_dispatch(dt_server_t *server, const dt_server_request_t *req);
 
-// Send an event to the connected client (thread-safe via event queue)
+// Send an event to the connected client (thread-safe via event queue).
+// In embedded mode, calls the event callback directly if set.
 void dt_server_queue_event(dt_server_t *server, const char *event_name, JsonNode *data);
+
+// Set event callback for embedded mode (replaces socket-based event delivery)
+void dt_server_set_event_callback(dt_server_t *server, dt_server_event_cb_t cb, void *user_data);
 
 // Find a develop session by ID
 dt_server_session_t *dt_server_find_session(dt_server_t *server, const char *session_id);

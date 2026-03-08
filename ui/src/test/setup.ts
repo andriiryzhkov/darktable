@@ -45,6 +45,7 @@ window.developGetIntrospection = () => Promise.resolve({ op: "", fields: [] });
 
 // Preview frame
 window.getPreviewFrame = () => Promise.resolve({ data: "", width: 800, height: 600, front_buffer: 0, sequence: 1 });
+window.getFramePort = () => Promise.resolve(0);
 
 // File system
 window.pickFolder = () => Promise.resolve(null);

@@ -271,7 +271,14 @@ dt_server_t *dt_server_init(const char *socket_path)
   // Initialize event bridge (connects to darktable signals)
   dt_server_events_init(server);
 
-  if(socket_path)
+  if(!socket_path)
+  {
+    // Embedded mode: no socket, dispatch calls directly
+    server->embedded = TRUE;
+    fprintf(stderr, "[server] embedded server initialized\n");
+    return server;
+  }
+
   {
     // Socket mode: bind and listen
     g_strlcpy(server->socket_path, socket_path, sizeof(server->socket_path));
@@ -315,11 +322,6 @@ dt_server_t *dt_server_init(const char *socket_path)
     }
 
     fprintf(stderr, "[server] listening on %s\n", socket_path);
-  }
-  else
-  {
-    // Embedded mode: no socket, dispatch calls directly
-    fprintf(stderr, "[server] embedded server initialized\n");
   }
 
   return server;
@@ -467,8 +469,36 @@ void dt_server_cleanup(dt_server_t *server)
 
 void dt_server_queue_event(dt_server_t *server, const char *event_name, JsonNode *data)
 {
+  if(server->embedded && server->event_cb)
+  {
+    // Embedded mode: serialize just the data node (not the full envelope).
+    // The callback expects (event_name, data_json) matching what the IPC
+    // reader thread extracts from the envelope for socket mode.
+    char *data_json;
+    if(data)
+    {
+      JsonGenerator *gen = json_generator_new();
+      json_generator_set_root(gen, data);
+      data_json = json_generator_to_data(gen, NULL);
+      g_object_unref(gen);
+    }
+    else
+    {
+      data_json = g_strdup("null");
+    }
+    server->event_cb(event_name, data_json, server->event_cb_data);
+    g_free(data_json);
+    return;
+  }
+
   char *json = dt_server_make_event(event_name, data);
   g_async_queue_push(server->event_queue, json);
+}
+
+void dt_server_set_event_callback(dt_server_t *server, dt_server_event_cb_t cb, void *user_data)
+{
+  server->event_cb = cb;
+  server->event_cb_data = user_data;
 }
 
 dt_server_session_t *dt_server_find_session(dt_server_t *server, const char *session_id)

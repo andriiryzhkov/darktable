@@ -43,6 +43,8 @@ typedef struct dt_direct_transport_data_t
   dt_server_t *server;       /* embedded server (no socket) — owned */
   pthread_mutex_t mutex;     /* serializes dispatch calls */
   int next_id;               /* monotonic request ID counter */
+  dt_transport_event_cb event_cb;   /* forwarded from set_event_callback */
+  void *event_cb_data;
 } dt_direct_transport_data_t;
 
 
@@ -157,7 +159,7 @@ static char *_direct_call(dt_webview_transport_t *self,
 }
 
 
-/* ── get_preview_frame: direct SHM access ─────────────────────── */
+/* ── get_preview_frame: direct backbuffer access ─────────────── */
 
 static gboolean _direct_get_preview_frame(dt_webview_transport_t *self,
                                           const char *session_id,
@@ -167,33 +169,59 @@ static gboolean _direct_get_preview_frame(dt_webview_transport_t *self,
   dt_server_session_t *session = dt_server_find_session(d->server, session_id);
   if(!session) return FALSE;
 
-  int front = session->front_buffer;
-  dt_shm_buffer_t *buf = &session->shm_buffers[front];
-  if(!buf->mapped || !buf->mapped->ready) return FALSE;
+  dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+  if(!pipe) return FALSE;
 
-  dt_shm_header_t *hdr = buf->mapped;
-  out_frame->pixels = (const uint8_t *)buf->mapped + DT_SHM_HEADER_SIZE;
-  out_frame->width = hdr->width;
-  out_frame->height = hdr->height;
-  out_frame->sequence = hdr->sequence;
-  out_frame->owned = FALSE; /* points directly into SHM — zero-copy */
+  dt_pthread_mutex_lock(&pipe->backbuf_mutex);
+
+  if(!pipe->backbuf || pipe->backbuf_width <= 0 || pipe->backbuf_height <= 0)
+  {
+    dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
+    return FALSE;
+  }
+
+  /* Copy the backbuffer so the caller doesn't need to hold the mutex.
+   * The copy is owned by the caller and must be g_free'd. */
+  const int w = pipe->backbuf_width;
+  const int h = pipe->backbuf_height;
+  const size_t size = (size_t)w * h * 4;
+  uint8_t *copy = g_malloc(size);
+  memcpy(copy, pipe->backbuf, size);
+
+  dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
+
+  out_frame->pixels = copy;
+  out_frame->width = w;
+  out_frame->height = h;
+  out_frame->sequence = session->frame_sequence;
+  out_frame->owned = TRUE;
 
   return TRUE;
 }
 
 
-/* ── set_event_callback ───────────────────────────────────────── */
+/* ── Event bridge: server event callback → transport event callback ── */
+
+static void _server_event_bridge(const char *event_name,
+                                 const char *json_data,
+                                 void *user_data)
+{
+  dt_direct_transport_data_t *d = user_data;
+  if(d->event_cb)
+    d->event_cb(event_name, json_data, d->event_cb_data);
+}
 
 static void _direct_set_event_callback(dt_webview_transport_t *self,
                                        dt_transport_event_cb callback,
                                        void *user_data)
 {
-  (void)self;
-  (void)callback;
-  (void)user_data;
-  /* Events are delivered via the embedded server's event_queue.
-   * The webview polls the queue in bindings.c event handling.
-   * A future improvement can wire this callback to signal handlers. */
+  dt_direct_transport_data_t *d = self->data;
+  d->event_cb = callback;
+  d->event_cb_data = user_data;
+
+  /* Wire the server's event callback to our bridge function,
+   * which forwards to the transport's event callback */
+  dt_server_set_event_callback(d->server, _server_event_bridge, d);
 }
 
 

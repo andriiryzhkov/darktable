@@ -24,9 +24,13 @@ import {
   developMoveInstance,
   developRenameInstance,
   getPreviewFrame,
+  getFramePort,
 } from "../api/commands";
 import { onServerEvent } from "../api/events";
 import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
+
+// Cached frame server port (resolved once, never changes)
+let _cachedFramePort: number | undefined;
 
 export const ZOOM_LEVELS = ["small", "fit", "fill", "50", "100", "200", "400", "800", "1600"] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
@@ -271,7 +275,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   fetchFrame: async () => {
     const { sessionId, frontBuffer, sequence } = get();
     if (!sessionId) return;
-    const port = (window as unknown as Record<string, number>).__dt_frame_port;
+    if (_cachedFramePort === undefined) _cachedFramePort = await getFramePort();
+    const port = _cachedFramePort;
     if (port) {
       try {
         // Fetch raw BGRA pixels over HTTP — no JPEG encoding, no base64

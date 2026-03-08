@@ -452,13 +452,8 @@ static void *_develop_open_worker(void *arg)
     gint64 pw = json_object_get_int_member(robj, "preview_width");
     gint64 ph = json_object_get_int_member(robj, "preview_height");
 
-    if(session_id && shm_names && json_array_get_length(shm_names) >= 2)
+    if(session_id)
     {
-      const char *name0 = json_array_get_string_element(shm_names, 0);
-      const char *name1 = json_array_get_string_element(shm_names, 1);
-
-      size_t shm_size = DT_SHM_HEADER_SIZE + (size_t)pw * (size_t)ph * 4;
-
       pthread_mutex_lock(&ctx->session_mutex);
       // Find empty slot
       int slot = -1;
@@ -473,34 +468,45 @@ static void *_develop_open_worker(void *arg)
       if(slot >= 0)
       {
         dt_webview_shm_t *s = &ctx->sessions[slot];
+        memset(s, 0, sizeof(*s));
         g_strlcpy(s->session_id, session_id, sizeof(s->session_id));
-        g_strlcpy(s->shm_names[0], name0, sizeof(s->shm_names[0]));
-        g_strlcpy(s->shm_names[1], name1, sizeof(s->shm_names[1]));
         s->width = (uint32_t)pw;
         s->height = (uint32_t)ph;
-        s->shm_size[0] = shm_size;
-        s->shm_size[1] = shm_size;
 
-        // Open SHM read-only
-        for(int b = 0; b < 2; b++)
+        // Map SHM buffers if available (IPC mode)
+        if(shm_names && json_array_get_length(shm_names) >= 2)
         {
-          int fd = shm_open(s->shm_names[b], O_RDONLY, 0);
-          if(fd >= 0)
+          const char *name0 = json_array_get_string_element(shm_names, 0);
+          const char *name1 = json_array_get_string_element(shm_names, 1);
+          size_t shm_size = DT_SHM_HEADER_SIZE + (size_t)pw * (size_t)ph * 4;
+
+          g_strlcpy(s->shm_names[0], name0, sizeof(s->shm_names[0]));
+          g_strlcpy(s->shm_names[1], name1, sizeof(s->shm_names[1]));
+          s->shm_size[0] = shm_size;
+          s->shm_size[1] = shm_size;
+
+          for(int b = 0; b < 2; b++)
           {
-            s->shm_ptr[b] = mmap(NULL, shm_size, PROT_READ, MAP_SHARED, fd, 0);
-            close(fd);
-            if(s->shm_ptr[b] == MAP_FAILED)
+            int fd = shm_open(s->shm_names[b], O_RDONLY, 0);
+            if(fd >= 0)
             {
-              fprintf(stderr, "[webview] mmap(%s) failed: %s\n", s->shm_names[b], strerror(errno));
+              s->shm_ptr[b] = mmap(NULL, shm_size, PROT_READ, MAP_SHARED, fd, 0);
+              close(fd);
+              if(s->shm_ptr[b] == MAP_FAILED)
+              {
+                fprintf(stderr, "[webview] mmap(%s) failed: %s\n", s->shm_names[b], strerror(errno));
+                s->shm_ptr[b] = NULL;
+              }
+            }
+            else
+            {
+              fprintf(stderr, "[webview] shm_open(%s) failed: %s\n", s->shm_names[b], strerror(errno));
               s->shm_ptr[b] = NULL;
             }
           }
-          else
-          {
-            fprintf(stderr, "[webview] shm_open(%s) failed: %s\n", s->shm_names[b], strerror(errno));
-            s->shm_ptr[b] = NULL;
-          }
         }
+        // else: direct mode — no SHM, frame server uses transport->get_preview_frame()
+
         s->active = 1;
       }
       pthread_mutex_unlock(&ctx->session_mutex);
@@ -1381,6 +1387,49 @@ static void _handle_frame_request(int client_fd, dt_webview_ctx_t *ctx,
 
   int buf_idx = (buffer_idx == 0) ? 0 : 1;
   void *ptr = session->shm_ptr[buf_idx];
+
+  /* Direct mode: no SHM — use transport->get_preview_frame() */
+  if(!ptr && ctx->transport)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+
+    dt_transport_frame_t frame = {0};
+    if(!dt_transport_get_preview_frame(ctx->transport, session_id, &frame))
+    {
+      _send_http_response(client_fd, 503, "Not Ready", "text/plain", "frame not ready", 15);
+      return;
+    }
+
+    uint32_t w = frame.width;
+    uint32_t h = frame.height;
+    size_t pixel_size = (size_t)w * h * 4;
+
+    /* BGRA → RGBA */
+    uint8_t *rgba = g_malloc(pixel_size);
+    for(size_t i = 0; i < pixel_size; i += 4)
+    {
+      rgba[i + 0] = frame.pixels[i + 2];
+      rgba[i + 1] = frame.pixels[i + 1];
+      rgba[i + 2] = frame.pixels[i + 0];
+      rgba[i + 3] = frame.pixels[i + 3];
+    }
+    if(frame.owned) g_free((void *)frame.pixels);
+
+    /* JPEG encode */
+    size_t jpeg_buf_size = pixel_size + 1024;
+    uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
+    const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+    g_free(rgba);
+
+    if(jpeg_size > 0)
+      _send_http_response(client_fd, 200, "OK", "image/jpeg", jpeg_buf, jpeg_size);
+    else
+      _send_http_response(client_fd, 500, "Error", "text/plain", "JPEG encode failed", 18);
+
+    g_free(jpeg_buf);
+    return;
+  }
+
   if(!ptr)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
@@ -1460,6 +1509,56 @@ static void _handle_raw_request(int client_fd, dt_webview_ctx_t *ctx,
 
   int buf_idx = (buffer_idx == 0) ? 0 : 1;
   void *ptr = session->shm_ptr[buf_idx];
+
+  /* Direct mode: no SHM — use transport->get_preview_frame() */
+  if(!ptr && ctx->transport)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+
+    dt_transport_frame_t frame = {0};
+    if(!dt_transport_get_preview_frame(ctx->transport, session_id, &frame))
+    {
+      _send_http_response(client_fd, 503, "Not Ready", "text/plain", "frame not ready", 15);
+      return;
+    }
+
+    uint32_t w = frame.width;
+    uint32_t h = frame.height;
+    size_t pixel_size = (size_t)w * h * 4;
+
+    char hdr[512];
+    int hlen = snprintf(hdr, sizeof(hdr),
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: application/octet-stream\r\n"
+      "Content-Length: %zu\r\n"
+      "X-Width: %u\r\n"
+      "X-Height: %u\r\n"
+      "Cache-Control: no-store\r\n"
+      "Access-Control-Allow-Origin: *\r\n"
+      "Access-Control-Expose-Headers: X-Width, X-Height\r\n"
+      "Connection: close\r\n"
+      "\r\n",
+      pixel_size, w, h);
+    if(write(client_fd, hdr, hlen) < 0)
+    {
+      if(frame.owned) g_free((void *)frame.pixels);
+      return;
+    }
+
+    size_t written = 0;
+    while(written < pixel_size)
+    {
+      ssize_t n = write(client_fd, frame.pixels + written, pixel_size - written);
+      if(n <= 0) break;
+      written += n;
+    }
+    if(frame.owned) g_free((void *)frame.pixels);
+
+    fprintf(stderr, "[perf] raw_serve(direct): %.1f ms (%ux%u, %zu bytes)\n",
+            (g_get_monotonic_time() - t0) / 1000.0, w, h, pixel_size);
+    return;
+  }
+
   if(!ptr)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
@@ -1686,6 +1785,59 @@ static void *_get_preview_frame_worker(void *arg)
   fprintf(stderr, "[webview] getPreviewFrame: session=%s buf=%d ptr=%p\n",
           session_id, buf_idx, ptr);
 
+  /* Direct mode: no SHM — use transport->get_preview_frame() */
+  if(!ptr && ctx->transport)
+  {
+    pthread_mutex_unlock(&ctx->session_mutex);
+    fprintf(stderr, "[webview] getPreviewFrame: using transport fallback for session %s\n", session_id);
+
+    dt_transport_frame_t frame = {0};
+    if(!dt_transport_get_preview_frame(ctx->transport, session_id, &frame))
+    {
+      _return_error(ctx, ar->id, "frame not ready");
+      g_free(session_id);
+      _async_req_free(ar);
+      return NULL;
+    }
+
+    uint32_t w = frame.width;
+    uint32_t h = frame.height;
+    size_t pixel_size = (size_t)w * h * 4;
+
+    /* BGRA → RGBA */
+    uint8_t *rgba = g_malloc(pixel_size);
+    for(size_t i = 0; i < pixel_size; i += 4)
+    {
+      rgba[i + 0] = frame.pixels[i + 2];
+      rgba[i + 1] = frame.pixels[i + 1];
+      rgba[i + 2] = frame.pixels[i + 0];
+      rgba[i + 3] = frame.pixels[i + 3];
+    }
+    if(frame.owned) g_free((void *)frame.pixels);
+
+    size_t jpeg_buf_size = pixel_size + 1024;
+    uint8_t *jpeg_buf = g_malloc(jpeg_buf_size);
+    const int jpeg_size = _jpeg_compress_rgba(rgba, jpeg_buf, w, h, jpeg_buf_size, 92);
+    g_free(rgba);
+
+    if(jpeg_size > 0)
+    {
+      gchar *b64 = g_base64_encode(jpeg_buf, jpeg_size);
+      char *result = g_strdup_printf("{\"width\":%u,\"height\":%u,\"format\":\"jpeg\",\"data\":\"%s\"}", w, h, b64);
+      g_free(b64);
+      _return_ok(ctx, ar->id, result);
+      g_free(result);
+    }
+    else
+    {
+      _return_error(ctx, ar->id, "JPEG encode failed");
+    }
+    g_free(jpeg_buf);
+    g_free(session_id);
+    _async_req_free(ar);
+    return NULL;
+  }
+
   if(!ptr)
   {
     pthread_mutex_unlock(&ctx->session_mutex);
@@ -1771,6 +1923,16 @@ static void *_get_preview_frame_worker(void *arg)
 static void on_get_preview_frame(const char *id, const char *req, void *arg)
 {
   _pool_dispatch(_get_preview_frame_worker, _async_req_new(arg, id, req));
+}
+
+static void on_get_frame_port(const char *id, const char *req, void *arg)
+{
+  (void)req;
+  dt_webview_ctx_t *ctx = arg;
+  int port = ctx->frame_server ? ctx->frame_server->port : 0;
+  char result[32];
+  snprintf(result, sizeof(result), "%d", port);
+  _return_ok(ctx, id, result);
 }
 
 /* ── Filesystem browsing (cross-platform via GLib) ───────────── */
@@ -2525,15 +2687,15 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
     else
       dt_transport_ipc_set_context(ctx->transport, ctx->ipc_ctx);
   }
-
-  /* Start local HTTP server for zero-copy JPEG frame delivery */
-  ctx->frame_server = _frame_server_start(ctx);
-  if(ctx->frame_server)
+  else
   {
-    char js[128];
-    snprintf(js, sizeof(js), "window.__dt_frame_port = %d;", ctx->frame_server->port);
-    webview_eval(ctx->webview, js);
+    /* Direct mode: register event callback on the transport so server events
+     * (like preview_ready) reach the webview's JS layer */
+    dt_transport_set_event_callback(ctx->transport, _on_server_event, ctx);
   }
+
+  /* Start local HTTP server for zero-copy frame delivery */
+  ctx->frame_server = _frame_server_start(ctx);
 
   webview_bind(ctx->webview, "ping", on_ping, ctx);
   webview_bind(ctx->webview, "catalogQuery", on_catalog_query, ctx);
@@ -2563,6 +2725,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developRenameInstance", on_develop_rename_instance, ctx);
   webview_bind(ctx->webview, "developGetIntrospection", on_develop_get_introspection, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
+  webview_bind(ctx->webview, "getFramePort", on_get_frame_port, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);
   webview_bind(ctx->webview, "listFolders", on_list_folders, ctx);
   webview_bind(ctx->webview, "listFiles", on_list_files, ctx);

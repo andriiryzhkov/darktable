@@ -49,6 +49,7 @@ declare global {
     developRenameInstance: (sessionId: string, op: string, instance: number, name: string) => Promise<unknown>;
     developGetIntrospection: (sessionId: string, op: string) => Promise<IntrospectionResult>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
+    getFramePort: () => Promise<number>;
     pickFolder: () => Promise<string | null>;
     listFolders: (path: string) => Promise<FolderEntry[]>;
     listFiles: (path: string, recursive: boolean, ignoreNonRaw: boolean) => Promise<FileEntry[]>;
@@ -155,6 +156,8 @@ export const developGetIntrospection = (sessionId: string, op: string) =>
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);
+
+export const getFramePort = () => window.getFramePort();
 
 export const pickFolder = () => window.pickFolder();
 
