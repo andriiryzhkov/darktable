@@ -76,6 +76,7 @@ export default function NavigationModule() {
       <div
         ref={containerRef}
         className="nav-module-preview"
+        style={showRect ? { cursor: "grab" } : undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
       >
