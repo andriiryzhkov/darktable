@@ -26,7 +26,7 @@ import {
   getPreviewFrame,
   getFramePort,
 } from "../api/commands";
-import { onServerEvent } from "../api/events";
+import { on } from "../events/eventBus";
 import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
 
 // Cached frame server port (resolved once, never changes)
@@ -621,17 +621,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
 // When the async pipeline finishes, the server writes SHM and pushes this event.
 // We update the store's buffer info and fetch the frame.
 
-interface PreviewReadyEvent {
-  session_id: string;
-  front_buffer: number;
-  width: number;
-  height: number;
-  sequence: number;
-}
-
-onServerEvent("develop.preview_ready", (raw: unknown) => {
+on("develop.preview_ready", (data) => {
   const tEvent = performance.now();
-  const data = raw as PreviewReadyEvent;
   const state = useDevelopStore.getState();
 
   // Ignore events for other sessions
