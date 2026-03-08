@@ -263,6 +263,62 @@ static dt_webview_transport_t *_loopback_transport_new(void)
   return t;
 }
 
+/* ── Frame delivery simulation ─────────────────────────────────── */
+
+/* Simulates frame delivery: allocate + memset a frame buffer (like
+ * the pipeline would produce) and memcpy it (like the transport would
+ * deliver). Measures the copy cost without actual pipeline processing. */
+
+typedef struct frame_bench_result_t
+{
+  int width;
+  int height;
+  double alloc_copy_us;    /* mean time: alloc + memcpy + free */
+  double copy_only_us;     /* mean time: memcpy only */
+  double fps;              /* estimated frames/sec from copy-only path */
+} frame_bench_result_t;
+
+static frame_bench_result_t _run_frame_benchmark(int width, int height, int iterations)
+{
+  const size_t frame_size = (size_t)width * height * 4; /* BGRA */
+  frame_bench_result_t r = { .width = width, .height = height };
+
+  /* Source buffer simulating pipeline backbuf */
+  uint8_t *src = g_malloc(frame_size);
+  memset(src, 0x42, frame_size);
+
+  /* Pre-allocated destination for copy-only test */
+  uint8_t *dst_prealloc = g_malloc(frame_size);
+
+  double sum_full = 0, sum_copy = 0;
+
+  for(int i = 0; i < iterations; i++)
+  {
+    /* Full path: alloc + copy + free (like direct transport get_preview_frame) */
+    double t0 = _now_ns();
+    uint8_t *dst = g_malloc(frame_size);
+    memcpy(dst, src, frame_size);
+    g_free(dst);
+    double t1 = _now_ns();
+    sum_full += (t1 - t0);
+
+    /* Copy-only path (like in-place update) */
+    t0 = _now_ns();
+    memcpy(dst_prealloc, src, frame_size);
+    t1 = _now_ns();
+    sum_copy += (t1 - t0);
+  }
+
+  r.alloc_copy_us = sum_full / iterations / 1e3;
+  r.copy_only_us = sum_copy / iterations / 1e3;
+  r.fps = 1e6 / r.alloc_copy_us; /* based on full path */
+
+  g_free(src);
+  g_free(dst_prealloc);
+  return r;
+}
+
+
 /* ── Run benchmark ────────────────────────────────────────────── */
 
 static bench_result_t _run_benchmark(const char *name,
@@ -463,23 +519,48 @@ int main(int argc, char *argv[])
   bench_result_t loopback_result = _run_benchmark("loopback", loopback_t, iterations);
   dt_transport_destroy(loopback_t);
 
+  /* --- Frame delivery benchmark --- */
+  int frame_iters = iterations < 1000 ? iterations : 1000;
+  frame_bench_result_t frame_720  = _run_frame_benchmark(1280, 720,  frame_iters);
+  frame_bench_result_t frame_1080 = _run_frame_benchmark(1920, 1080, frame_iters);
+  frame_bench_result_t frame_4k   = _run_frame_benchmark(3840, 2160, frame_iters);
+
   /* --- Output --- */
   bench_result_t results[] = { null_result, loopback_result };
   int n_results = 2;
 
   if(json_output)
+  {
     _print_json(results, n_results, stdout);
+  }
   else
+  {
     _print_table(results, n_results);
 
-  /* Overhead ratio */
-  if(!json_output)
-  {
+    /* Overhead ratio */
     if(null_result.mean_us > 0.001)
       printf("Socket overhead: %.0fx (loopback mean / null mean)\n\n",
              loopback_result.mean_us / null_result.mean_us);
     else
       printf("Null transport: < 1 ns/call (below timer resolution)\n\n");
+
+    /* Frame delivery table */
+    printf("Frame Delivery (alloc + memcpy + free)\n");
+    printf("%-20s %10s %10s %10s %10s\n",
+           "Resolution", "Size(MB)", "Copy(us)", "Full(us)", "Max FPS");
+    printf("%-20s %10s %10s %10s %10s\n",
+           "--------------------", "----------", "----------",
+           "----------", "----------");
+    frame_bench_result_t frames[] = { frame_720, frame_1080, frame_4k };
+    const char *labels[] = { "1280x720", "1920x1080", "3840x2160" };
+    for(int i = 0; i < 3; i++)
+    {
+      double size_mb = (double)frames[i].width * frames[i].height * 4 / (1024.0 * 1024.0);
+      printf("%-20s %10.1f %10.1f %10.1f %10.0f\n",
+             labels[i], size_mb, frames[i].copy_only_us,
+             frames[i].alloc_copy_us, frames[i].fps);
+    }
+    printf("\n");
   }
 
   /* --- Baseline regression check --- */

@@ -50,6 +50,29 @@ get_rss_kb() {
   esac
 }
 
+# CPU usage measurement: sample %CPU over a duration
+# Returns average CPU% over the sampling period
+get_cpu_pct() {
+  local pid=$1
+  local duration=${2:-3}
+  local samples=0
+  local total=0
+  for i in $(seq 1 "$duration"); do
+    local cpu
+    cpu=$(ps -o %cpu= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [[ -n "$cpu" ]]; then
+      total=$(echo "$total + $cpu" | bc)
+      samples=$((samples + 1))
+    fi
+    sleep 1
+  done
+  if [[ $samples -gt 0 ]]; then
+    echo "scale=1; $total / $samples" | bc
+  else
+    echo "0"
+  fi
+}
+
 cleanup() {
   # Kill any processes we started
   [[ -n "${NOVA_PID:-}" ]] && kill "$NOVA_PID" 2>/dev/null && wait "$NOVA_PID" 2>/dev/null || true
@@ -76,10 +99,14 @@ mkdir -p "$CONFIGDIR"
 NOVA_PID=$!
 sleep "$SETTLE"
 
+CPU_DIRECT="0"
 if kill -0 "$NOVA_PID" 2>/dev/null; then
   RSS_DIRECT=$(get_rss_kb "$NOVA_PID")
   echo "  PID: $NOVA_PID"
   echo "  RSS: $((RSS_DIRECT / 1024)) MB ($RSS_DIRECT KB)"
+  echo "  Measuring idle CPU (3s)..."
+  CPU_DIRECT=$(get_cpu_pct "$NOVA_PID" 3)
+  echo "  CPU (idle): ${CPU_DIRECT}%"
   kill "$NOVA_PID" 2>/dev/null
   wait "$NOVA_PID" 2>/dev/null || true
   unset NOVA_PID
@@ -115,6 +142,8 @@ if [[ -x "$SERVER_BIN" ]]; then
     NOVA_PID=$!
     sleep "$SETTLE"
 
+    CPU_HOST="0"
+    CPU_SERVER="0"
     if kill -0 "$NOVA_PID" 2>/dev/null && kill -0 "$SERVER_PID" 2>/dev/null; then
       RSS_HOST=$(get_rss_kb "$NOVA_PID")
       RSS_SERVER=$(get_rss_kb "$SERVER_PID")
@@ -122,6 +151,11 @@ if [[ -x "$SERVER_BIN" ]]; then
       echo "  Host PID:   $NOVA_PID   RSS: $((RSS_HOST / 1024)) MB ($RSS_HOST KB)"
       echo "  Server PID: $SERVER_PID   RSS: $((RSS_SERVER / 1024)) MB ($RSS_SERVER KB)"
       echo "  IPC Total:               RSS: $((RSS_IPC_TOTAL / 1024)) MB ($RSS_IPC_TOTAL KB)"
+      echo "  Measuring idle CPU (3s)..."
+      CPU_HOST=$(get_cpu_pct "$NOVA_PID" 3)
+      CPU_SERVER=$(get_cpu_pct "$SERVER_PID" 3)
+      echo "  Host CPU (idle): ${CPU_HOST}%"
+      echo "  Server CPU (idle): ${CPU_SERVER}%"
     else
       echo "  ERROR: one or both processes exited prematurely"
     fi
@@ -143,12 +177,12 @@ echo ""
 
 # --- Summary ---
 echo "=== Summary ==="
-printf "  %-20s %8s\n" "Mode" "RSS (MB)"
-printf "  %-20s %8s\n" "--------------------" "--------"
-[[ $RSS_DIRECT -gt 0 ]] && printf "  %-20s %8d\n" "Direct" "$((RSS_DIRECT / 1024))"
-[[ $RSS_IPC_TOTAL -gt 0 ]] && printf "  %-20s %8d\n" "IPC (host)" "$((RSS_HOST / 1024))"
-[[ $RSS_IPC_TOTAL -gt 0 ]] && printf "  %-20s %8d\n" "IPC (server)" "$((RSS_SERVER / 1024))"
-[[ $RSS_IPC_TOTAL -gt 0 ]] && printf "  %-20s %8d\n" "IPC (total)" "$((RSS_IPC_TOTAL / 1024))"
+printf "  %-20s %8s %8s\n" "Mode" "RSS (MB)" "CPU (%)"
+printf "  %-20s %8s %8s\n" "--------------------" "--------" "--------"
+[[ $RSS_DIRECT -gt 0 ]] && printf "  %-20s %8d %8s\n" "Direct" "$((RSS_DIRECT / 1024))" "${CPU_DIRECT}"
+[[ $RSS_IPC_TOTAL -gt 0 ]] && printf "  %-20s %8d %8s\n" "IPC (host)" "$((RSS_HOST / 1024))" "${CPU_HOST}"
+[[ $RSS_IPC_TOTAL -gt 0 ]] && printf "  %-20s %8d %8s\n" "IPC (server)" "$((RSS_SERVER / 1024))" "${CPU_SERVER}"
+[[ $RSS_IPC_TOTAL -gt 0 ]] && printf "  %-20s %8d %8s\n" "IPC (total)" "$((RSS_IPC_TOTAL / 1024))" "$(echo "$CPU_HOST + $CPU_SERVER" | bc)"
 if [[ $RSS_DIRECT -gt 0 && $RSS_IPC_TOTAL -gt 0 ]]; then
   OVERHEAD=$(echo "scale=1; $RSS_IPC_TOTAL * 100 / $RSS_DIRECT" | bc)
   printf "  %-20s %7s%%\n" "IPC overhead" "$OVERHEAD"
@@ -160,8 +194,11 @@ if [[ $JSON_OUTPUT -eq 1 ]]; then
   cat <<ENDJSON
 {
   "direct_rss_kb": $RSS_DIRECT,
+  "direct_cpu_pct": ${CPU_DIRECT},
   "ipc_host_rss_kb": $RSS_HOST,
+  "ipc_host_cpu_pct": ${CPU_HOST:-0},
   "ipc_server_rss_kb": $RSS_SERVER,
+  "ipc_server_cpu_pct": ${CPU_SERVER:-0},
   "ipc_total_rss_kb": $RSS_IPC_TOTAL
 }
 ENDJSON
