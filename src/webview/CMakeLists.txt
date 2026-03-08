@@ -58,6 +58,7 @@ find_package(JPEG REQUIRED)
 set(WEBVIEW_HOST_SOURCES
   main.c
   ipc.c
+  ipc_transport.c
   bindings.c
   splash.c
   ../server/server_protocol.c

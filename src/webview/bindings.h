@@ -25,6 +25,7 @@
 #include <sys/types.h>
 
 #include "ipc.h"
+#include "transport.h"
 
 #define DT_WEBVIEW_MAX_SESSIONS 4
 
@@ -49,6 +50,7 @@ typedef struct dt_webview_ctx_t
   char socket_path[PATH_MAX];
   pthread_mutex_t ipc_mutex;          // legacy: used by dt_ipc_request()
   dt_ipc_context_t *ipc_ctx;         // event-aware IPC context (reader thread)
+  dt_webview_transport_t *transport;  // transport vtable (owns IPC call dispatch)
   dt_frame_server_t *frame_server;   // local HTTP server for JPEG frames
   dt_webview_shm_t sessions[DT_WEBVIEW_MAX_SESSIONS];
   pthread_mutex_t session_mutex;

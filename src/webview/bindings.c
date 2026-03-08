@@ -20,6 +20,7 @@
 #include "ipc.h"
 #include "path_validation.h"
 #include "titlebar.h"
+#include "transport.h"
 #include "server/server_protocol.h"
 
 #include <errno.h>
@@ -238,28 +239,13 @@ static void *_ipc_passthrough_worker(void *arg)
 {
   ipc_passthrough_t *pt = arg;
   char *error = NULL;
-  fprintf(stderr, "[webview] IPC request: %s(%s)\n", pt->method, pt->params_json);
 
-  // Use event-aware IPC context if available, otherwise fall back to legacy
-  char *result;
-  if(pt->ctx->ipc_ctx)
-    result = dt_ipc_request2(pt->ctx->ipc_ctx, pt->method, pt->params_json, &error);
-  else
-    result = dt_ipc_request(pt->ctx->socket_fd, &pt->ctx->ipc_mutex,
-                            pt->method, pt->params_json, &error);
+  char *result = dt_transport_call(pt->ctx->transport, pt->method, pt->params_json, &error);
 
   if(result)
-  {
-    // Log truncated result for debugging
-    fprintf(stderr, "[webview] IPC result for %s: %.200s%s\n",
-            pt->method, result, strlen(result) > 200 ? "..." : "");
     _return_ok(pt->ctx, pt->id, result);
-  }
   else
-  {
-    fprintf(stderr, "[webview] IPC error for %s: %s\n", pt->method, error ? error : "(null)");
     _return_error(pt->ctx, pt->id, error ? error : "IPC request failed");
-  }
 
   g_free(result);
   g_free(error);
@@ -440,17 +426,12 @@ static void *_develop_open_worker(void *arg)
   gint64 height = json_array_get_int_element(args, 2);
   g_object_unref(parser);
 
-  // IPC request
+  // IPC request via transport
   char *params = g_strdup_printf("{\"imgid\":%" G_GINT64_FORMAT
                                   ",\"width\":%" G_GINT64_FORMAT
                                   ",\"height\":%" G_GINT64_FORMAT "}", imgid, width, height);
   char *error = NULL;
-  char *result;
-  if(ctx->ipc_ctx)
-    result = dt_ipc_request2(ctx->ipc_ctx, "develop.open", params, &error);
-  else
-    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                            "develop.open", params, &error);
+  char *result = dt_transport_call(ctx->transport, "develop.open", params, &error);
   g_free(params);
 
   if(!result)
@@ -576,17 +557,12 @@ static void *_develop_close_worker(void *arg)
   }
   pthread_mutex_unlock(&ctx->session_mutex);
 
-  // IPC close
+  // IPC close via transport
   char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
   g_free(session_id);
 
   char *error = NULL;
-  char *result;
-  if(ctx->ipc_ctx)
-    result = dt_ipc_request2(ctx->ipc_ctx, "develop.close", params, &error);
-  else
-    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                            "develop.close", params, &error);
+  char *result = dt_transport_call(ctx->transport, "develop.close", params, &error);
   g_free(params);
 
   if(result)
@@ -2032,12 +2008,7 @@ static GHashTable *_check_imported_paths(dt_webview_ctx_t *ctx, JsonArray *files
   g_object_unref(pb);
 
   char *error = NULL;
-  char *result;
-  if(ctx->ipc_ctx)
-    result = dt_ipc_request2(ctx->ipc_ctx, "catalog.check_imported", params_json, &error);
-  else
-    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                            "catalog.check_imported", params_json, &error);
+  char *result = dt_transport_call(ctx->transport, "catalog.check_imported", params_json, &error);
   g_free(params_json);
 
   if(result)
@@ -2291,12 +2262,7 @@ static void *_import_images_worker(void *arg)
   g_object_unref(pb);
 
   char *error = NULL;
-  char *result;
-  if(ctx->ipc_ctx)
-    result = dt_ipc_request2(ctx->ipc_ctx, "catalog.import", params_json, &error);
-  else
-    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                            "catalog.import", params_json, &error);
+  char *result = dt_transport_call(ctx->transport, "catalog.import", params_json, &error);
   g_free(params_json);
 
   if(result)
@@ -2375,12 +2341,7 @@ static void *_copy_import_images_worker(void *arg)
   g_object_unref(pb);
 
   char *error = NULL;
-  char *result;
-  if(ctx->ipc_ctx)
-    result = dt_ipc_request2(ctx->ipc_ctx, "catalog.copy_import", params_json, &error);
-  else
-    result = dt_ipc_request(ctx->socket_fd, &ctx->ipc_mutex,
-                            "catalog.copy_import", params_json, &error);
+  char *result = dt_transport_call(ctx->transport, "catalog.copy_import", params_json, &error);
   g_free(params_json);
 
   if(result)
@@ -2551,10 +2512,15 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   /* Initialize NFD once */
   NFD_Init();
 
+  /* Create IPC transport wrapping the socket */
+  ctx->transport = dt_transport_ipc_new(ctx->socket_fd);
+
   /* Create event-aware IPC context with reader thread */
   ctx->ipc_ctx = dt_ipc_context_new(ctx->socket_fd, _on_server_event, ctx);
   if(!ctx->ipc_ctx)
     fprintf(stderr, "[webview] WARNING: failed to create IPC context, falling back to legacy IPC\n");
+  else
+    dt_transport_ipc_set_context(ctx->transport, ctx->ipc_ctx);
 
   /* Start local HTTP server for zero-copy JPEG frame delivery */
   ctx->frame_server = _frame_server_start(ctx);

@@ -174,7 +174,7 @@ struct dt_webview_transport_t
 /* ── Factory functions (implemented in transport_ipc.c / transport_direct.c) ── */
 
 /* Create an IPC transport connected to a darktable-server via Unix socket.
- * socket_fd: connected socket file descriptor (transport takes ownership)
+ * socket_fd: connected socket file descriptor (borrowed, caller retains ownership)
  * Returns NULL on failure. */
 dt_webview_transport_t *dt_transport_ipc_new(int socket_fd);
 
@@ -182,3 +182,22 @@ dt_webview_transport_t *dt_transport_ipc_new(int socket_fd);
  * Requires darktable to be initialized (dt_init() called).
  * Returns NULL on failure. */
 dt_webview_transport_t *dt_transport_direct_new(void);
+
+
+/* ── IPC transport accessors (for migration; allow bindings.c to
+ *    access internals during the transition period) ──────────────── */
+
+#include <pthread.h>
+
+typedef struct dt_ipc_context_t dt_ipc_context_t;
+
+/* Set/get the event-aware IPC context on an IPC transport. */
+void dt_transport_ipc_set_context(dt_webview_transport_t *t,
+                                  dt_ipc_context_t *ipc_ctx);
+dt_ipc_context_t *dt_transport_ipc_get_context(dt_webview_transport_t *t);
+
+/* Get the raw socket fd (for SHM setup, legacy fallback, etc.) */
+int dt_transport_ipc_get_fd(dt_webview_transport_t *t);
+
+/* Get the legacy mutex (for code not yet migrated to ipc_ctx) */
+pthread_mutex_t *dt_transport_ipc_get_mutex(dt_webview_transport_t *t);
