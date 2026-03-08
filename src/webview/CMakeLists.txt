@@ -15,6 +15,13 @@ add_subdirectory(
   EXCLUDE_FROM_ALL
 )
 
+# darktable globally sets -DGTK_DISABLE_DEPRECATED (compiler-warnings.cmake)
+# which hides GtkAction from gtk/gtk.h. The webkit2gtk-4.1 headers still
+# reference GtkAction in deprecated API declarations, causing a hard error.
+# Also relax -Werror/-Wfatal-errors for third-party code.
+target_compile_options(webview_core_static PRIVATE
+  -Wno-error -Wno-deprecated-declarations -UGTK_DISABLE_DEPRECATED -UGDK_DISABLE_DEPRECATED)
+
 # Build nativefiledialog-extended (for native folder picker)
 # On macOS, NFD uses Objective-C (nfd_cocoa.m) so we need OBJC enabled
 if(APPLE)
