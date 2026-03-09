@@ -27,6 +27,7 @@ import {
   getFramePort,
 } from "../api/commands";
 import { on } from "../events/eventBus";
+import { useCatalogStore } from "./catalogStore";
 import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
 
 // Cached frame server port (resolved once, never changes)
@@ -270,6 +271,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     const prevSession = get().sessionId;
     if (prevSession) {
       await developClose(prevSession).catch(() => {});
+      // Bump thumbRevision so filmstrip re-fetches thumbnails for the edited image
+      useCatalogStore.getState().bumpThumbRevision();
     }
 
     set({ loading: true, imgid, previewError: null, sessionId: null, previewSrc: null, frameData: null, zoom: "fit" as ZoomLevel, panX: 0.5, panY: 0.5 });

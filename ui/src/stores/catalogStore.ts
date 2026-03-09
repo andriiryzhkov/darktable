@@ -26,6 +26,7 @@ interface CatalogState {
   hoverImageId: number | null;
 
   fetchAll: () => Promise<void>;
+  bumpThumbRevision: () => void;
   selectImage: (id: number, e?: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => void;
   clearSelection: () => void;
   selectAll: () => void;
@@ -43,6 +44,8 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   selectedIds: new Set<number>(),
   lastSelectedId: null,
   hoverImageId: null,
+
+  bumpThumbRevision: () => set((s) => ({ thumbRevision: s.thumbRevision + 1 })),
 
   fetchAll: async () => {
     set({ loading: true });

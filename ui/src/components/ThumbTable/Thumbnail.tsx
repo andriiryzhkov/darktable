@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { requestThumbnail } from "../../api/thumbnailBatch";
 import { useCatalogStore } from "../../stores/catalogStore";
+import { useDevelopStore } from "../../stores/developStore";
 import { OverlayMode } from "./types";
 import ThumbnailOverlay, { formatExif } from "./ThumbnailOverlay";
 
@@ -58,6 +59,12 @@ export default function Thumbnail({
   const ref = useRef<HTMLDivElement>(null);
   const thumbRevision = useCatalogStore((s) => s.thumbRevision);
 
+  // Live preview: use develop store's already-fetched preview data
+  const devPreviewSrc = useDevelopStore((s) => processing ? s.previewSrc : null);
+  const devFrameData = useDevelopStore((s) => processing ? s.frameData : null);
+  const devPreviewWidth = useDevelopStore((s) => processing ? s.previewWidth : 0);
+  const devPreviewHeight = useDevelopStore((s) => processing ? s.previewHeight : 0);
+
   // Intersection observer for lazy loading
   useEffect(() => {
     const el = ref.current;
@@ -75,9 +82,9 @@ export default function Thumbnail({
     return () => observer.disconnect();
   }, []);
 
-  // Load thumbnail when visible
+  // Load thumbnail when visible (mipmap cache)
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || processing) return;
     let cancelled = false;
     requestThumbnail(imgid)
       .then((dataUrl) => {
@@ -85,7 +92,64 @@ export default function Thumbnail({
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [visible, imgid, thumbRevision]);
+  }, [visible, imgid, thumbRevision, processing]);
+
+  // Live preview: derive filmstrip thumbnail from develop store's preview data.
+  // previewSrc (JPEG URL) is used directly. frameData (raw BGRA) is rendered
+  // to a small offscreen canvas and exported as a blob URL.
+  useEffect(() => {
+    if (!processing) return;
+
+    // Path 1: JPEG preview URL from develop store — use directly
+    if (devPreviewSrc) {
+      setSrc(devPreviewSrc);
+      return;
+    }
+
+    // Path 2: raw BGRA pixels — render to offscreen canvas, export as blob
+    if (!devFrameData || !devPreviewWidth || !devPreviewHeight) return;
+    let cancelled = false;
+
+    // Scale down to thumbnail size for efficiency
+    const maxThumbW = 300;
+    const scale = Math.min(1, maxThumbW / devPreviewWidth);
+    const tw = Math.round(devPreviewWidth * scale);
+    const th = Math.round(devPreviewHeight * scale);
+
+    const canvas = new OffscreenCanvas(tw, th);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Create full-size ImageData from BGRA, then draw scaled
+    const fullCanvas = new OffscreenCanvas(devPreviewWidth, devPreviewHeight);
+    const fullCtx = fullCanvas.getContext("2d");
+    if (!fullCtx) return;
+    const imgData = fullCtx.createImageData(devPreviewWidth, devPreviewHeight);
+    const src = devFrameData;
+    const dst = imgData.data;
+    // BGRA → RGBA swap
+    for (let i = 0, len = src.length; i < len; i += 4) {
+      dst[i] = src[i + 2];     // R ← B
+      dst[i + 1] = src[i + 1]; // G
+      dst[i + 2] = src[i];     // B ← R
+      dst[i + 3] = 255;        // A
+    }
+    fullCtx.putImageData(imgData, 0, 0);
+
+    // Draw scaled into thumbnail canvas
+    ctx.drawImage(fullCanvas, 0, 0, tw, th);
+
+    canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 }).then((blob) => {
+      if (cancelled) return;
+      const url = URL.createObjectURL(blob);
+      setSrc((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return url;
+      });
+    });
+
+    return () => { cancelled = true; };
+  }, [processing, devPreviewSrc, devFrameData, devPreviewWidth, devPreviewHeight]);
 
   // Handle hover block timer (-1 = stay until mouse leaves, 0 = instant hide, >0 = seconds)
   const handleMouseEnter = useCallback(() => {

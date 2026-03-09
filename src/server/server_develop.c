@@ -21,6 +21,7 @@
 #include "common/history.h"
 #include "common/image.h"
 #include "common/image_cache.h"
+#include "common/mipmap_cache.h"
 #include "common/iop_order.h"
 #include "develop/develop.h"
 #include "develop/blend.h"
@@ -534,7 +535,16 @@ char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *re
 
   // Write in-memory history to DB before closing
   if(session->dirty)
+  {
     dt_dev_write_history(&session->dev);
+
+    // Invalidate mipmap cache so thumbnails regenerate with new edits
+    // (mirrors GTK darkroom.c leave behavior)
+    const dt_imgid_t imgid = session->imgid;
+    dt_mipmap_cache_remove(imgid);
+    dt_image_update_final_size(imgid);
+    dt_image_synch_xmp(imgid);
+  }
 
   // Destroy SHM buffers if they were allocated
   if(session->shm_allocated)
@@ -1526,7 +1536,6 @@ static void *_preview_pipeline_worker(void *arg)
 
     session->preview_width = rendered_width;
     session->preview_height = rendered_height;
-    session->dirty = FALSE;
 
     dt_pthread_mutex_unlock(&pipe->backbuf_mutex);
 
@@ -2033,6 +2042,7 @@ char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_reque
 
   // Write current params to history (the params were already applied by preview_only set_params calls)
   dt_dev_add_history_item_ext(&session->dev, target, target->enabled, TRUE);
+  session->dirty = TRUE;
 
   fprintf(stderr, "[server] develop.commit_params: session=%s op=%s history_end=%d\n",
           session_id, op, session->dev.history_end);
