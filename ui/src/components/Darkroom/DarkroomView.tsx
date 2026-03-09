@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useDevelopStore } from "../../stores/developStore";
 import { useUIStore } from "../../stores/uiStore";
+import { useDarkroomShortcuts } from "../../hooks/useDarkroomShortcuts";
 import PreviewCanvas from "./PreviewCanvas";
 import ImageInfo from "./ImageInfo";
 import TopToolbar from "../Lighttable/TopToolbar";
@@ -12,6 +13,7 @@ interface Props {
 export default function DarkroomView({ imgid }: Props) {
   const { openSession, closeSession } = useDevelopStore();
   const borderSize = useUIStore((s) => s.darkroomBorderSize);
+  useDarkroomShortcuts();
 
   useEffect(() => {
     openSession(imgid);
