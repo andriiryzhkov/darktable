@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Aperture, Pipette, Pen, Camera, SwitchCamera } from "lucide-react";
+import { Aperture, Pipette, Pen, Camera, SwitchCamera, AlertTriangle } from "lucide-react";
 import { useDevelopStore, getEnabledOps } from "../../../stores/developStore";
 import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import { usePickerStore } from "../../../stores/pickerStore";
+import { useIopModuleContext } from "../IopModuleContext";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausButton from "../../controls/BauhausButton";
+import BauhausTooltip from "../../controls/BauhausTooltip";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausSection from "../../controls/BauhausSection";
 
@@ -105,6 +107,7 @@ function buildGradient(
 }
 
 export default function TemperatureModule() {
+  const { setIndicator } = useIopModuleContext();
   const params = useDevelopStore((s) => s.genericParams["temperature"]);
   const setModuleParam = useDevelopStore((s) => s.setModuleParam);
   const fetchGenericParams = useDevelopStore((s) => s.fetchGenericParams);
@@ -229,6 +232,15 @@ export default function TemperatureModule() {
   const tempEnabled = enabledOps.has("temperature");
   const isD65 = presetIdx === 3 || presetIdx === 4;
   const wbAppliedTwice = tempEnabled && colorCalEnabled && !isD65;
+
+  useEffect(() => {
+    setIndicator(wbAppliedTwice
+      ? <BauhausTooltip content="white balance applied twice" placement="left">
+          <span className="module-trouble-icon"><AlertTriangle size={12} /></span>
+        </BauhausTooltip>
+      : null
+    );
+  }, [wbAppliedTwice, setIndicator]);
 
   const presetButtons = [
     { preset: 0, icon: <Aperture size={12} />, title: "as shot" },

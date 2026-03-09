@@ -1,7 +1,11 @@
 import { useState, type ReactNode } from "react";
-import { RotateCcw, Menu } from "lucide-react";
+import { RotateCcw, Menu, Power, CircleDot, CircleChevronRight, CircleChevronDown } from "lucide-react";
 import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
+
+type LeftButton =
+  | { kind: "power"; enabled: boolean; mandatory?: boolean; moduleName: string; onToggle: () => void }
+  | { kind: "chevron" };
 
 interface ModuleCardProps {
   title: ReactNode;
@@ -9,14 +13,9 @@ interface ModuleCardProps {
   open?: boolean;
   defaultOpen?: boolean;
   onToggle?: (open: boolean, shiftKey?: boolean) => void;
-  /** Icon to the left of the title; receives current open state */
-  leftIcon?: ReactNode | ((open: boolean) => ReactNode);
-  /** Tooltip for the left icon */
-  leftIconTooltip?: string;
-  /** Extra elements after the title (trouble warnings, etc.) */
-  afterTitle?: ReactNode;
-  /** Extra action buttons before reset/menu */
-  extraButtons?: ReactNode;
+  leftButton?: LeftButton;
+  indicators?: ReactNode;
+  rightButtons?: ReactNode;
   onReset?: () => void;
   resetTooltip?: ReactNode;
   onPresets?: () => void;
@@ -26,16 +25,49 @@ interface ModuleCardProps {
   children: ReactNode;
 }
 
+function LeftButtonIcon({ button, open }: { button: LeftButton; open: boolean }) {
+  if (button.kind === "chevron") {
+    return (
+      <BauhausTooltip content="show module" placement="bottom">
+        <span className="module-actions" onClick={(e) => e.stopPropagation()}>
+          <BauhausButton
+            icon={open ? <CircleChevronDown size={12} /> : <CircleChevronRight size={12} />}
+          />
+        </span>
+      </BauhausTooltip>
+    );
+  }
+
+  if (button.mandatory) {
+    return (
+      <BauhausTooltip content={`'${button.moduleName}' is switched on`} placement="bottom">
+        <CircleDot size={12} className="module-mandatory-icon" />
+      </BauhausTooltip>
+    );
+  }
+
+  return (
+    <BauhausTooltip content={`'${button.moduleName}' is switched ${button.enabled ? "on" : "off"}`} placement="bottom">
+      <span className="module-actions" onClick={(e) => e.stopPropagation()}>
+        <BauhausButton
+          icon={<Power size={12} />}
+          active={button.enabled}
+          onClick={button.onToggle}
+        />
+      </span>
+    </BauhausTooltip>
+  );
+}
+
 export default function ModuleCard({
   title,
   tooltip,
   open: controlledOpen,
   defaultOpen = false,
   onToggle,
-  leftIcon,
-  leftIconTooltip,
-  afterTitle,
-  extraButtons,
+  leftButton,
+  indicators,
+  rightButtons,
   onReset,
   resetTooltip = "reset",
   onPresets,
@@ -53,41 +85,26 @@ export default function ModuleCard({
     onToggle?.(next, e.shiftKey);
   };
 
-  const icon = typeof leftIcon === "function" ? leftIcon(open) : leftIcon;
-
-  const titleContent = (
-    <>
-      <span className="flex-1">{title}</span>
-      {afterTitle}
-    </>
-  );
-
   return (
     <div ref={wrapperRef} className="module-wrapper" data-open={open}>
       <div className="module-header" onClick={toggle}>
-        {leftIconTooltip ? (
-          <BauhausTooltip content={leftIconTooltip} placement="bottom">
-            <span>{icon}</span>
-          </BauhausTooltip>
-        ) : icon}
+        {leftButton && <LeftButtonIcon button={leftButton} open={open} />}
 
         {tooltip ? (
           <BauhausTooltip content={tooltip} placement="bottom-start" delay={700}>
-            <span className="module-header-main">
-              {titleContent}
-            </span>
+            <span className="module-header-main">{title}</span>
           </BauhausTooltip>
         ) : (
-          <span className="module-header-main">
-            {titleContent}
-          </span>
+          <span className="module-header-main">{title}</span>
         )}
+
+        {indicators}
 
         <span
           className="module-actions"
           onClick={(e) => e.stopPropagation()}
         >
-          {extraButtons}
+          {rightButtons}
           {onReset ? (
             <BauhausTooltip content={resetTooltip} placement="bottom">
               <BauhausButton icon={<RotateCcw size={12} />} onClick={onReset} />

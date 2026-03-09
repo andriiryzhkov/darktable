@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect, useRef, Suspense } from "react";
-import { Copy, Power, CircleDot, AlertTriangle, Crosshair, ArrowRightToLine, Workflow, ArrowRightFromLine } from "lucide-react";
+import { useState, useCallback, useEffect, useRef, useMemo, Suspense, type ReactNode } from "react";
+import { Copy, Crosshair, ArrowRightToLine, Workflow, ArrowRightFromLine } from "lucide-react";
 import type { IopModuleDef } from "./registry";
 import type { ModuleDescription } from "../../types/protocol";
 import { IOP_FLAGS } from "../../types/protocol";
@@ -8,25 +8,9 @@ import BauhausTooltip from "../controls/BauhausTooltip";
 import ModuleCard from "./ModuleCard";
 import PresetMenu from "./PresetMenu";
 import MultiInstanceMenu from "./MultiInstanceMenu";
+import { IopModuleProvider } from "./IopModuleContext";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 import { useModuleExpanded } from "../../hooks/useModuleExpanded";
-
-/** Detect pipeline trouble messages for known modules */
-function useModuleTrouble(op: string): string | null {
-  const historyItems = useDevelopStore((s) => s.historyItems);
-  const temperatureParams = useDevelopStore((s) => s.genericParams["temperature"]);
-  const enabledOps = getEnabledOps(historyItems);
-
-  if (op === "temperature") {
-    const tempEnabled = enabledOps.has("temperature");
-    const colorCalEnabled = enabledOps.has("channelmixerrgb");
-    if (!temperatureParams) return null;
-    const isD65 = temperatureParams.preset === 3 || temperatureParams.preset === 4;
-    if (tempEnabled && colorCalEnabled && !isD65) return "white balance applied twice";
-  }
-
-  return null;
-}
 
 const ICON_SIZE = 10;
 
@@ -71,7 +55,6 @@ export default function IopModuleCard({ module, instance: instanceProp, instance
   const resetModule = useDevelopStore((s) => s.resetModule);
   const focusModuleOp = useDevelopStore((s) => s.focusModuleOp);
   const description = useDevelopStore((s) => s.moduleDescriptions[module.op]);
-  const trouble = useModuleTrouble(module.op);
   const modules = useDevelopStore((s) => s.modules);
   const newInstance = useDevelopStore((s) => s.newInstance);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -83,6 +66,8 @@ export default function IopModuleCard({ module, instance: instanceProp, instance
   const [renameValue, setRenameValue] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
   const renameInstance = useDevelopStore((s) => s.renameInstance);
+  const [indicator, setIndicator] = useState<ReactNode>(null);
+  const iopCtx = useMemo(() => ({ setIndicator }), []);
 
   // Find this module's info from the server modules list
   const moduleInfo = modules.find((m) => m.op === module.op && m.instance === instanceId);
@@ -151,35 +136,17 @@ export default function IopModuleCard({ module, instance: instanceProp, instance
         open={open}
         onToggle={setOpen}
         wrapperRef={wrapperRef}
-        leftIcon={
-          isMandatory ? (
-            <BauhausTooltip content={`'${module.name}' is switched on`} placement="bottom">
-              <CircleDot size={12} className="module-mandatory-icon" />
-            </BauhausTooltip>
-          ) : (
-            <BauhausTooltip content={`'${module.name}' is switched ${enabled ? "on" : "off"}`} placement="bottom">
-              <span className="module-power" onClick={(e) => e.stopPropagation()}>
-                <BauhausButton
-                  icon={<Power size={12} />}
-                  active={enabled}
-                  onClick={toggleEnabled}
-                />
-              </span>
-            </BauhausTooltip>
-          )
-        }
-        afterTitle={
-          trouble ? (
-            <BauhausTooltip content={trouble} placement="left">
-              <span className="module-trouble-icon">
-                <AlertTriangle size={12} />
-              </span>
-            </BauhausTooltip>
-          ) : undefined
-        }
+        leftButton={{
+          kind: "power",
+          enabled,
+          mandatory: isMandatory,
+          moduleName: module.name,
+          onToggle: toggleEnabled,
+        }}
+        indicators={indicator}
         onReset={() => resetModule(module.op)}
         resetTooltip={<span style={{ whiteSpace: "pre" }}>{"reset parameters\nctrl-click to reapply any automatic presets"}</span>}
-        extraButtons={
+        rightButtons={
           <span className="module-presets-wrapper" ref={multiRef as React.Ref<HTMLSpanElement>}>
             <BauhausTooltip content={<span style={{ whiteSpace: "pre" }}>{"multiple instance action\nright-click creates new instance"}</span>} placement="bottom">
               <BauhausButton
@@ -198,9 +165,11 @@ export default function IopModuleCard({ module, instance: instanceProp, instance
         presetsButtonRef={presetsRef}
         presetsTooltip={<span style={{ whiteSpace: "pre" }}>{"presets\nright-click to apply on new instance"}</span>}
       >
-        <Suspense fallback={null}>
-          <Component />
-        </Suspense>
+        <IopModuleProvider value={iopCtx}>
+          <Suspense fallback={null}>
+            <Component />
+          </Suspense>
+        </IopModuleProvider>
       </ModuleCard>
       {presetsOpen && (
         <PresetMenu op={module.op} moduleName={module.name} anchorRef={presetsRef} onClose={() => setPresetsOpen(false)} />

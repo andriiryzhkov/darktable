@@ -259,7 +259,6 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
 }
 
 .module-actions .bauhaus-button-icon-only {
@@ -271,28 +270,28 @@ body {
   color: var(--plugin-label-color);
 }
 
-.module-power,
-.module-presets-wrapper {
-  display: flex;
-  align-items: center;
-}
-
-.module-power .bauhaus-button-icon-only {
-  background: transparent;
-  border-color: transparent;
-  width: 16px;
-  height: 16px;
-  padding: 0;
+.module-actions .bauhaus-button-icon-only[data-active="false"] {
   color: var(--disabled-fg-color);
 }
 
-.module-power .bauhaus-button-icon-only[data-active="true"] {
+.module-actions .bauhaus-button-icon-only[data-active="true"] {
+  background: transparent;
   color: var(--fg-color);
 }
 
-.module-power .bauhaus-button-icon-only:has(svg.lucide-circle-chevron-right),
-.module-power .bauhaus-button-icon-only:has(svg.lucide-circle-chevron-down) {
-  color: var(--fg-color);
+.module-actions .bauhaus-button-icon-only[data-active="true"]:hover {
+  background-color: var(--button-hover-bg);
+  color: var(--button-hover-fg);
+}
+
+.module-actions .bauhaus-button-icon-only[data-active="false"]:hover {
+  background-color: var(--button-hover-bg);
+  color: var(--disabled-fg-color);
+}
+
+.module-presets-wrapper {
+  display: flex;
+  align-items: center;
 }
 
 .module-mandatory-icon {
