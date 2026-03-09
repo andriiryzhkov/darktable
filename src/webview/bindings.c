@@ -1312,6 +1312,13 @@ struct dt_frame_server_t
   dt_webview_ctx_t *ctx;
   gboolean running;
   pthread_t thread;
+
+  /* Test eval infrastructure — allows external tools (MCP server) to
+   * execute JS in the webview and get results back via HTTP. */
+  GMutex test_mutex;
+  GCond test_cond;
+  char *test_result;
+  gboolean test_result_ready;
 };
 
 /* Parse a query param value: find "key=" in qs, copy value up to '&' or ' ' or end */
@@ -1641,6 +1648,113 @@ static void _handle_raw_request(int client_fd, dt_webview_ctx_t *ctx,
           (g_get_monotonic_time() - t0) / 1000.0, w, h, pixel_size);
 }
 
+/* ── Test eval: execute JS in the webview from HTTP ──────────────────
+ * Used by the MCP server to automate the UI for testing.
+ *
+ * Flow: POST /test/eval  →  webview_dispatch(webview_eval)  →  JS calls
+ *       window.__testResult(json)  →  binding stores result  →  HTTP response
+ */
+
+/* Binding callback: JS calls __testResult(jsonString) to return eval results */
+static void on_test_result(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  dt_frame_server_t *fs = ctx->frame_server;
+  if(!fs) { webview_return(ctx->webview, id, 0, "null"); return; }
+
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+
+  g_mutex_lock(&fs->test_mutex);
+  g_free(fs->test_result);
+  if(args && json_array_get_length(args) > 0)
+    fs->test_result = g_strdup(json_array_get_string_element(args, 0));
+  else
+    fs->test_result = g_strdup("{\"ok\":false,\"error\":\"no result\"}");
+  fs->test_result_ready = TRUE;
+  g_cond_signal(&fs->test_cond);
+  g_mutex_unlock(&fs->test_mutex);
+
+  if(parser) g_object_unref(parser);
+  webview_return(ctx->webview, id, 0, "null");
+}
+
+/* Dispatch struct for running webview_eval on the main thread */
+typedef struct _test_eval_dispatch_t
+{
+  dt_webview_ctx_t *ctx;
+  char *js;
+} _test_eval_dispatch_t;
+
+static void _test_eval_on_main(webview_t w, void *arg)
+{
+  _test_eval_dispatch_t *d = arg;
+  webview_eval(d->ctx->webview, d->js);
+  g_free(d->js);
+  g_free(d);
+}
+
+/* HTTP handler for POST /test/eval */
+static void _handle_test_eval(int client_fd, dt_frame_server_t *fs, const char *body)
+{
+  if(!body || !*body)
+  {
+    const char *err = "{\"ok\":false,\"error\":\"empty code\"}";
+    _send_http_response(client_fd, 400, "Bad Request", "application/json", err, strlen(err));
+    return;
+  }
+
+  /* Reset result */
+  g_mutex_lock(&fs->test_mutex);
+  fs->test_result_ready = FALSE;
+  g_free(fs->test_result);
+  fs->test_result = NULL;
+  g_mutex_unlock(&fs->test_mutex);
+
+  /* Base64-encode the user code so it can be safely embedded in JS */
+  gchar *b64 = g_base64_encode((const guchar *)body, strlen(body));
+
+  /* Build JS wrapper: decode base64 → eval → call __testResult with result */
+  char *js = g_strdup_printf(
+    "(async()=>{"
+    "try{"
+    "const __code=atob('%s');"
+    "const __r=await(0,eval)(__code);"
+    "window.__testResult(JSON.stringify({ok:true,"
+    "value:typeof __r==='undefined'?null:__r}));"
+    "}catch(__e){"
+    "window.__testResult(JSON.stringify({ok:false,"
+    "error:__e.message,stack:__e.stack}));"
+    "}})()",
+    b64);
+  g_free(b64);
+
+  /* Dispatch eval to the webview's main thread */
+  _test_eval_dispatch_t *d = g_new0(_test_eval_dispatch_t, 1);
+  d->ctx = fs->ctx;
+  d->js = js;
+  webview_dispatch(fs->ctx->webview, _test_eval_on_main, d);
+
+  /* Wait for __testResult callback (10 second timeout) */
+  g_mutex_lock(&fs->test_mutex);
+  gint64 deadline = g_get_monotonic_time() + 10 * G_USEC_PER_SEC;
+  while(!fs->test_result_ready)
+  {
+    if(!g_cond_wait_until(&fs->test_cond, &fs->test_mutex, deadline))
+    {
+      g_mutex_unlock(&fs->test_mutex);
+      const char *err = "{\"ok\":false,\"error\":\"timeout (10s)\"}";
+      _send_http_response(client_fd, 504, "Timeout", "application/json", err, strlen(err));
+      return;
+    }
+  }
+  char *result = g_strdup(fs->test_result);
+  g_mutex_unlock(&fs->test_mutex);
+
+  _send_http_response(client_fd, 200, "OK", "application/json", result, strlen(result));
+  g_free(result);
+}
+
 static void *_frame_server_loop(void *arg)
 {
   dt_frame_server_t *fs = arg;
@@ -1654,12 +1768,32 @@ static void *_frame_server_loop(void *arg)
       break;
     }
 
-    /* Read the HTTP request (we only need the first line) */
-    char buf[2048];
+    /* Read the HTTP request */
+    char buf[65536];
     ssize_t n = read(client, buf, sizeof(buf) - 1);
     if(n > 0)
     {
       buf[n] = '\0';
+
+      /* Route: POST /test/eval */
+      if(strncmp(buf, "POST /test/eval", 15) == 0)
+      {
+        char *body = strstr(buf, "\r\n\r\n");
+        if(body) body += 4;
+        _handle_test_eval(client, fs, body);
+        close(client);
+        continue;
+      }
+
+      /* Route: GET /test/port — return port for MCP discovery */
+      if(strncmp(buf, "GET /test/port", 14) == 0)
+      {
+        char port_json[64];
+        snprintf(port_json, sizeof(port_json), "{\"port\":%d}", fs->port);
+        _send_http_response(client, 200, "OK", "application/json", port_json, strlen(port_json));
+        close(client);
+        continue;
+      }
 
       /* Route: GET /raw?... or GET /frame?... */
       char *query = strchr(buf, '?');
@@ -1741,12 +1875,16 @@ static dt_frame_server_t *_frame_server_start(dt_webview_ctx_t *ctx)
   fs->port = ntohs(bound.sin_port);
   fs->ctx = ctx;
   fs->running = TRUE;
+  g_mutex_init(&fs->test_mutex);
+  g_cond_init(&fs->test_cond);
 
   pthread_t thread;
   if(pthread_create(&thread, NULL, _frame_server_loop, fs) != 0)
   {
     perror("[frame-server] pthread_create");
     close(fd);
+    g_mutex_clear(&fs->test_mutex);
+    g_cond_clear(&fs->test_cond);
     g_free(fs);
     return NULL;
   }
@@ -1754,6 +1892,17 @@ static dt_frame_server_t *_frame_server_start(dt_webview_ctx_t *ctx)
   fs->thread = thread;
 
   fprintf(stderr, "[frame-server] listening on localhost:%d\n", fs->port);
+
+  /* Write port to discoverable file for MCP server */
+  char port_path[PATH_MAX];
+  snprintf(port_path, sizeof(port_path), "%s/darktable_test_port", g_get_tmp_dir());
+  FILE *port_file = fopen(port_path, "w");
+  if(port_file)
+  {
+    fprintf(port_file, "%d", fs->port);
+    fclose(port_file);
+    fprintf(stderr, "[frame-server] test port written to %s\n", port_path);
+  }
   return fs;
 }
 
@@ -1762,6 +1911,20 @@ void dt_frame_server_stop(dt_frame_server_t *fs)
   if(!fs) return;
   fs->running = FALSE;
   close(fs->listen_fd);
+
+  /* Clean up test eval resources */
+  g_mutex_lock(&fs->test_mutex);
+  g_free(fs->test_result);
+  fs->test_result = NULL;
+  g_mutex_unlock(&fs->test_mutex);
+  g_mutex_clear(&fs->test_mutex);
+  g_cond_clear(&fs->test_cond);
+
+  /* Remove port discovery file */
+  char port_path[PATH_MAX];
+  snprintf(port_path, sizeof(port_path), "%s/darktable_test_port", g_get_tmp_dir());
+  g_unlink(port_path);
+
   g_free(fs);
 }
 
@@ -2938,6 +3101,9 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "imageSetMonochrome", on_image_set_monochrome, ctx);
   webview_bind(ctx->webview, "imageMove", on_image_move, ctx);
   webview_bind(ctx->webview, "imageCopyTo", on_image_copy_to, ctx);
+
+  /* Test automation — internal binding for returning eval results */
+  webview_bind(ctx->webview, "__testResult", on_test_result, ctx);
 }
 
 void dt_webview_register_window_bindings(dt_webview_ctx_t *ctx)

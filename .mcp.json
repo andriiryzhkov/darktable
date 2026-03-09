@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "darktable-webview": {
+      "command": "node",
+      "args": ["tools/webview-mcp/index.js"],
+      "description": "Automate darktable's WebView UI for testing"
+    }
+  }
+}

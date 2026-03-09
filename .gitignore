@@ -34,3 +34,4 @@ AGENTS.local.md
 
 ui/node_modules/
 ui/dist/
+tools/webview-mcp/node_modules/
