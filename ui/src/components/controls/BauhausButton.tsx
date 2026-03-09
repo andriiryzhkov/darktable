@@ -5,6 +5,7 @@ interface BauhausButtonProps {
   icon?: ReactNode;
   disabled?: boolean;
   active?: boolean;
+  accent?: boolean;
   title?: string;
   transparent?: boolean;
   onClick?: () => void;
@@ -12,12 +13,13 @@ interface BauhausButtonProps {
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
-export default function BauhausButton({ label, icon, disabled, active, title, transparent, onClick, onMouseDown, onContextMenu }: BauhausButtonProps) {
+export default function BauhausButton({ label, icon, disabled, active, accent, title, transparent, onClick, onMouseDown, onContextMenu }: BauhausButtonProps) {
   const iconOnly = icon && !label;
   const classes = [
     "bauhaus-button",
     iconOnly ? "bauhaus-button-icon-only" : "",
     transparent ? "bauhaus-button-transparent" : "",
+    accent ? "bauhaus-button-accent" : "",
   ].filter(Boolean).join(" ");
   return (
     <button

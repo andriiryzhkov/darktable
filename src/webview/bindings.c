@@ -2595,6 +2595,150 @@ static void on_get_file_thumbnail(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+/* ── Image actions ────────────────────────────────────────────── */
+
+static void _image_action_passthrough(const char *id, const char *req, void *arg,
+                                      const char *method)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    if(parser) g_object_unref(parser);
+    _return_error(ctx, id, "Missing imgids argument");
+    return;
+  }
+
+  /* Build params: {"imgids": [...], ...extra} */
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "imgids");
+  json_builder_add_value(b, json_node_copy(json_array_get_element(args, 0)));
+
+  /* Optional second argument (direction for rotate) */
+  if(json_array_get_length(args) > 1)
+  {
+    json_builder_set_member_name(b, "direction");
+    json_builder_add_int_value(b, (gint64)json_array_get_int_element(args, 1));
+  }
+
+  json_builder_end_object(b);
+  JsonNode *root = json_builder_get_root(b);
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, root);
+  char *params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  json_node_unref(root);
+  g_object_unref(b);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, method, params);
+  g_free(params);
+}
+
+static void on_image_remove(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_remove"); }
+
+static void on_image_delete(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_delete"); }
+
+static void on_image_duplicate(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_duplicate"); }
+
+static void on_image_rotate(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_rotate"); }
+
+static void on_image_group(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_group"); }
+
+static void on_image_ungroup(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_ungroup"); }
+
+static void on_image_copy_local(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_copy_local"); }
+
+static void on_image_resync_local(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_resync_local"); }
+
+static void on_image_refresh_exif(const char *id, const char *req, void *arg)
+{ _image_action_passthrough(id, req, arg, "catalog.image_refresh_exif"); }
+
+/* Metadata/monochrome: forward single JSON object arg directly */
+static void _json_object_passthrough(const char *id, const char *req, void *arg,
+                                     const char *method)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    if(parser) g_object_unref(parser);
+    _return_error(ctx, id, "Missing argument");
+    return;
+  }
+
+  JsonNode *obj_node = json_array_get_element(args, 0);
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, obj_node);
+  char *params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, method, params);
+  g_free(params);
+}
+
+static void on_metadata_paste(const char *id, const char *req, void *arg)
+{ _json_object_passthrough(id, req, arg, "catalog.metadata_paste"); }
+
+static void on_metadata_clear(const char *id, const char *req, void *arg)
+{ _json_object_passthrough(id, req, arg, "catalog.metadata_clear"); }
+
+static void on_image_set_monochrome(const char *id, const char *req, void *arg)
+{ _json_object_passthrough(id, req, arg, "catalog.image_set_monochrome"); }
+
+/* Move/copy to folder: args = [imgids[], path] */
+static void _image_folder_action(const char *id, const char *req, void *arg,
+                                 const char *method)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    if(parser) g_object_unref(parser);
+    _return_error(ctx, id, "Missing imgids or path argument");
+    return;
+  }
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "imgids");
+  json_builder_add_value(b, json_node_copy(json_array_get_element(args, 0)));
+  json_builder_set_member_name(b, "path");
+  json_builder_add_string_value(b, json_array_get_string_element(args, 1));
+  json_builder_end_object(b);
+  JsonNode *root = json_builder_get_root(b);
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, root);
+  char *params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  json_node_unref(root);
+  g_object_unref(b);
+  g_object_unref(parser);
+
+  _ipc_passthrough(ctx, id, method, params);
+  g_free(params);
+}
+
+static void on_image_move(const char *id, const char *req, void *arg)
+{ _image_folder_action(id, req, arg, "catalog.image_move"); }
+
+static void on_image_copy_to(const char *id, const char *req, void *arg)
+{ _image_folder_action(id, req, arg, "catalog.image_copy_to"); }
+
+
 /* ── Window titlebar actions ──────────────────────────────────── */
 
 static void on_window_start_drag(const char *id, const char *req, void *arg)
@@ -2778,6 +2922,22 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "catalogGetTags", on_catalog_get_tags, ctx);
   webview_bind(ctx->webview, "configGet", on_config_get, ctx);
   webview_bind(ctx->webview, "configSet", on_config_set, ctx);
+
+  /* Image actions */
+  webview_bind(ctx->webview, "imageRemove", on_image_remove, ctx);
+  webview_bind(ctx->webview, "imageDelete", on_image_delete, ctx);
+  webview_bind(ctx->webview, "imageDuplicate", on_image_duplicate, ctx);
+  webview_bind(ctx->webview, "imageRotate", on_image_rotate, ctx);
+  webview_bind(ctx->webview, "imageGroup", on_image_group, ctx);
+  webview_bind(ctx->webview, "imageUngroup", on_image_ungroup, ctx);
+  webview_bind(ctx->webview, "imageCopyLocal", on_image_copy_local, ctx);
+  webview_bind(ctx->webview, "imageResyncLocal", on_image_resync_local, ctx);
+  webview_bind(ctx->webview, "imageRefreshExif", on_image_refresh_exif, ctx);
+  webview_bind(ctx->webview, "metadataPaste", on_metadata_paste, ctx);
+  webview_bind(ctx->webview, "metadataClear", on_metadata_clear, ctx);
+  webview_bind(ctx->webview, "imageSetMonochrome", on_image_set_monochrome, ctx);
+  webview_bind(ctx->webview, "imageMove", on_image_move, ctx);
+  webview_bind(ctx->webview, "imageCopyTo", on_image_copy_to, ctx);
 }
 
 void dt_webview_register_window_bindings(dt_webview_ctx_t *ctx)

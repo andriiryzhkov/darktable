@@ -65,7 +65,41 @@ declare global {
     configSet: (key: string, value: string) => Promise<unknown>;
     windowStartDrag: () => Promise<void>;
     windowZoom: () => Promise<void>;
+    imageRemove: (imgids: number[]) => Promise<{ count: number }>;
+    imageDelete: (imgids: number[]) => Promise<{ count: number }>;
+    imageDuplicate: (imgids: number[]) => Promise<{ count: number }>;
+    imageRotate: (imgids: number[], direction: number) => Promise<{ count: number }>;
+    imageGroup: (imgids: number[]) => Promise<{ count: number }>;
+    imageUngroup: (imgids: number[]) => Promise<{ count: number }>;
+    imageCopyLocal: (imgids: number[]) => Promise<{ count: number }>;
+    imageResyncLocal: (imgids: number[]) => Promise<{ count: number }>;
+    imageRefreshExif: (imgids: number[]) => Promise<{ count: number }>;
+    metadataPaste: (params: MetadataPasteParams) => Promise<{ count: number }>;
+    metadataClear: (params: MetadataClearParams) => Promise<{ count: number }>;
+    imageSetMonochrome: (params: { imgids: number[]; monochrome: boolean }) => Promise<{ count: number }>;
+    imageMove: (imgids: number[], path: string) => Promise<{ count: number }>;
+    imageCopyTo: (imgids: number[], path: string) => Promise<{ count: number }>;
   }
+}
+
+export interface MetadataFlags {
+  ratings: boolean;
+  colors: boolean;
+  tags: boolean;
+  geotags: boolean;
+  metadata: boolean;
+}
+
+export interface MetadataPasteParams {
+  source_imgid: number;
+  imgids: number[];
+  flags: MetadataFlags;
+  mode: "merge" | "overwrite";
+}
+
+export interface MetadataClearParams {
+  imgids: number[];
+  flags: MetadataFlags;
 }
 
 export type PlatformOS = "macos" | "windows" | "linux";
@@ -190,3 +224,31 @@ export const configSet = (key: string, value: string) => window.configSet(key, v
 export const windowStartDrag = () => window.windowStartDrag();
 
 export const windowZoom = () => window.windowZoom();
+
+export const imageRemove = (imgids: number[]) => window.imageRemove(imgids);
+
+export const imageDelete = (imgids: number[]) => window.imageDelete(imgids);
+
+export const imageDuplicate = (imgids: number[]) => window.imageDuplicate(imgids);
+
+export const imageRotate = (imgids: number[], direction: number) => window.imageRotate(imgids, direction);
+
+export const imageGroup = (imgids: number[]) => window.imageGroup(imgids);
+
+export const imageUngroup = (imgids: number[]) => window.imageUngroup(imgids);
+
+export const imageCopyLocal = (imgids: number[]) => window.imageCopyLocal(imgids);
+
+export const imageResyncLocal = (imgids: number[]) => window.imageResyncLocal(imgids);
+
+export const imageRefreshExif = (imgids: number[]) => window.imageRefreshExif(imgids);
+
+export const metadataPaste = (params: MetadataPasteParams) => window.metadataPaste(params);
+
+export const metadataClear = (params: MetadataClearParams) => window.metadataClear(params);
+
+export const imageSetMonochrome = (params: { imgids: number[]; monochrome: boolean }) => window.imageSetMonochrome(params);
+
+export const imageMove = (imgids: number[], path: string) => window.imageMove(imgids, path);
+
+export const imageCopyTo = (imgids: number[], path: string) => window.imageCopyTo(imgids, path);

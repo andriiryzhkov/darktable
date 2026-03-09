@@ -1,4 +1,4 @@
-import { Ban, Copy, Group, PencilRuler } from "lucide-react";
+import { Ban, Group, PencilRuler } from "lucide-react";
 import StarRating from "../Lighttable/StarRating";
 import ColorLabels from "../Lighttable/ColorLabels";
 
@@ -98,9 +98,7 @@ export default function ThumbnailOverlay({
           </span>
         )}
         {localCopy && (
-          <span className="thumb-status-icon">
-            <Copy size={12} />
-          </span>
+          <span className="thumb-local-copy" title="local copy" />
         )}
         {groupSize > 1 && (
           <span className="thumb-status-icon thumb-group-badge">

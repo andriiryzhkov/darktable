@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { requestThumbnail } from "../../api/thumbnailBatch";
+import { useCatalogStore } from "../../stores/catalogStore";
 import { OverlayMode } from "./types";
 import ThumbnailOverlay, { formatExif } from "./ThumbnailOverlay";
 
@@ -55,6 +56,7 @@ export default function Thumbnail({
   const [blockVisible, setBlockVisible] = useState(false);
   const blockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const thumbRevision = useCatalogStore((s) => s.thumbRevision);
 
   // Intersection observer for lazy loading
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function Thumbnail({
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [visible, imgid]);
+  }, [visible, imgid, thumbRevision]);
 
   // Handle hover block timer (-1 = stay until mouse leaves, 0 = instant hide, >0 = seconds)
   const handleMouseEnter = useCallback(() => {
@@ -135,7 +137,7 @@ export default function Thumbnail({
       onDoubleClick={onDoubleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      title={showTooltip ? `${filename}\n${datetimeTaken}\n${formatExif(exposure, aperture, focalLength, iso)}` : undefined}
+      title={showTooltip ? `${filename}${localCopy ? " (local copy)" : ""}\n${datetimeTaken}\n${formatExif(exposure, aperture, focalLength, iso)}` : undefined}
     >
       <div className="thumb-back">
         {src ? (

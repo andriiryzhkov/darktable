@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { requestThumbnail } from "../../api/thumbnailBatch";
+import { useCatalogStore } from "../../stores/catalogStore";
 import StarRating from "./StarRating";
 import ColorLabels from "./ColorLabels";
-import { Ban, Copy, Group, Pencil } from "lucide-react";
+import { Ban, Group, Pencil } from "lucide-react";
 
 function RejectIcon({ rejected }: { rejected: boolean }) {
   return (
@@ -51,6 +52,7 @@ export default function ThumbnailCard({
   const [src, setSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const thumbRevision = useCatalogStore((s) => s.thumbRevision);
 
   useEffect(() => {
     const el = ref.current;
@@ -80,7 +82,7 @@ export default function ThumbnailCard({
     return () => {
       cancelled = true;
     };
-  }, [visible, imgid]);
+  }, [visible, imgid, thumbRevision]);
 
   const dotIdx = filename.lastIndexOf(".");
   const ext = dotIdx > 0 ? filename.substring(dotIdx + 1) : "";
@@ -105,9 +107,7 @@ export default function ThumbnailCard({
             </span>
           )}
           {localCopy && (
-            <span className="thumb-status-icon">
-              <Copy size={12} />
-            </span>
+            <span className="thumb-local-copy" title="local copy" />
           )}
           {groupSize > 1 && (
             <span className="thumb-status-icon thumb-group-badge">

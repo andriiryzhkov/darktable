@@ -17,16 +17,22 @@
 */
 
 #include "server/server.h"
+#include "common/collection.h"
 #include "common/database.h"
 #include "common/datetime.h"
 #include "common/debug.h"
 #include "common/exif.h"
 #include "common/film.h"
+#include "common/grouping.h"
+#include "common/history.h"
 #include "common/image.h"
 #include "common/image_cache.h"
 #include "common/import_session.h"
+#include "common/colorlabels.h"
 #include "common/metadata.h"
 #include "common/mipmap_cache.h"
+#include "common/ratings.h"
+#include "common/tags.h"
 #include "control/conf.h"
 #include "control/signal.h"
 #include "imageio/imageio_jpeg.h"
@@ -481,6 +487,9 @@ char *dt_server_catalog_query(dt_server_t *server, const dt_server_request_t *re
 
     json_builder_set_member_name(b, "altered");
     json_builder_add_boolean_value(b, sqlite3_column_int(stmt, 14) != 0);
+
+    json_builder_set_member_name(b, "local_copy");
+    json_builder_add_boolean_value(b, (flags & DT_IMAGE_LOCAL_COPY) != 0);
 
     json_builder_set_member_name(b, "color_labels");
     json_builder_add_int_value(b, sqlite3_column_int(stmt, 15));
@@ -1822,4 +1831,640 @@ char *dt_server_catalog_get_collection_values(dt_server_t *server, const dt_serv
   json_node_unref(cv_result);
   g_object_unref(cv);
   return cv_resp;
+}
+
+
+/* ── Helper: parse imgids array from params ─────────────────────── */
+
+static GList *_parse_imgids(const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "imgids"))
+    return NULL;
+
+  JsonArray *arr = json_object_get_array_member(req->params, "imgids");
+  const guint len = json_array_get_length(arr);
+  GList *ids = NULL;
+  for(guint i = 0; i < len; i++)
+    ids = g_list_prepend(ids, GINT_TO_POINTER((int)json_array_get_int_element(arr, i)));
+  return g_list_reverse(ids);
+}
+
+static char *_make_count_response(const dt_server_request_t *req, int count)
+{
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+  json_builder_set_member_name(b, "count");
+  json_builder_add_int_value(b, count);
+  json_builder_end_object(b);
+  JsonNode *result = json_builder_get_root(b);
+  char *resp = dt_server_make_response(req->id, result);
+  json_node_unref(result);
+  g_object_unref(b);
+  return resp;
+}
+
+
+/* ── catalog.image_remove ───────────────────────────────────────── */
+
+char *dt_server_catalog_image_remove(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    dt_image_remove(imgid);
+    count++;
+  }
+
+  dt_film_remove_empty();
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF, ids);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_FILMROLLS_CHANGED);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_delete ───────────────────────────────────────── */
+
+char *dt_server_catalog_image_delete(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  const gboolean send_to_trash = dt_conf_get_bool("send_to_trash");
+  int count = 0;
+
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    char pathname[PATH_MAX] = { 0 };
+    gboolean from_cache = TRUE;
+    dt_image_full_path(imgid, pathname, sizeof(pathname), &from_cache);
+
+    dt_image_remove(imgid);
+
+    if(pathname[0])
+    {
+      if(send_to_trash)
+      {
+        GFile *gfile = g_file_new_for_path(pathname);
+        g_file_trash(gfile, NULL, NULL);
+        g_object_unref(gfile);
+      }
+      else
+      {
+        g_unlink(pathname);
+      }
+      // Also remove XMP sidecar if present
+      char *xmp = g_strconcat(pathname, ".xmp", NULL);
+      if(g_file_test(xmp, G_FILE_TEST_EXISTS))
+      {
+        if(send_to_trash)
+        {
+          GFile *gxmp = g_file_new_for_path(xmp);
+          g_file_trash(gxmp, NULL, NULL);
+          g_object_unref(gxmp);
+        }
+        else
+          g_unlink(xmp);
+      }
+      g_free(xmp);
+    }
+    count++;
+  }
+
+  dt_film_remove_empty();
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF, ids);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_FILMROLLS_CHANGED);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_duplicate ────────────────────────────────────── */
+
+char *dt_server_catalog_image_duplicate(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    const dt_imgid_t newid = dt_image_duplicate(imgid);
+    if(dt_is_valid_imgid(newid))
+    {
+      dt_history_copy_and_paste_on_image(imgid, newid, FALSE, NULL, TRUE, TRUE, TRUE);
+      dt_image_cache_set_change_timestamp_from_image(newid, imgid);
+      count++;
+    }
+  }
+
+  g_list_free(ids);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_FILMROLLS_CHANGED);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_rotate ───────────────────────────────────────── */
+
+char *dt_server_catalog_image_rotate(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  /* cw: 0 = clockwise, 1 = counter-clockwise, 2 = reset */
+  int cw = 0;
+  if(req->params && json_object_has_member(req->params, "direction"))
+    cw = (int)json_object_get_int_member(req->params, "direction");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    dt_image_flip(imgid, cw);
+    dt_image_set_aspect_ratio(imgid, FALSE);
+    dt_mipmap_cache_remove(imgid);
+    count++;
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_ASPECT_RATIO,
+                             g_list_copy(ids));
+  g_list_free(ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_group ────────────────────────────────────────── */
+
+char *dt_server_catalog_image_group(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  /* Use first image as group leader */
+  const dt_imgid_t group_id = GPOINTER_TO_INT(ids->data);
+  int count = 0;
+
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    dt_grouping_add_to_group(group_id, imgid);
+    count++;
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF,
+                             ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_ungroup ──────────────────────────────────────── */
+
+char *dt_server_catalog_image_ungroup(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    const dt_imgid_t new_group = dt_grouping_remove_from_group(imgid);
+    if(dt_is_valid_imgid(new_group))
+      count++;
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF,
+                             ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_copy_local ───────────────────────────────────── */
+
+char *dt_server_catalog_image_copy_local(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    dt_image_local_copy_set(imgid);
+    count++;
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF,
+                             ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_resync_local ─────────────────────────────────── */
+
+char *dt_server_catalog_image_resync_local(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    dt_image_local_copy_reset(imgid);
+    count++;
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF,
+                             ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_refresh_exif ─────────────────────────────────── */
+
+char *dt_server_catalog_image_refresh_exif(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    gboolean from_cache = TRUE;
+    char sourcefile[PATH_MAX];
+    dt_image_full_path(imgid, sourcefile, sizeof(sourcefile), &from_cache);
+
+    dt_image_t *img = dt_image_cache_get(imgid, 'w');
+    if(img)
+    {
+      img->job_flags |= DT_IMAGE_JOB_NO_METADATA;
+      dt_exif_read(img, sourcefile);
+      dt_image_cache_write_release_info(img, DT_IMAGE_CACHE_SAFE,
+                                        "dt_server_catalog_image_refresh_exif");
+      count++;
+    }
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF,
+                             ids);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_TAG_CHANGED);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.metadata_paste ─────────────────────────────────────── */
+/* Copies metadata from source_imgid to target imgids.
+ * Params: { source_imgid, imgids, flags: { ratings, colors, tags, geotags, metadata }, mode: "merge"|"overwrite" }
+ */
+
+char *dt_server_catalog_metadata_paste(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+
+  if(!req->params || !json_object_has_member(req->params, "source_imgid")
+     || !json_object_has_member(req->params, "imgids"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                "Missing source_imgid or imgids parameter");
+
+  const dt_imgid_t src = (dt_imgid_t)json_object_get_int_member(req->params, "source_imgid");
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Empty imgids");
+
+  /* Parse flags */
+  gboolean f_ratings = TRUE, f_colors = TRUE, f_tags = TRUE, f_geotags = TRUE, f_metadata = TRUE;
+  if(json_object_has_member(req->params, "flags"))
+  {
+    JsonObject *flags = json_object_get_object_member(req->params, "flags");
+    if(json_object_has_member(flags, "ratings"))
+      f_ratings = json_object_get_boolean_member(flags, "ratings");
+    if(json_object_has_member(flags, "colors"))
+      f_colors = json_object_get_boolean_member(flags, "colors");
+    if(json_object_has_member(flags, "tags"))
+      f_tags = json_object_get_boolean_member(flags, "tags");
+    if(json_object_has_member(flags, "geotags"))
+      f_geotags = json_object_get_boolean_member(flags, "geotags");
+    if(json_object_has_member(flags, "metadata"))
+      f_metadata = json_object_get_boolean_member(flags, "metadata");
+  }
+
+  const gboolean clear_on = json_object_has_member(req->params, "mode")
+    && g_strcmp0(json_object_get_string_member(req->params, "mode"), "overwrite") == 0;
+
+  int count = 0;
+
+  if(f_ratings)
+  {
+    const int stars = dt_ratings_get(src);
+    dt_ratings_apply_on_list(ids, stars, TRUE);
+    count++;
+  }
+
+  if(f_colors)
+  {
+    const int labels = dt_colorlabels_get_labels(src);
+    if(clear_on)
+    {
+      /* Clear then set each label */
+      for(GList *t = ids; t; t = g_list_next(t))
+      {
+        const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+        dt_colorlabels_set_labels(g_list_prepend(NULL, GINT_TO_POINTER(imgid)),
+                                  0, TRUE, FALSE);
+      }
+    }
+    for(int c = 0; c < 5; c++)
+    {
+      if(labels & (1 << c))
+        dt_colorlabels_set_labels(g_list_copy(ids), c, FALSE, FALSE);
+    }
+    count++;
+  }
+
+  if(f_tags)
+  {
+    GList *tag_list = NULL;
+    const guint tag_count = dt_tag_get_attached(src, &tag_list, TRUE);
+    if(tag_count > 0)
+    {
+      dt_tag_set_tags(tag_list, g_list_copy(ids), TRUE, clear_on, FALSE);
+    }
+    g_list_free_full(tag_list, g_free);
+    count++;
+  }
+
+  if(f_geotags)
+  {
+    dt_image_geoloc_t geoloc;
+    dt_image_get_location(src, &geoloc);
+    dt_image_set_locations(g_list_copy(ids), &geoloc, FALSE);
+    count++;
+  }
+
+  if(f_metadata)
+  {
+    /* Copy all dt metadata keys from source, apply to targets */
+    GList *md_list = dt_metadata_get_list();
+    GList *kv = NULL;
+    for(GList *m = md_list; m; m = g_list_next(m))
+    {
+      const dt_metadata_t *md = m->data;
+      uint32_t cnt = 0;
+      GList *val = dt_metadata_get(src, md->tagname, &cnt);
+      kv = g_list_prepend(kv, g_strdup(md->tagname));
+      kv = g_list_prepend(kv, val ? g_strdup(val->data) : g_strdup(""));
+      g_list_free_full(val, g_free);
+    }
+    kv = g_list_reverse(kv);
+    dt_metadata_set_list(g_list_copy(ids), kv, FALSE);
+    count++;
+  }
+
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_TAG_CHANGED);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_IMAGE_INFO_CHANGED, g_list_copy(ids));
+  g_list_free(ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.metadata_clear ─────────────────────────────────────── */
+
+char *dt_server_catalog_metadata_clear(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  gboolean f_ratings = TRUE, f_colors = TRUE, f_tags = TRUE, f_geotags = TRUE, f_metadata = TRUE;
+  if(req->params && json_object_has_member(req->params, "flags"))
+  {
+    JsonObject *flags = json_object_get_object_member(req->params, "flags");
+    if(json_object_has_member(flags, "ratings"))
+      f_ratings = json_object_get_boolean_member(flags, "ratings");
+    if(json_object_has_member(flags, "colors"))
+      f_colors = json_object_get_boolean_member(flags, "colors");
+    if(json_object_has_member(flags, "tags"))
+      f_tags = json_object_get_boolean_member(flags, "tags");
+    if(json_object_has_member(flags, "geotags"))
+      f_geotags = json_object_get_boolean_member(flags, "geotags");
+    if(json_object_has_member(flags, "metadata"))
+      f_metadata = json_object_get_boolean_member(flags, "metadata");
+  }
+
+  int count = 0;
+
+  if(f_ratings)
+  {
+    dt_ratings_apply_on_list(g_list_copy(ids), 0, FALSE);
+    count++;
+  }
+
+  if(f_colors)
+  {
+    for(GList *t = ids; t; t = g_list_next(t))
+    {
+      const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+      dt_colorlabels_set_labels(g_list_prepend(NULL, GINT_TO_POINTER(imgid)),
+                                0, TRUE, FALSE);
+    }
+    count++;
+  }
+
+  if(f_tags)
+  {
+    dt_tag_set_tags(NULL, g_list_copy(ids), TRUE, TRUE, FALSE);
+    count++;
+  }
+
+  if(f_geotags)
+  {
+    dt_image_geoloc_t empty = { NAN, NAN, NAN };
+    dt_image_set_locations(g_list_copy(ids), &empty, FALSE);
+    count++;
+  }
+
+  if(f_metadata)
+  {
+    GList *md_list = dt_metadata_get_list();
+    GList *kv = NULL;
+    for(GList *m = md_list; m; m = g_list_next(m))
+    {
+      const dt_metadata_t *md = m->data;
+      kv = g_list_prepend(kv, g_strdup(md->tagname));
+      kv = g_list_prepend(kv, g_strdup(""));
+    }
+    kv = g_list_reverse(kv);
+    dt_metadata_set_list(g_list_copy(ids), kv, FALSE);
+    count++;
+  }
+
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_TAG_CHANGED);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_IMAGE_INFO_CHANGED, g_list_copy(ids));
+  g_list_free(ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_set_monochrome ───────────────────────────────── */
+
+char *dt_server_catalog_image_set_monochrome(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  /* monochrome: 0 = set color, 2 = set monochrome */
+  int mode = 2;
+  if(req->params && json_object_has_member(req->params, "monochrome"))
+    mode = json_object_get_boolean_member(req->params, "monochrome") ? 2 : 0;
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    dt_image_set_monochrome_flag(imgid, mode == 2);
+    count++;
+  }
+
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF,
+                             ids);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_move ────────────────────────────────────────── */
+
+char *dt_server_catalog_image_move(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  if(!req->params || !json_object_has_member(req->params, "path"))
+  {
+    g_list_free(ids);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing path parameter");
+  }
+
+  const char *path = json_object_get_string_member(req->params, "path");
+
+  /* Get or create film roll for destination directory */
+  dt_film_t film;
+  dt_film_init(&film);
+  const dt_filmid_t filmid = dt_film_new(&film, path);
+  if(!dt_is_valid_filmid(filmid))
+  {
+    dt_film_cleanup(&film);
+    g_list_free(ids);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Cannot access destination folder");
+  }
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    if(!dt_image_move(imgid, filmid))
+      count++;
+  }
+
+  dt_film_cleanup(&film);
+  dt_film_remove_empty();
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF, ids);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_FILMROLLS_CHANGED);
+
+  return _make_count_response(req, count);
+}
+
+
+/* ── catalog.image_copy_to ─────────────────────────────────────── */
+
+char *dt_server_catalog_image_copy_to(dt_server_t *server, const dt_server_request_t *req)
+{
+  (void)server;
+  GList *ids = _parse_imgids(req);
+  if(!ids)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing imgids parameter");
+
+  if(!req->params || !json_object_has_member(req->params, "path"))
+  {
+    g_list_free(ids);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing path parameter");
+  }
+
+  const char *path = json_object_get_string_member(req->params, "path");
+
+  dt_film_t film;
+  dt_film_init(&film);
+  const dt_filmid_t filmid = dt_film_new(&film, path);
+  if(!dt_is_valid_filmid(filmid))
+  {
+    dt_film_cleanup(&film);
+    g_list_free(ids);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Cannot access destination folder");
+  }
+
+  int count = 0;
+  for(GList *t = ids; t; t = g_list_next(t))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(t->data);
+    const dt_imgid_t new_imgid = dt_image_copy(imgid, filmid);
+    if(dt_is_valid_imgid(new_imgid))
+      count++;
+  }
+
+  dt_film_cleanup(&film);
+  dt_collection_update_query(darktable.collection,
+                             DT_COLLECTION_CHANGE_RELOAD, DT_COLLECTION_PROP_UNDEF, ids);
+  DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_FILMROLLS_CHANGED);
+
+  return _make_count_response(req, count);
 }

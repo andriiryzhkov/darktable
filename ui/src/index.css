@@ -118,9 +118,12 @@ body {
 
 .thumb-top-right {
   position: absolute;
-  top: 4px;
-  right: 6px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  padding: 4px 6px;
   display: flex;
+  align-items: flex-start;
   gap: 3px;
   z-index: 2;
 }
@@ -586,6 +589,14 @@ body {
   padding: 2px;
 }
 
+.bauhaus-button-accent {
+  background-color: color-mix(in srgb, var(--button-bg) 85%, var(--fg-color));
+}
+
+.bauhaus-button[data-active="true"] {
+  background-color: color-mix(in srgb, var(--button-bg) 85%, var(--fg-color));
+}
+
 .bauhaus-button-transparent {
   background: transparent;
   border-color: transparent;
@@ -613,9 +624,8 @@ body {
   flex: 0 1 auto;
   min-width: 0;
   padding: 3px 4px;
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
+  font-size: 0.75rem;
+  text-align: center;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
@@ -626,6 +636,9 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.bauhaus-tab-bar[data-justify="uniform"] > .bauhaus-tab {
+  flex: 1 1 0;
+}
 
 .bauhaus-tab:hover {
   color: var(--fg-color);
@@ -634,6 +647,17 @@ body {
 .bauhaus-tab--active {
   color: var(--fg-color);
   border-bottom-color: var(--fg-color);
+}
+
+.bauhaus-tab-stack {
+  display: grid;
+}
+.bauhaus-tab-panel {
+  grid-area: 1 / 1;
+}
+.bauhaus-tab-panel--hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .bauhaus-button-row {
@@ -661,6 +685,38 @@ body {
 
 .module-button-grid .bauhaus-button:last-child:nth-child(odd) {
   grid-column: 1 / -1;
+}
+
+/* Actions on selection module */
+.actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.actions-grid > .actions-rotate-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr;
+  gap: 2px;
+  align-items: stretch;
+}
+
+.actions-rotate-row > .bauhaus-button {
+  width: 100%;
+  aspect-ratio: unset;
+}
+
+.actions-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.actions-metadata-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 2px;
 }
 
 /* Orientation module: label + icon buttons row */
@@ -732,7 +788,6 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 2px 0;
-  margin-bottom: 6px;
   cursor: pointer;
   user-select: none;
 }
@@ -1657,6 +1712,24 @@ body {
 
 .lighttable-loading {
   color: var(--plugin-label-color);
+}
+
+/* Local copy triangle indicator (center-right edge, matches GTK darktable) */
+.thumb-local-copy {
+  position: absolute;
+  top: calc(50% - 8px);
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 14px 14px 0;
+  border-color: transparent var(--thumbnail-font-color) transparent transparent;
+  filter:
+    drop-shadow(-1px 0 0 rgba(255, 255, 255, 0.5))
+    drop-shadow(0 -1px 0 rgba(255, 255, 255, 0.5))
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.5));
+  z-index: 3;
+  pointer-events: none;
 }
 
 /* Thumbnail status icons */

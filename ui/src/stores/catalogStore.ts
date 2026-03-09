@@ -20,6 +20,7 @@ interface CatalogState {
   images: ImageInfo[];
   total: number;
   loading: boolean;
+  thumbRevision: number;
   selectedIds: Set<number>;
   lastSelectedId: number | null;
   hoverImageId: number | null;
@@ -38,6 +39,7 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
   images: [],
   total: 0,
   loading: false,
+  thumbRevision: 0,
   selectedIds: new Set<number>(),
   lastSelectedId: null,
   hoverImageId: null,
@@ -59,11 +61,12 @@ export const useCatalogStore = create<CatalogState>((set, get) => ({
       }
       // Fetch all image metadata in one request
       const result = await catalogQuery(0, total, rules, sortBy, sortDirection);
-      set({
+      set((s) => ({
         images: result.images.map(enrichImage),
         total: result.total,
         loading: false,
-      });
+        thumbRevision: s.thumbRevision + 1,
+      }));
     } catch (e) {
       console.error("catalog.query failed:", e);
       set({ loading: false });

@@ -133,6 +133,22 @@ char *dt_server_catalog_copy_import(dt_server_t *server, const dt_server_request
 char *dt_server_catalog_get_file_thumbnail(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_catalog_get_collection_values(dt_server_t *server, const dt_server_request_t *req);
 
+// Image action handlers (server_catalog.c)
+char *dt_server_catalog_image_remove(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_delete(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_duplicate(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_rotate(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_group(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_ungroup(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_copy_local(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_resync_local(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_refresh_exif(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_metadata_paste(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_metadata_clear(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_set_monochrome(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_move(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_catalog_image_copy_to(dt_server_t *server, const dt_server_request_t *req);
+
 // Develop handlers (dt_server_develop.c)
 char *dt_server_develop_open(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_close(dt_server_t *server, const dt_server_request_t *req);

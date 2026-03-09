@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import DialogOverlay from "./DialogOverlay";
 import BauhausButton from "./controls/BauhausButton";
 
@@ -15,16 +15,13 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const yesRef = useRef<HTMLButtonElement>(null);
-
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") onConfirm();
+      if (e.key === "Enter") onCancel();
     };
     window.addEventListener("keydown", handleKey);
-    yesRef.current?.focus();
     return () => window.removeEventListener("keydown", handleKey);
-  }, [onConfirm]);
+  }, [onCancel]);
 
   return (
     <DialogOverlay title={title} onClose={onCancel} zIndex={300}>
@@ -32,7 +29,7 @@ export default function ConfirmDialog({
         <div className="confirm-message">{message}</div>
         <div className="confirm-buttons">
           <BauhausButton label="yes" onClick={onConfirm} />
-          <BauhausButton label="no" onClick={onCancel} />
+          <BauhausButton label="no" accent onClick={onCancel} />
         </div>
       </div>
     </DialogOverlay>
