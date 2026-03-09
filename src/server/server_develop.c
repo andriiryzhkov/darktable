@@ -669,6 +669,51 @@ char *dt_server_develop_get_modules(dt_server_t *server, const dt_server_request
       json_builder_end_object(b);
     }
 
+    // Blend parameters (only for modules that support blending)
+    if((mod->flags() & IOP_FLAGS_SUPPORTS_BLENDING) && mod->blend_params)
+    {
+      json_builder_set_member_name(b, "blend");
+      json_builder_begin_object(b);
+
+      json_builder_set_member_name(b, "mask_mode");
+      json_builder_add_int_value(b, mod->blend_params->mask_mode);
+
+      json_builder_set_member_name(b, "blend_mode");
+      json_builder_add_int_value(b, mod->blend_params->blend_mode);
+
+      json_builder_set_member_name(b, "opacity");
+      json_builder_add_double_value(b, mod->blend_params->opacity);
+
+      json_builder_set_member_name(b, "mask_id");
+      json_builder_add_int_value(b, mod->blend_params->mask_id);
+
+      json_builder_set_member_name(b, "mask_combine");
+      json_builder_add_int_value(b, mod->blend_params->mask_combine);
+
+      json_builder_set_member_name(b, "blend_parameter");
+      json_builder_add_double_value(b, mod->blend_params->blend_parameter);
+
+      json_builder_set_member_name(b, "details");
+      json_builder_add_double_value(b, mod->blend_params->details);
+
+      json_builder_set_member_name(b, "feathering_guide");
+      json_builder_add_int_value(b, mod->blend_params->feathering_guide);
+
+      json_builder_set_member_name(b, "feathering_radius");
+      json_builder_add_double_value(b, mod->blend_params->feathering_radius);
+
+      json_builder_set_member_name(b, "blur_radius");
+      json_builder_add_double_value(b, mod->blend_params->blur_radius);
+
+      json_builder_set_member_name(b, "contrast");
+      json_builder_add_double_value(b, mod->blend_params->contrast);
+
+      json_builder_set_member_name(b, "brightness");
+      json_builder_add_double_value(b, mod->blend_params->brightness);
+
+      json_builder_end_object(b);
+    }
+
     json_builder_end_object(b);
   }
 
@@ -3137,6 +3182,70 @@ char *dt_server_develop_rename_instance(dt_server_t *server, const dt_server_req
   return _make_modules_response(server, session, req);
 }
 
+// ---- develop.set_blend_param ----
+
+char *dt_server_develop_set_blend_param(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "op")
+     || !json_object_has_member(req->params, "param")
+     || !json_object_has_member(req->params, "value"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, op, param, or value");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const int instance = json_object_has_member(req->params, "instance")
+    ? (int)json_object_get_int_member(req->params, "instance") : 0;
+  const char *param = json_object_get_string_member(req->params, "param");
+
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_iop_module_t *module = _find_module(session, op, instance);
+  if(!module)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+
+  if(!(module->flags() & IOP_FLAGS_SUPPORTS_BLENDING) || !module->blend_params)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Module does not support blending");
+
+  dt_develop_blend_params_t *bp = module->blend_params;
+
+  if(!strcmp(param, "mask_mode"))
+    bp->mask_mode = (uint32_t)json_object_get_int_member(req->params, "value");
+  else if(!strcmp(param, "blend_mode"))
+    bp->blend_mode = (uint32_t)json_object_get_int_member(req->params, "value");
+  else if(!strcmp(param, "opacity"))
+    bp->opacity = (float)json_object_get_double_member(req->params, "value");
+  else if(!strcmp(param, "mask_combine"))
+    bp->mask_combine = (uint32_t)json_object_get_int_member(req->params, "value");
+  else if(!strcmp(param, "blend_parameter"))
+    bp->blend_parameter = (float)json_object_get_double_member(req->params, "value");
+  else if(!strcmp(param, "details"))
+    bp->details = (float)json_object_get_double_member(req->params, "value");
+  else if(!strcmp(param, "feathering_guide"))
+    bp->feathering_guide = (uint32_t)json_object_get_int_member(req->params, "value");
+  else if(!strcmp(param, "feathering_radius"))
+    bp->feathering_radius = (float)json_object_get_double_member(req->params, "value");
+  else if(!strcmp(param, "blur_radius"))
+    bp->blur_radius = (float)json_object_get_double_member(req->params, "value");
+  else if(!strcmp(param, "contrast"))
+    bp->contrast = (float)json_object_get_double_member(req->params, "value");
+  else if(!strcmp(param, "brightness"))
+    bp->brightness = (float)json_object_get_double_member(req->params, "value");
+  else
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Unknown blend param");
+
+  dt_iop_commit_blend_params(module, bp);
+  dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
+
+  fprintf(stderr, "[server] develop.set_blend_param: op=%s instance=%d param=%s\n",
+          op, instance, param);
+
+  return _make_modules_response(server, session, req);
+}
+
 char *dt_server_develop_delete_preset(dt_server_t *server, const dt_server_request_t *req)
 {
   if(!req->params || !json_object_has_member(req->params, "op")
@@ -3314,7 +3423,20 @@ char *dt_server_develop_get_masks(dt_server_t *server, const dt_server_request_t
     json_builder_set_member_name(b, "is_clone");
     json_builder_add_boolean_value(b, (form->type & DT_MASKS_CLONE) != 0);
 
-    if(form->type & DT_MASKS_GROUP)
+    // Source position for clone masks
+    if(form->type & DT_MASKS_CLONE)
+    {
+      json_builder_set_member_name(b, "source");
+      json_builder_begin_array(b);
+      json_builder_add_double_value(b, form->source[0]);
+      json_builder_add_double_value(b, form->source[1]);
+      json_builder_end_array(b);
+    }
+
+    // Serialize type-specific point geometry
+    const dt_masks_type_t base_type = form->type & ~(DT_MASKS_CLONE | DT_MASKS_NON_CLONE);
+
+    if(base_type == DT_MASKS_GROUP)
     {
       json_builder_set_member_name(b, "children");
       json_builder_begin_array(b);
@@ -3332,6 +3454,150 @@ char *dt_server_develop_get_masks(dt_server_t *server, const dt_server_request_t
         json_builder_end_object(b);
       }
       json_builder_end_array(b);
+    }
+    else if(base_type == DT_MASKS_CIRCLE)
+    {
+      const dt_masks_point_circle_t *pt = g_list_nth_data(form->points, 0);
+      if(pt)
+      {
+        json_builder_set_member_name(b, "points");
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "center");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->center[0]);
+        json_builder_add_double_value(b, pt->center[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "radius");
+        json_builder_add_double_value(b, pt->radius);
+        json_builder_set_member_name(b, "border");
+        json_builder_add_double_value(b, pt->border);
+        json_builder_end_object(b);
+      }
+    }
+    else if(base_type == DT_MASKS_ELLIPSE)
+    {
+      const dt_masks_point_ellipse_t *pt = g_list_nth_data(form->points, 0);
+      if(pt)
+      {
+        json_builder_set_member_name(b, "points");
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "center");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->center[0]);
+        json_builder_add_double_value(b, pt->center[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "radius");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->radius[0]);
+        json_builder_add_double_value(b, pt->radius[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "rotation");
+        json_builder_add_double_value(b, pt->rotation);
+        json_builder_set_member_name(b, "border");
+        json_builder_add_double_value(b, pt->border);
+        json_builder_set_member_name(b, "flags");
+        json_builder_add_int_value(b, pt->flags);
+        json_builder_end_object(b);
+      }
+    }
+    else if(base_type == DT_MASKS_PATH)
+    {
+      json_builder_set_member_name(b, "points");
+      json_builder_begin_array(b);
+      for(GList *p = form->points; p; p = g_list_next(p))
+      {
+        const dt_masks_point_path_t *pt = p->data;
+        if(!pt) continue;
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "corner");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->corner[0]);
+        json_builder_add_double_value(b, pt->corner[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "ctrl1");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->ctrl1[0]);
+        json_builder_add_double_value(b, pt->ctrl1[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "ctrl2");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->ctrl2[0]);
+        json_builder_add_double_value(b, pt->ctrl2[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "border");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->border[0]);
+        json_builder_add_double_value(b, pt->border[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "state");
+        json_builder_add_int_value(b, pt->state);
+        json_builder_end_object(b);
+      }
+      json_builder_end_array(b);
+    }
+    else if(base_type == DT_MASKS_BRUSH)
+    {
+      json_builder_set_member_name(b, "points");
+      json_builder_begin_array(b);
+      for(GList *p = form->points; p; p = g_list_next(p))
+      {
+        const dt_masks_point_brush_t *pt = p->data;
+        if(!pt) continue;
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "corner");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->corner[0]);
+        json_builder_add_double_value(b, pt->corner[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "ctrl1");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->ctrl1[0]);
+        json_builder_add_double_value(b, pt->ctrl1[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "ctrl2");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->ctrl2[0]);
+        json_builder_add_double_value(b, pt->ctrl2[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "border");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->border[0]);
+        json_builder_add_double_value(b, pt->border[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "density");
+        json_builder_add_double_value(b, pt->density);
+        json_builder_set_member_name(b, "hardness");
+        json_builder_add_double_value(b, pt->hardness);
+        json_builder_set_member_name(b, "state");
+        json_builder_add_int_value(b, pt->state);
+        json_builder_end_object(b);
+      }
+      json_builder_end_array(b);
+    }
+    else if(base_type == DT_MASKS_GRADIENT)
+    {
+      const dt_masks_point_gradient_t *pt = g_list_nth_data(form->points, 0);
+      if(pt)
+      {
+        json_builder_set_member_name(b, "points");
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "anchor");
+        json_builder_begin_array(b);
+        json_builder_add_double_value(b, pt->anchor[0]);
+        json_builder_add_double_value(b, pt->anchor[1]);
+        json_builder_end_array(b);
+        json_builder_set_member_name(b, "rotation");
+        json_builder_add_double_value(b, pt->rotation);
+        json_builder_set_member_name(b, "compression");
+        json_builder_add_double_value(b, pt->compression);
+        json_builder_set_member_name(b, "steepness");
+        json_builder_add_double_value(b, pt->steepness);
+        json_builder_set_member_name(b, "curvature");
+        json_builder_add_double_value(b, pt->curvature);
+        json_builder_set_member_name(b, "state");
+        json_builder_add_int_value(b, pt->state);
+        json_builder_end_object(b);
+      }
     }
 
     json_builder_end_object(b);
@@ -3435,7 +3701,7 @@ char *dt_server_develop_delete_mask(dt_server_t *server, const dt_server_request
     if(module->blend_params->mask_id == formid)
     {
       module->blend_params->mask_id = NO_MASKID;
-      dt_dev_add_history_item(&session->dev, module, TRUE);
+      dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
       continue;
     }
 
@@ -3451,7 +3717,7 @@ char *dt_server_develop_delete_mask(dt_server_t *server, const dt_server_request
       {
         grp->points = g_list_remove(grp->points, grpt);
         free(grpt);
-        dt_dev_add_history_item(&session->dev, module, TRUE);
+        dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
         break;
       }
     }

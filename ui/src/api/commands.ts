@@ -52,6 +52,7 @@ declare global {
     developGetMasks: (sessionId: string) => Promise<MaskListResult>;
     developRenameMask: (sessionId: string, formid: number, name: string) => Promise<unknown>;
     developDeleteMask: (sessionId: string, formid: number) => Promise<unknown>;
+    developSetBlendParam: (sessionId: string, op: string, instance: number, param: string, value: number) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     getFramePort: () => Promise<number>;
     pickFolder: () => Promise<string | null>;
@@ -200,6 +201,9 @@ export const developRenameMask = (sessionId: string, formid: number, name: strin
 
 export const developDeleteMask = (sessionId: string, formid: number) =>
   window.developDeleteMask(sessionId, formid);
+
+export const developSetBlendParam = (sessionId: string, op: string, instance: number, param: string, value: number) =>
+  window.developSetBlendParam(sessionId, op, instance, param, value);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);

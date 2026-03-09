@@ -26,6 +26,7 @@ import {
   developGetMasks,
   developRenameMask,
   developDeleteMask,
+  developSetBlendParam,
   getPreviewFrame,
   getFramePort,
 } from "../api/commands";
@@ -157,6 +158,7 @@ interface DevelopState {
   historyEnd: number;
   maskForms: MaskForm[];
   maskUsage: MaskUsage[];
+  showMasks: boolean;
   loading: boolean;
   previewError: string | null;
 
@@ -205,6 +207,8 @@ interface DevelopState {
   fetchMasks: () => Promise<void>;
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
+  toggleMasks: () => void;
+  setBlendParam: (op: string, instance: number, param: string, value: number, skipRefresh?: boolean) => Promise<void>;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -250,6 +254,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   historyEnd: 0,
   maskForms: [],
   maskUsage: [],
+  showMasks: false,
   loading: false,
   previewError: null,
   focusModuleOp: null,
@@ -365,6 +370,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       historyEnd: 0,
       maskForms: [],
       maskUsage: [],
+      showMasks: false,
       sequence: 0,
     });
   },
@@ -773,6 +779,23 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       get().fetchHistory();
     } catch (e) {
       console.error("delete mask failed:", e);
+    }
+  },
+
+  toggleMasks: () => set((s) => ({ showMasks: !s.showMasks })),
+
+  setBlendParam: async (op, instance, param, value, skipRefresh) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developSetBlendParam(sessionId, op, instance, param, value);
+      if (!skipRefresh) {
+        // Refresh modules to get updated blend params
+        const result = await developGetModules(sessionId);
+        set({ modules: result.modules });
+      }
+    } catch (e) {
+      console.error("set blend param failed:", e);
     }
   },
 

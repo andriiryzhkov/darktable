@@ -797,6 +797,46 @@ static void on_develop_delete_mask(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+static void on_develop_set_blend_param(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 5)
+  {
+    _return_error(ctx, id, "developSetBlendParam requires (sessionId, op, instance, param, value)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *op = _get_string_arg(args, 1);
+  const gint64 instance = json_array_get_int_element(args, 2);
+  char *param = _get_string_arg(args, 3);
+  // JS numbers are always doubles in JSON
+  const double value = json_array_get_double_element(args, 4);
+  g_object_unref(parser);
+
+  // Use integer format for whole numbers (e.g. blend_mode with REVERSE flag 0x80000000),
+  // otherwise %g which truncates large integers via scientific notation
+  char *params;
+  if(value == (double)(gint64)value && value >= -2147483648.0 && value <= 4294967295.0)
+    params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"instance\":%" G_GINT64_FORMAT
+                             ",\"param\":\"%s\",\"value\":%" G_GINT64_FORMAT "}",
+                             session_id, op, instance, param, (gint64)value);
+  else
+    params = g_strdup_printf("{\"session_id\":\"%s\",\"op\":\"%s\",\"instance\":%" G_GINT64_FORMAT
+                             ",\"param\":\"%s\",\"value\":%g}",
+                             session_id, op, instance, param, value);
+
+  g_free(session_id);
+  g_free(op);
+  g_free(param);
+
+  _ipc_passthrough(ctx, id, "develop.set_blend_param", params);
+  g_free(params);
+}
+
 static void on_develop_request_preview(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -3147,6 +3187,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developGetMasks", on_develop_get_masks, ctx);
   webview_bind(ctx->webview, "developRenameMask", on_develop_rename_mask, ctx);
   webview_bind(ctx->webview, "developDeleteMask", on_develop_delete_mask, ctx);
+  webview_bind(ctx->webview, "developSetBlendParam", on_develop_set_blend_param, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "getFramePort", on_get_frame_port, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);

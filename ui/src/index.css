@@ -387,6 +387,23 @@ body {
 }
 
 /* Module collapsible section */
+/* Non-collapsible section with title */
+.bauhaus-section {
+  margin-top: 6px;
+}
+
+.bauhaus-section-header {
+  border-bottom: 1px solid color-mix(in srgb, var(--plugin-label-color) 50%, transparent);
+  padding: 2px 0 1px;
+  margin-bottom: 4px;
+}
+
+.bauhaus-section-title {
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+}
+
+/* Collapsible section */
 .module-section {
   background-color: var(--collapsible-bg-color);
   border-radius: 4px;
@@ -3238,6 +3255,118 @@ body {
   display: none;
   pointer-events: none;
   z-index: 5;
+}
+
+.mask-overlay {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Blending toolbar (inside IOP modules) */
+.blending-toolbar {
+  margin-top: 6px;
+}
+
+.blending-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.blending-mode-row .bauhaus-combo {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+
+.blending-mask-modes {
+  display: flex;
+  align-items: stretch;
+  background: transparent;
+  position: relative;
+  border-radius: 8px;
+  height: 20px;
+  padding: 0;
+  gap: 0;
+}
+
+.blending-mask-modes::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px dashed var(--plugin-bg-color);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.blending-mask-modes > .bauhaus-tooltip-trigger {
+  flex: 1 1 0;
+  display: flex;
+}
+
+.blending-mask-modes > .bauhaus-tooltip-trigger:last-child {
+  flex: 0 0 20px;
+}
+
+.blending-mask-modes .bauhaus-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--plugin-label-color);
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  position: relative;
+}
+
+.blending-toolbar .bauhaus-button-transparent:hover:not(:disabled) {
+  background: var(--plugin-label-color);
+  color: var(--plugin-bg-color);
+}
+
+.blending-toolbar .bauhaus-button-transparent[data-active="true"] {
+  background: var(--plugin-label-color);
+  color: var(--plugin-bg-color);
+}
+
+.blending-mask-modes .bauhaus-button:disabled {
+  opacity: 0.3;
+}
+
+.blending-combined-icon {
+  display: flex;
+  align-items: center;
+  position: relative;
+  width: 18px;
+  height: 16px;
+}
+
+.blending-combined-icon > :first-child {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.blending-combined-icon > :last-child {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+
+.blending-controls {
+  padding: 6px 0 2px;
+}
+
+.blending-shapes {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0 2px;
 }
 
 /* Picker overlay */

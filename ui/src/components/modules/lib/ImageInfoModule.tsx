@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import LibModuleCard from "../LibModuleCard";
-import BauhausSection from "../../controls/BauhausSection";
+import BauhausCollapsible from "../../controls/BauhausCollapsible";
 import { useCatalogStore } from "../../../stores/catalogStore";
 import type { ImageInfo } from "../../../types/protocol";
 
@@ -355,9 +355,9 @@ export default function ImageInfoModule() {
   return (
     <LibModuleCard title="image information" description="display camera and image metadata for the selected image">
       <ExifBar image={image} various={various} />
-      <BauhausSection title="full information">
+      <BauhausCollapsible title="full information">
         <FullDetails image={image} various={various} />
-      </BauhausSection>
+      </BauhausCollapsible>
     </LibModuleCard>
   );
 }

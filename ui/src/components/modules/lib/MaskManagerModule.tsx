@@ -5,7 +5,7 @@ import LibModuleCard from "../LibModuleCard";
 import BauhausButton from "../../controls/BauhausButton";
 import BauhausTooltip from "../../controls/BauhausTooltip";
 import BauhausSlider from "../../controls/BauhausSlider";
-import BauhausSection from "../../controls/BauhausSection";
+import BauhausCollapsible from "../../controls/BauhausCollapsible";
 import { useDevelopStore } from "../../../stores/developStore";
 import { MASKS_TYPE } from "../../../types/protocol";
 import type { MaskForm, MaskUsage } from "../../../types/protocol";
@@ -294,7 +294,7 @@ export default function MaskManagerModule() {
         </div>
 
         {/* Properties section */}
-        <BauhausSection title="properties">
+        <BauhausCollapsible title="properties">
           <BauhausSlider
             label="opacity"
             value={1}
@@ -322,7 +322,7 @@ export default function MaskManagerModule() {
             defaultValue={0.33}
             format={(v) => `${(v * 100).toFixed(2)}%`}
           />
-        </BauhausSection>
+        </BauhausCollapsible>
       </LibModuleCard>
       {menuPos && createPortal(
         <div

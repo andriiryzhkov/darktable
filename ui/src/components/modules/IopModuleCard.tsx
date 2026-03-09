@@ -8,6 +8,7 @@ import BauhausTooltip from "../controls/BauhausTooltip";
 import ModuleCard from "./ModuleCard";
 import PresetMenu from "./PresetMenu";
 import MultiInstanceMenu from "./MultiInstanceMenu";
+import BlendingToolbar from "./BlendingToolbar";
 import { IopModuleProvider } from "./IopModuleContext";
 import { useDevelopStore, getEnabledOps } from "../../stores/developStore";
 import { useModuleExpanded } from "../../hooks/useModuleExpanded";
@@ -169,6 +170,9 @@ export default function IopModuleCard({ module, instance: instanceProp, instance
           <Suspense fallback={null}>
             <Component />
           </Suspense>
+          {moduleInfo?.blend && (
+            <BlendingToolbar op={module.op} instance={instanceId} moduleInfo={moduleInfo} />
+          )}
         </IopModuleProvider>
       </ModuleCard>
       {presetsOpen && (

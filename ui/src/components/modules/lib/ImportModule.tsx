@@ -2,7 +2,7 @@ import LibModuleCard from "../LibModuleCard";
 import BauhausButton from "../../controls/BauhausButton";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
 import BauhausInput from "../../controls/BauhausInput";
-import BauhausSection from "../../controls/BauhausSection";
+import BauhausCollapsible from "../../controls/BauhausCollapsible";
 import { useImportStore } from "../../../stores/importStore";
 
 export default function ImportModule() {
@@ -15,7 +15,7 @@ export default function ImportModule() {
           <BauhausButton label="add to library..." onClick={() => openDialog("inplace")} />
           <BauhausButton label="copy & import..." onClick={() => openDialog("copy")} />
         </div>
-        <BauhausSection title="parameters">
+        <BauhausCollapsible title="parameters">
           <div className="bauhaus-input-group">
             <BauhausCheckbox label="ignore EXIF rating" />
             <BauhausInput
@@ -42,7 +42,7 @@ export default function ImportModule() {
             <BauhausInput label="tag presets" type="select" options={["none"]} />
             <BauhausInput label="tags" value="" />
           </div>
-        </BauhausSection>
+        </BauhausCollapsible>
       </div>
     </LibModuleCard>
   );

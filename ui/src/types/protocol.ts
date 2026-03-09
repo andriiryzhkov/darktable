@@ -93,6 +93,22 @@ export interface ModuleDescription {
   output: string;
 }
 
+/** Blend parameters for a module */
+export interface BlendParams {
+  mask_mode: number;
+  blend_mode: number;
+  blend_parameter: number;
+  opacity: number;
+  mask_id: number;
+  mask_combine: number;
+  details: number;
+  feathering_guide: number;
+  feathering_radius: number;
+  blur_radius: number;
+  contrast: number;
+  brightness: number;
+}
+
 export interface ModuleInfo {
   op: string;
   name: string;
@@ -103,11 +119,64 @@ export interface ModuleInfo {
   iop_order: number;
   params_size: number;
   description?: ModuleDescription;
+  blend?: BlendParams;
 }
 
 /** IOP module flags from dt_iop_flags_t */
 export const IOP_FLAGS = {
+  SUPPORTS_BLENDING: 1 << 1,
   ONE_INSTANCE: 1 << 7,
+  NO_MASKS: 1 << 10,
+} as const;
+
+/** Mask mode flags from dt_develop_mask_mode_t */
+export const MASK_MODE = {
+  DISABLED: 0,
+  ENABLED: 1,       // uniform (no mask)
+  DRAWN: 1 << 1,    // drawn mask
+  PARAMETRIC: 1 << 2,
+  RASTER: 1 << 3,
+  DRAWN_PARAMETRIC: (1 << 1) | (1 << 2),
+} as const;
+
+/** Blend modes from dt_develop_blend_mode_t */
+export const BLEND_MODE = {
+  NORMAL2: 0x18,
+  BOUNDED: 0x19,
+  LIGHTEN: 0x02,
+  DARKEN: 0x03,
+  MULTIPLY: 0x04,
+  AVERAGE: 0x05,
+  ADD: 0x06,
+  SUBTRACT: 0x07,
+  DIFFERENCE2: 0x17,
+  SCREEN: 0x09,
+  OVERLAY: 0x0A,
+  SOFTLIGHT: 0x0B,
+  HARDLIGHT: 0x0C,
+  VIVIDLIGHT: 0x0D,
+  LINEARLIGHT: 0x0E,
+  PINLIGHT: 0x0F,
+  LIGHTNESS: 0x10,
+  CHROMATICITY: 0x11,
+  HUE: 0x12,
+  COLOR: 0x13,
+  COLORADJUST: 0x16,
+  LAB_LIGHTNESS: 0x1A,
+  LAB_COLOR: 0x1B,
+  HSV_VALUE: 0x1C,
+  HSV_COLOR: 0x1D,
+  LAB_L: 0x1E,
+  LAB_A: 0x1F,
+  LAB_B: 0x20,
+  RGB_R: 0x21,
+  RGB_G: 0x22,
+  RGB_B: 0x23,
+  SUBTRACT_INVERSE: 0x25,
+  DIVIDE: 0x26,
+  DIVIDE_INVERSE: 0x27,
+  GEOMETRIC_MEAN: 0x28,
+  HARMONIC_MEAN: 0x29,
 } as const;
 
 export interface HistoryItem {
@@ -211,13 +280,61 @@ export interface MaskGroupChild {
   opacity: number;
 }
 
+/** Point geometry for circle masks */
+export interface MaskPointsCircle {
+  center: [number, number];
+  radius: number;
+  border: number;
+}
+
+/** Point geometry for ellipse masks */
+export interface MaskPointsEllipse {
+  center: [number, number];
+  radius: [number, number];
+  rotation: number;
+  border: number;
+  flags: number; // 0=equidistant, 1=proportional
+}
+
+/** Single control point for path masks */
+export interface MaskPointPath {
+  corner: [number, number];
+  ctrl1: [number, number];
+  ctrl2: [number, number];
+  border: [number, number];
+  state: number;
+}
+
+/** Single control point for brush masks */
+export interface MaskPointBrush {
+  corner: [number, number];
+  ctrl1: [number, number];
+  ctrl2: [number, number];
+  border: [number, number];
+  density: number;
+  hardness: number;
+  state: number;
+}
+
+/** Point geometry for gradient masks */
+export interface MaskPointsGradient {
+  anchor: [number, number];
+  rotation: number;
+  compression: number;
+  steepness: number;
+  curvature: number;
+  state: number; // 1=linear, 2=sigmoidal
+}
+
 export interface MaskForm {
   formid: number;
   name: string;
   type: number;
   type_name: string;
   is_clone: boolean;
+  source?: [number, number];
   children?: MaskGroupChild[];
+  points?: MaskPointsCircle | MaskPointsEllipse | MaskPointPath[] | MaskPointBrush[] | MaskPointsGradient;
 }
 
 export interface MaskUsage {

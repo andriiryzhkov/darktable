@@ -1,4 +1,4 @@
-import { useCallback, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 interface BauhausSliderProps {
   label: string;
@@ -12,7 +12,7 @@ interface BauhausSliderProps {
   color?: string;
   format?: (v: number) => string;
   onChange?: (value: number) => void;
-  onRelease?: () => void;
+  onRelease?: (value: number) => void;
   actionIcon?: ReactNode;
   onAction?: () => void;
 }
@@ -39,7 +39,19 @@ export default function BauhausSlider({
   onAction,
 }: BauhausSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
-  const clampedValue = Math.max(min, Math.min(max, value));
+  const [dragValue, setDragValue] = useState<number | null>(null);
+  const dragRef = useRef<number | null>(null);
+  const releasedRef = useRef(false);
+  const dragging = dragValue !== null;
+  const displayValue = Math.max(min, Math.min(max, dragging ? dragValue : value));
+
+  // Clear held drag value once the prop catches up after release
+  useEffect(() => {
+    if (releasedRef.current && dragValue !== null) {
+      releasedRef.current = false;
+      setDragValue(null);
+    }
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const valueFromX = useCallback(
     (clientX: number) => {
@@ -63,7 +75,10 @@ export default function BauhausSlider({
     (e: React.PointerEvent) => {
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      onChange?.(valueFromX(e.clientX));
+      const v = valueFromX(e.clientX);
+      dragRef.current = v;
+      setDragValue(v);
+      onChange?.(v);
     },
     [onChange, valueFromX],
   );
@@ -72,7 +87,10 @@ export default function BauhausSlider({
     (e: React.PointerEvent) => {
       if (!(e.currentTarget as HTMLElement).hasPointerCapture(e.pointerId))
         return;
-      onChange?.(valueFromX(e.clientX));
+      const v = valueFromX(e.clientX);
+      dragRef.current = v;
+      setDragValue(v);
+      onChange?.(v);
     },
     [onChange, valueFromX],
   );
@@ -81,14 +99,17 @@ export default function BauhausSlider({
     const el = e.currentTarget as HTMLElement;
     if (el.hasPointerCapture(e.pointerId)) {
       el.releasePointerCapture(e.pointerId);
-      onRelease?.();
+      const final = dragRef.current ?? value;
+      dragRef.current = null;
+      releasedRef.current = true;
+      onRelease?.(final);
     }
-  }, [onRelease]);
+  }, [onRelease, value]);
 
   const range = max - min;
   const orig = origin ?? min;
   const originPct = ((orig - min) / range) * 100;
-  const valuePct = ((clampedValue - min) / range) * 100;
+  const valuePct = ((displayValue - min) / range) * 100;
   const fillLeft = Math.min(originPct, valuePct);
   const fillWidth = Math.abs(valuePct - originPct);
 
@@ -103,7 +124,7 @@ export default function BauhausSlider({
       >
         <div className="bauhaus-slider-header">
           <span className="bauhaus-slider-label">{label}</span>
-          <span className="bauhaus-slider-value">{format(clampedValue)}</span>
+          <span className="bauhaus-slider-value">{format(displayValue)}</span>
         </div>
         <div
           ref={trackRef}

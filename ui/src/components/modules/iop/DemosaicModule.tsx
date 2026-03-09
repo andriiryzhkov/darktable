@@ -4,7 +4,7 @@ import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
 import BauhausCheckbox from "../../controls/BauhausCheckbox";
-import BauhausSection from "../../controls/BauhausSection";
+import BauhausCollapsible from "../../controls/BauhausCollapsible";
 
 // Demosaic method enum values (must match server-side)
 const DEMOSAIC_DUAL = 2048;
@@ -213,7 +213,7 @@ export default function DemosaicModule() {
       )}
 
       {showCapture && (
-        <BauhausSection title="capture sharpen controls">
+        <BauhausCollapsible title="capture sharpen controls">
           <BauhausSlider
             label="iterations"
             value={localCsIter}
@@ -271,7 +271,7 @@ export default function DemosaicModule() {
               onRelease={throttledRelease}
             />
           )}
-        </BauhausSection>
+        </BauhausCollapsible>
       )}
     </>
   );

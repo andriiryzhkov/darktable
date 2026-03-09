@@ -3,7 +3,7 @@ import { useDevelopStore } from "../../../stores/developStore";
 import { useThrottledParam } from "../../../hooks/useThrottledParam";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCombo from "../../controls/BauhausCombo";
-import BauhausSection from "../../controls/BauhausSection";
+import BauhausCollapsible from "../../controls/BauhausCollapsible";
 
 const RAD_2_DEG = 180 / Math.PI;
 
@@ -110,7 +110,7 @@ export default function SigmoidModule() {
         />
       )}
 
-      <BauhausSection title="display luminance">
+      <BauhausCollapsible title="display luminance">
         <BauhausSlider
           label="target black"
           value={localBlack}
@@ -134,10 +134,10 @@ export default function SigmoidModule() {
           onChange={(v) => { setLocalWhite(v); throttledApply("display_white_target", v); }}
           onRelease={throttledRelease}
         />
-      </BauhausSection>
+      </BauhausCollapsible>
 
       {isPerChannel && (
-        <BauhausSection title="primaries">
+        <BauhausCollapsible title="primaries">
           <BauhausCombo
             label="base primaries"
             options={["working profile", "Rec2020", "Display P3", "Adobe RGB", "sRGB"]}
@@ -237,7 +237,7 @@ export default function SigmoidModule() {
             onChange={(v) => { const raw = v / 100; setLocalPurity(raw); throttledApply("purity", raw); }}
             onRelease={throttledRelease}
           />
-        </BauhausSection>
+        </BauhausCollapsible>
       )}
     </>
   );

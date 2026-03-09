@@ -1,33 +1,17 @@
-import { useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface BauhausSectionProps {
   title: string;
-  defaultOpen?: boolean;
   children: ReactNode;
 }
 
-export default function BauhausSection({
-  title,
-  defaultOpen = false,
-  children,
-}: BauhausSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
-
+export default function BauhausSection({ title, children }: BauhausSectionProps) {
   return (
-    <div className="module-section">
-      <button
-        className="module-section-header"
-        onClick={() => setOpen(!open)}
-      >
-        <span className="module-section-title">{title}</span>
-        <ChevronDown
-          size={12}
-          className="module-section-chevron"
-          style={{ transform: open ? "rotate(180deg)" : "none" }}
-        />
-      </button>
-      {open && <div className="module-section-content">{children}</div>}
+    <div className="bauhaus-section">
+      <div className="bauhaus-section-header">
+        <span className="bauhaus-section-title">{title}</span>
+      </div>
+      <div className="bauhaus-section-content">{children}</div>
     </div>
   );
 }

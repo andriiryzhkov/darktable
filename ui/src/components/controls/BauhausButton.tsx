@@ -1,10 +1,15 @@
-import type { ReactNode } from "react";
+import { useState, useCallback, type ReactNode } from "react";
 
 interface BauhausButtonProps {
   label?: string;
   icon?: ReactNode;
   disabled?: boolean;
+  /** Controlled active state */
   active?: boolean;
+  /** Toggle mode: manages internal on/off state, calls onToggle with new value */
+  toggle?: boolean;
+  /** Callback for toggle mode */
+  onToggle?: (pressed: boolean) => void;
   accent?: boolean;
   title?: string;
   transparent?: boolean;
@@ -13,7 +18,19 @@ interface BauhausButtonProps {
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
-export default function BauhausButton({ label, icon, disabled, active, accent, title, transparent, onClick, onMouseDown, onContextMenu }: BauhausButtonProps) {
+export default function BauhausButton({ label, icon, disabled, active, toggle, onToggle, accent, title, transparent, onClick, onMouseDown, onContextMenu }: BauhausButtonProps) {
+  const [pressed, setPressed] = useState(active ?? false);
+  const isActive = toggle ? pressed : active;
+
+  const handleClick = useCallback(() => {
+    if (toggle) {
+      const next = !isActive;
+      setPressed(next);
+      onToggle?.(next);
+    }
+    onClick?.();
+  }, [toggle, isActive, onToggle, onClick]);
+
   const iconOnly = icon && !label;
   const classes = [
     "bauhaus-button",
@@ -25,9 +42,9 @@ export default function BauhausButton({ label, icon, disabled, active, accent, t
     <button
       className={classes}
       disabled={disabled}
-      data-active={active}
+      data-active={isActive}
       title={title}
-      onClick={onClick}
+      onClick={handleClick}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
     >

@@ -8,7 +8,7 @@ import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausButton from "../../controls/BauhausButton";
 import BauhausTooltip from "../../controls/BauhausTooltip";
 import BauhausCombo from "../../controls/BauhausCombo";
-import BauhausSection from "../../controls/BauhausSection";
+import BauhausCollapsible from "../../controls/BauhausCollapsible";
 
 const PRESET_OPTIONS = [
   "as shot",
@@ -321,7 +321,7 @@ export default function TemperatureModule() {
         onRelease={throttledRelease}
       />
 
-      <BauhausSection title="channel coefficients">
+      <BauhausCollapsible title="channel coefficients">
         <BauhausSlider
           label="red"
           value={localRed}
@@ -360,7 +360,7 @@ export default function TemperatureModule() {
           onChange={(v) => { setLocalBlue(v); throttledApply("blue", v); }}
           onRelease={throttledRelease}
         />
-      </BauhausSection>
+      </BauhausCollapsible>
     </>
   );
 }

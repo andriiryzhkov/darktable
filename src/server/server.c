@@ -186,6 +186,7 @@ static const dt_server_route_t _routes[] = {
   { "develop.get_masks",         dt_server_develop_get_masks },
   { "develop.rename_mask",       dt_server_develop_rename_mask },
   { "develop.delete_mask",       dt_server_develop_delete_mask },
+  { "develop.set_blend_param",   dt_server_develop_set_blend_param },
   { "export.image",               dt_server_export_image },
   { "config.get",                 _handle_config_get },
   { "config.set",                 _handle_config_set },
