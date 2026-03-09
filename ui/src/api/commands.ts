@@ -12,6 +12,7 @@ import type {
   Tag,
   PresetListResult,
   IntrospectionResult,
+  MaskListResult,
 } from "../types/protocol";
 import type { CollectionRuleParam, PropertyValue } from "../types/collections";
 import type { FolderEntry, FileEntry } from "../types/import";
@@ -48,6 +49,9 @@ declare global {
     developMoveInstance: (sessionId: string, op: string, instance: number, direction: "up" | "down") => Promise<unknown>;
     developRenameInstance: (sessionId: string, op: string, instance: number, name: string) => Promise<unknown>;
     developGetIntrospection: (sessionId: string, op: string) => Promise<IntrospectionResult>;
+    developGetMasks: (sessionId: string) => Promise<MaskListResult>;
+    developRenameMask: (sessionId: string, formid: number, name: string) => Promise<unknown>;
+    developDeleteMask: (sessionId: string, formid: number) => Promise<unknown>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     getFramePort: () => Promise<number>;
     pickFolder: () => Promise<string | null>;
@@ -187,6 +191,15 @@ export const developRenameInstance = (sessionId: string, op: string, instance: n
 
 export const developGetIntrospection = (sessionId: string, op: string) =>
   window.developGetIntrospection(sessionId, op);
+
+export const developGetMasks = (sessionId: string) =>
+  window.developGetMasks(sessionId);
+
+export const developRenameMask = (sessionId: string, formid: number, name: string) =>
+  window.developRenameMask(sessionId, formid, name);
+
+export const developDeleteMask = (sessionId: string, formid: number) =>
+  window.developDeleteMask(sessionId, formid);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);

@@ -3007,6 +3007,159 @@ body {
   color: var(--fg-color);
 }
 
+/* Mask manager module */
+.mask-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px 4px;
+}
+
+.mask-toolbar-label {
+  flex: 1;
+  font-size: var(--bauhaus-font-size);
+  color: var(--plugin-label-color);
+}
+
+.mask-toolbar-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.mask-tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 150px;
+  background: var(--bauhaus-bg);
+  border-radius: 6px;
+  padding: 2px 0;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+
+.mask-empty {
+  font-size: var(--bauhaus-font-size);
+  color: var(--disabled-fg-color);
+  padding: 2px 4px;
+  margin: 0;
+}
+
+.mask-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  font-size: var(--bauhaus-font-size);
+  color: var(--plugin-label-color);
+  cursor: pointer;
+}
+
+.mask-group-header:hover {
+  background: var(--hovered-bg-color);
+  border-radius: 3px;
+}
+
+.mask-group-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-color);
+}
+
+.mask-group-count {
+  font-size: 9px;
+  color: var(--plugin-label-color);
+  background: var(--button-bg);
+  border-radius: 3px;
+  padding: 0 4px;
+  min-width: 14px;
+  text-align: center;
+}
+
+.mask-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  font-size: var(--bauhaus-font-size);
+  cursor: default;
+}
+
+.mask-item[data-indent] {
+  padding-left: 20px;
+}
+
+.mask-item:hover {
+  background: var(--hovered-bg-color);
+}
+
+.mask-item-icon {
+  flex-shrink: 0;
+  color: var(--plugin-label-color);
+  display: flex;
+  align-items: center;
+}
+
+.mask-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mask-item-rename {
+  flex: 1;
+  background: var(--button-bg);
+  border: 1px solid var(--border-color);
+  color: var(--fg-color);
+  font-size: var(--bauhaus-font-size);
+  padding: 0 4px;
+  border-radius: 3px;
+  outline: none;
+}
+
+.mask-clone-badge {
+  margin-left: 4px;
+  font-size: 9px;
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.mask-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 4px;
+}
+
+.mask-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background-color: var(--bauhaus-bg);
+  border-radius: 4px;
+  padding: 3px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.mask-context-menu-item {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  color: var(--plugin-label-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mask-context-menu-item:hover {
+  background-color: var(--bauhaus-indicator);
+  color: var(--fg-color);
+}
+
+.mask-context-menu-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 3px 6px;
+}
+
 /* Navigation module */
 .nav-module {
   margin: 1px 4px 8px;

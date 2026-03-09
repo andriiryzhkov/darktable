@@ -26,6 +26,7 @@
 #include "develop/develop.h"
 #include "develop/blend.h"
 #include "develop/imageop.h"
+#include "develop/masks.h"
 #include "develop/pixelpipe.h"
 #include "common/database.h"
 #include "common/debug.h"
@@ -3256,4 +3257,220 @@ char *dt_server_develop_get_introspection(dt_server_t *server, const dt_server_r
   json_node_unref(result);
   g_object_unref(b);
   return resp;
+}
+
+static const char *_mask_type_name(dt_masks_type_t type)
+{
+  const int base = type & ~(DT_MASKS_CLONE | DT_MASKS_NON_CLONE);
+  switch(base)
+  {
+    case DT_MASKS_CIRCLE:   return "circle";
+    case DT_MASKS_ELLIPSE:  return "ellipse";
+    case DT_MASKS_PATH:     return "path";
+    case DT_MASKS_GRADIENT: return "gradient";
+    case DT_MASKS_BRUSH:    return "brush";
+    case DT_MASKS_GROUP:    return "group";
+    default:                return "unknown";
+  }
+}
+
+char *dt_server_develop_get_masks(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+
+  json_builder_set_member_name(b, "forms");
+  json_builder_begin_array(b);
+
+  for(GList *l = session->dev.forms; l; l = g_list_next(l))
+  {
+    const dt_masks_form_t *form = l->data;
+    if(!form) continue;
+
+    json_builder_begin_object(b);
+
+    json_builder_set_member_name(b, "formid");
+    json_builder_add_int_value(b, form->formid);
+
+    json_builder_set_member_name(b, "name");
+    json_builder_add_string_value(b, form->name);
+
+    json_builder_set_member_name(b, "type");
+    json_builder_add_int_value(b, form->type);
+
+    json_builder_set_member_name(b, "type_name");
+    json_builder_add_string_value(b, _mask_type_name(form->type));
+
+    json_builder_set_member_name(b, "is_clone");
+    json_builder_add_boolean_value(b, (form->type & DT_MASKS_CLONE) != 0);
+
+    if(form->type & DT_MASKS_GROUP)
+    {
+      json_builder_set_member_name(b, "children");
+      json_builder_begin_array(b);
+      for(GList *p = form->points; p; p = g_list_next(p))
+      {
+        const dt_masks_point_group_t *grpt = p->data;
+        if(!grpt) continue;
+        json_builder_begin_object(b);
+        json_builder_set_member_name(b, "formid");
+        json_builder_add_int_value(b, grpt->formid);
+        json_builder_set_member_name(b, "state");
+        json_builder_add_int_value(b, grpt->state);
+        json_builder_set_member_name(b, "opacity");
+        json_builder_add_double_value(b, grpt->opacity);
+        json_builder_end_object(b);
+      }
+      json_builder_end_array(b);
+    }
+
+    json_builder_end_object(b);
+  }
+
+  json_builder_end_array(b);
+
+  json_builder_set_member_name(b, "usage");
+  json_builder_begin_array(b);
+
+  for(GList *m = session->dev.iop; m; m = g_list_next(m))
+  {
+    const dt_iop_module_t *module = m->data;
+    if(!module || !module->blend_params) continue;
+    if(!dt_is_valid_maskid(module->blend_params->mask_id)) continue;
+
+    json_builder_begin_object(b);
+    json_builder_set_member_name(b, "mask_id");
+    json_builder_add_int_value(b, module->blend_params->mask_id);
+    json_builder_set_member_name(b, "op");
+    json_builder_add_string_value(b, module->op);
+    json_builder_set_member_name(b, "instance");
+    json_builder_add_int_value(b, module->multi_priority);
+    if(module->name)
+    {
+      json_builder_set_member_name(b, "module_name");
+      json_builder_add_string_value(b, module->name());
+    }
+    json_builder_end_object(b);
+  }
+
+  json_builder_end_array(b);
+  json_builder_end_object(b);
+
+  JsonNode *masks_result = json_builder_get_root(b);
+  char *masks_resp = dt_server_make_response(req->id, masks_result);
+  json_node_unref(masks_result);
+  g_object_unref(b);
+  return masks_resp;
+}
+
+char *dt_server_develop_rename_mask(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "formid")
+     || !json_object_has_member(req->params, "name"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, formid or name parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_mask_id_t formid = (dt_mask_id_t)json_object_get_int_member(req->params, "formid");
+  const char *name = json_object_get_string_member(req->params, "name");
+  if(!name)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "name must be a string");
+
+  dt_masks_form_t *form = dt_masks_get_from_id_ext(session->dev.forms, formid);
+  if(!form)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Mask form not found");
+
+  g_strlcpy(form->name, name, sizeof(form->name));
+  dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
+  dt_dev_write_history(&session->dev);
+
+  return dt_server_make_response(req->id, json_node_new(JSON_NODE_NULL));
+}
+
+char *dt_server_develop_delete_mask(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "formid"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or formid parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_mask_id_t formid = (dt_mask_id_t)json_object_get_int_member(req->params, "formid");
+
+  dt_masks_form_t *form = dt_masks_get_from_id_ext(session->dev.forms, formid);
+  if(!form)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Mask form not found");
+
+  // Remove this form from any module groups that reference it
+  for(GList *m = session->dev.iop; m; m = g_list_next(m))
+  {
+    dt_iop_module_t *module = m->data;
+    if(!module || !module->blend_params) continue;
+    if(!(module->flags() & IOP_FLAGS_SUPPORTS_BLENDING)) continue;
+
+    // Check if this is the module's base mask group
+    if(module->blend_params->mask_id == formid)
+    {
+      module->blend_params->mask_id = NO_MASKID;
+      dt_dev_add_history_item(&session->dev, module, TRUE);
+      continue;
+    }
+
+    // Check if this form is inside the module's mask group
+    dt_masks_form_t *grp = dt_masks_get_from_id_ext(session->dev.forms,
+                                                     module->blend_params->mask_id);
+    if(!grp || !(grp->type & DT_MASKS_GROUP)) continue;
+
+    for(GList *p = grp->points; p; p = g_list_next(p))
+    {
+      dt_masks_point_group_t *grpt = p->data;
+      if(grpt->formid == formid)
+      {
+        grp->points = g_list_remove(grp->points, grpt);
+        free(grpt);
+        dt_dev_add_history_item(&session->dev, module, TRUE);
+        break;
+      }
+    }
+  }
+
+  // Remove from dev->forms list
+  for(GList *l = session->dev.forms; l; l = g_list_next(l))
+  {
+    dt_masks_form_t *f = l->data;
+    if(f->formid == formid)
+    {
+      session->dev.forms = g_list_remove(session->dev.forms, f);
+      dt_masks_free_form(f);
+      break;
+    }
+  }
+
+  dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
+  dt_dev_write_history(&session->dev);
+
+  return dt_server_make_response(req->id, json_node_new(JSON_NODE_NULL));
 }

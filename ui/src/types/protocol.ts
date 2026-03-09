@@ -191,3 +191,43 @@ export interface IntrospectionResult {
   params_version: number;
   fields: IntrospectionField[];
 }
+
+/** Mask type flags from dt_masks_type_t */
+export const MASKS_TYPE = {
+  NONE: 0,
+  CIRCLE: 1 << 0,
+  PATH: 1 << 1,
+  GROUP: 1 << 2,
+  CLONE: 1 << 3,
+  GRADIENT: 1 << 4,
+  ELLIPSE: 1 << 5,
+  BRUSH: 1 << 6,
+  NON_CLONE: 1 << 7,
+} as const;
+
+export interface MaskGroupChild {
+  formid: number;
+  state: number;
+  opacity: number;
+}
+
+export interface MaskForm {
+  formid: number;
+  name: string;
+  type: number;
+  type_name: string;
+  is_clone: boolean;
+  children?: MaskGroupChild[];
+}
+
+export interface MaskUsage {
+  mask_id: number;
+  op: string;
+  instance: number;
+  module_name?: string;
+}
+
+export interface MaskListResult {
+  forms: MaskForm[];
+  usage: MaskUsage[];
+}

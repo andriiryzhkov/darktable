@@ -23,12 +23,15 @@ import {
   developDeleteInstance,
   developMoveInstance,
   developRenameInstance,
+  developGetMasks,
+  developRenameMask,
+  developDeleteMask,
   getPreviewFrame,
   getFramePort,
 } from "../api/commands";
 import { on } from "../events/eventBus";
 import { useCatalogStore } from "./catalogStore";
-import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult } from "../types/protocol";
+import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult, MaskForm, MaskUsage } from "../types/protocol";
 
 // Cached frame server port (resolved once, never changes)
 let _cachedFramePort: number | undefined;
@@ -152,6 +155,8 @@ interface DevelopState {
   introspectionSchemas: Record<string, IntrospectionResult>; // op → schema cache
   historyItems: HistoryItem[];
   historyEnd: number;
+  maskForms: MaskForm[];
+  maskUsage: MaskUsage[];
   loading: boolean;
   previewError: string | null;
 
@@ -197,6 +202,9 @@ interface DevelopState {
   moveInstance: (op: string, instance: number, direction: "up" | "down") => Promise<void>;
   renameInstance: (op: string, instance: number, name: string) => Promise<void>;
   fetchIntrospection: (op: string) => Promise<IntrospectionResult | null>;
+  fetchMasks: () => Promise<void>;
+  renameMask: (formid: number, name: string) => Promise<void>;
+  deleteMask: (formid: number) => Promise<void>;
 }
 
 /** Compute preview dimensions (CSS pixels, no DPR — pipeline cost scales with pixel count). */
@@ -240,6 +248,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   introspectionSchemas: {},
   historyItems: [],
   historyEnd: 0,
+  maskForms: [],
+  maskUsage: [],
   loading: false,
   previewError: null,
   focusModuleOp: null,
@@ -292,9 +302,10 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
         previewHeight: result.preview_height,
       });
 
-      // Start history + module info + params fetch in parallel with preview render
+      // Start history + module info + masks + params fetch in parallel with preview render
       const metadataPromise = Promise.all([
         get().fetchHistory(),
+        get().fetchMasks(),
         (typeof window.developGetModules === "function"
           ? developGetModules(result.session_id).then((res) => {
               if (gen !== sessionGeneration) return;
@@ -352,6 +363,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       moduleDescriptions: {},
       historyItems: [],
       historyEnd: 0,
+      maskForms: [],
+      maskUsage: [],
       sequence: 0,
     });
   },
@@ -726,6 +739,40 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     } catch (e) {
       console.error(`fetch introspection for ${op} failed:`, e);
       return null;
+    }
+  },
+
+  fetchMasks: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      const result = await developGetMasks(sessionId);
+      set({ maskForms: result.forms, maskUsage: result.usage });
+    } catch (e) {
+      console.error("fetch masks failed:", e);
+    }
+  },
+
+  renameMask: async (formid: number, name: string) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developRenameMask(sessionId, formid, name);
+      get().fetchMasks();
+    } catch (e) {
+      console.error("rename mask failed:", e);
+    }
+  },
+
+  deleteMask: async (formid: number) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developDeleteMask(sessionId, formid);
+      get().fetchMasks();
+      get().fetchHistory();
+    } catch (e) {
+      console.error("delete mask failed:", e);
     }
   },
 

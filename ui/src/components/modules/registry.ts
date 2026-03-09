@@ -112,6 +112,14 @@ export const LIB_MODULES: LibModuleDef[] = [
     container: PANEL_LEFT_CENTER,
     position: 1000,
   },
+  {
+    op: "mask_manager",
+    name: "mask manager",
+    component: lazy(() => import("./lib/MaskManagerModule")),
+    views: VIEW_DARKROOM,
+    container: PANEL_LEFT_CENTER,
+    position: 10,
+  },
 
   // -- Lighttable left sidebar --
   {
