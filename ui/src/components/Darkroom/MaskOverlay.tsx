@@ -421,24 +421,25 @@ function buildBrushBorderOutline(pts: MaskPointBrush[], w: number, h: number): P
   return p;
 }
 
-function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], hovered = false, mx: number | null = null, my: number | null = null, serverPolyline1?: number[], serverPolyline2?: number[]) {
+function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], hovered = false, mx: number | null = null, my: number | null = null, serverPolyline1?: number[], serverPolyline2?: number[], hoveredSeg = -1) {
   if (pts.length < 2) return;
 
-  // Main brush spline — solid (open path)
-  ctx.beginPath();
-  ctx.moveTo(pts[0].corner[0] * w, pts[0].corner[1] * h);
+  // Main brush spline — draw each segment individually for per-segment highlighting
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   for (let i = 0; i < pts.length - 1; i++) {
     const curr = pts[i];
     const next = pts[i + 1];
-    ctx.bezierCurveTo(
+    const segPath = new Path2D();
+    segPath.moveTo(curr.corner[0] * w, curr.corner[1] * h);
+    segPath.bezierCurveTo(
       curr.ctrl2[0] * w, curr.ctrl2[1] * h,
       next.ctrl1[0] * w, next.ctrl1[1] * h,
       next.corner[0] * w, next.corner[1] * h,
     );
+    const segSelected = hovered && (hoveredSeg === -1 || hoveredSeg === i);
+    dualStrokePath2D(ctx, segPath, false, segSelected);
   }
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  dualStroke(ctx, false, hovered);
 
   // Feather border — use server-side polylines if available
   if (serverPolyline1 && serverPolyline1.length >= 4 && serverPolyline2 && serverPolyline2.length >= 4) {
@@ -485,29 +486,36 @@ function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: Mas
   }
 }
 
-function hitTestBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], px: number, py: number): boolean {
-  if (pts.length < 2) return false;
+/** Returns the hovered segment index (0-based), or -1 if no segment is hit */
+function hitTestBrushSegment(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], px: number, py: number): number {
+  if (pts.length < 2) return -1;
 
-  // Check proximity to the main spline (use a stroke-based test)
-  const mainPath = new Path2D();
-  mainPath.moveTo(pts[0].corner[0] * w, pts[0].corner[1] * h);
+  // Test each segment individually
+  ctx.lineWidth = 10;
   for (let i = 0; i < pts.length - 1; i++) {
     const curr = pts[i];
     const next = pts[i + 1];
-    mainPath.bezierCurveTo(
+    const segPath = new Path2D();
+    segPath.moveTo(curr.corner[0] * w, curr.corner[1] * h);
+    segPath.bezierCurveTo(
       curr.ctrl2[0] * w, curr.ctrl2[1] * h,
       next.ctrl1[0] * w, next.ctrl1[1] * h,
       next.corner[0] * w, next.corner[1] * h,
     );
+    if (ctx.isPointInStroke(segPath, px, py)) return i;
   }
-  ctx.lineWidth = 10;
-  if (ctx.isPointInStroke(mainPath, px, py)) return true;
 
-  // Check handle proximity
+  // Check handle proximity — return the segment starting at that handle
   for (let i = 0; i < pts.length; i++) {
-    if (isNearHandle(pts[i].corner[0] * w, pts[i].corner[1] * h, px, py)) return true;
+    if (isNearHandle(pts[i].corner[0] * w, pts[i].corner[1] * h, px, py)) {
+      return Math.min(i, pts.length - 2);
+    }
   }
-  return false;
+  return -1;
+}
+
+function hitTestBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], px: number, py: number): boolean {
+  return hitTestBrushSegment(ctx, w, h, pts, px, py) >= 0;
 }
 
 function drawArrow(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, toX: number, toY: number) {
@@ -879,7 +887,7 @@ function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: 
   }
 }
 
-function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, hovered = false, mx: number | null = null, my: number | null = null, editedPoint: { formid: number; index: number } | null = null) {
+function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, hovered = false, mx: number | null = null, my: number | null = null, editedPoint: { formid: number; index: number } | null = null, hoveredSeg = -1) {
   if (!form.points) return;
   const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
 
@@ -909,9 +917,9 @@ function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: Mas
     case MASKS_TYPE.BRUSH: {
       const t = form.transformed;
       if (t && isTransformedBrush(t)) {
-        drawBrush(ctx, w, h, t.controls, hovered, mx, my, t.border_polyline1, t.border_polyline2);
+        drawBrush(ctx, w, h, t.controls, hovered, mx, my, t.border_polyline1, t.border_polyline2, hoveredSeg);
       } else {
-        drawBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], hovered, mx, my);
+        drawBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], hovered, mx, my, undefined, undefined, hoveredSeg);
       }
       break;
     }
@@ -931,6 +939,7 @@ export default function MaskOverlay({ targetRef }: Props) {
   const selectedMaskId = useDevelopStore((s) => s.selectedMaskId);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoveredIdRef = useRef<number | null>(null);
+  const hoveredSegRef = useRef<number>(-1);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const editedPointRef = useRef<{ formid: number; index: number } | null>(null);
 
@@ -1018,7 +1027,8 @@ export default function MaskOverlay({ targetRef }: Props) {
       const ep = editedPointRef.current;
       for (const form of drawableForms) {
         const hovered = hoveredIdRef.current === form.formid;
-        drawForm(ctx, w, h, form, hovered, m?.x ?? null, m?.y ?? null, ep);
+        const seg = hovered ? hoveredSegRef.current : -1;
+        drawForm(ctx, w, h, form, hovered, m?.x ?? null, m?.y ?? null, ep, seg);
       }
     };
 
@@ -1031,21 +1041,31 @@ export default function MaskOverlay({ targetRef }: Props) {
       const h = canvas.height;
 
       let newHovered: number | null = null;
+      let newSeg = -1;
       for (const form of drawableForms) {
         const ctx2 = canvas.getContext("2d");
         if (ctx2 && hitTestForm(ctx2, w, h, form, px, py)) {
           newHovered = form.formid;
+          // Detect per-segment hover for brush masks
+          const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+          if (baseType === MASKS_TYPE.BRUSH) {
+            const t = form.transformed;
+            const pts = (t && isTransformedBrush(t)) ? t.controls : (t || form.points) as MaskPointBrush[];
+            newSeg = hitTestBrushSegment(ctx2, w, h, pts, px, py);
+          }
           break;
         }
       }
 
       hoveredIdRef.current = newHovered;
+      hoveredSegRef.current = newSeg;
       draw();
     };
 
     const onMouseLeave = () => {
       mouseRef.current = null;
       hoveredIdRef.current = null;
+      hoveredSegRef.current = -1;
       draw();
     };
 
