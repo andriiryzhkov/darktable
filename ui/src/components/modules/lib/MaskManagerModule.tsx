@@ -35,11 +35,15 @@ function MaskTypeIcon({ type }: { type: number }) {
 function MaskItem({
   form,
   indent,
+  selected,
+  onSelect,
   onRename,
   onContextMenu,
 }: {
   form: MaskForm;
   indent?: boolean;
+  selected?: boolean;
+  onSelect?: (formid: number | null) => void;
   onRename: (formid: number, name: string) => void;
   onContextMenu: (formid: number, e: React.MouseEvent) => void;
 }) {
@@ -71,6 +75,8 @@ function MaskItem({
     <div
       className="mask-item"
       data-indent={indent || undefined}
+      data-selected={selected || undefined}
+      onClick={(e) => { e.stopPropagation(); onSelect?.(selected ? null : form.formid); }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(form.formid, e); }}
     >
       <span className="mask-item-icon">
@@ -103,12 +109,16 @@ function ModuleGroup({
   usage,
   forms,
   formsById,
+  selectedMaskId,
+  onSelect,
   onRename,
   onContextMenu,
 }: {
   usage: MaskUsage;
   forms: MaskForm | undefined;
   formsById: Map<number, MaskForm>;
+  selectedMaskId: number | null;
+  onSelect: (formid: number | null) => void;
   onRename: (formid: number, name: string) => void;
   onContextMenu: (formid: number, e: React.MouseEvent) => void;
 }) {
@@ -134,6 +144,8 @@ function ModuleGroup({
                 key={child.formid}
                 form={childForm}
                 indent
+                selected={selectedMaskId === child.formid}
+                onSelect={onSelect}
                 onRename={onRename}
                 onContextMenu={onContextMenu}
               />
@@ -149,9 +161,11 @@ export default function MaskManagerModule() {
   const sessionId = useDevelopStore((s) => s.sessionId);
   const maskForms = useDevelopStore((s) => s.maskForms);
   const maskUsage = useDevelopStore((s) => s.maskUsage);
+  const selectedMaskId = useDevelopStore((s) => s.selectedMaskId);
   const fetchMasks = useDevelopStore((s) => s.fetchMasks);
   const renameMask = useDevelopStore((s) => s.renameMask);
   const deleteMask = useDevelopStore((s) => s.deleteMask);
+  const selectMask = useDevelopStore((s) => s.selectMask);
 
   // Context menu state
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -266,13 +280,15 @@ export default function MaskManagerModule() {
         </div>
 
         {/* Mask tree: grouped by module, then unused */}
-        <div className="mask-tree" onContextMenu={handleTreeContextMenu}>
+        <div className="mask-tree" onContextMenu={handleTreeContextMenu} onClick={() => selectMask(null)}>
           {maskUsage.map((u) => (
             <ModuleGroup
               key={`${u.op}-${u.instance}`}
               usage={u}
               forms={formsById.get(u.mask_id)}
               formsById={formsById}
+              selectedMaskId={selectedMaskId}
+              onSelect={selectMask}
               onRename={renameMask}
               onContextMenu={handleMaskContextMenu}
             />
@@ -285,6 +301,8 @@ export default function MaskManagerModule() {
                 <MaskItem
                   key={form.formid}
                   form={form}
+                  selected={selectedMaskId === form.formid}
+                  onSelect={selectMask}
                   onRename={renameMask}
                   onContextMenu={handleMaskContextMenu}
                 />

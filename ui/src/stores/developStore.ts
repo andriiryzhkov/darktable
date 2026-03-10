@@ -159,6 +159,7 @@ interface DevelopState {
   maskForms: MaskForm[];
   maskUsage: MaskUsage[];
   showMasks: boolean;
+  selectedMaskId: number | null;
   loading: boolean;
   previewError: string | null;
 
@@ -208,6 +209,7 @@ interface DevelopState {
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
   toggleMasks: () => void;
+  selectMask: (formid: number | null) => void;
   setBlendParam: (op: string, instance: number, param: string, value: number, skipRefresh?: boolean) => Promise<void>;
 }
 
@@ -255,6 +257,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   maskForms: [],
   maskUsage: [],
   showMasks: false,
+  selectedMaskId: null,
   loading: false,
   previewError: null,
   focusModuleOp: null,
@@ -371,6 +374,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       maskForms: [],
       maskUsage: [],
       showMasks: false,
+      selectedMaskId: null,
       sequence: 0,
     });
   },
@@ -783,6 +787,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   },
 
   toggleMasks: () => set((s) => ({ showMasks: !s.showMasks })),
+  selectMask: (formid) => set({ selectedMaskId: formid }),
 
   setBlendParam: async (op, instance, param, value, skipRefresh) => {
     const { sessionId } = get();
@@ -829,4 +834,8 @@ on("develop.preview_ready", (data) => {
   state.fetchFrame().then(() => {
     console.log(`[perf] event→render: ${(performance.now() - tEvent).toFixed(1)}ms`);
   });
+
+  // Re-fetch masks now that the pipeline has completed — this enables
+  // gui_points (distortion-transformed coordinates) which require pipe dimensions.
+  state.fetchMasks();
 });

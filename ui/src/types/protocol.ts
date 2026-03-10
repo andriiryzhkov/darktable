@@ -335,6 +335,8 @@ export interface MaskForm {
   source?: [number, number];
   children?: MaskGroupChild[];
   points?: MaskPointsCircle | MaskPointsEllipse | MaskPointPath[] | MaskPointBrush[] | MaskPointsGradient;
+  /** Control points transformed through distortion pipeline (output-normalized space) */
+  transformed?: MaskPointsCircle | MaskPointsEllipse | MaskPointPath[] | MaskPointBrush[] | MaskPointsGradient;
 }
 
 export interface MaskUsage {

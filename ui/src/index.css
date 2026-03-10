@@ -3111,6 +3111,15 @@ body {
   background: var(--hovered-bg-color);
 }
 
+.mask-item[data-selected] {
+  background: var(--plugin-label-color);
+  color: var(--plugin-bg-color);
+}
+
+.mask-item[data-selected] .mask-item-icon {
+  color: var(--plugin-bg-color);
+}
+
 .mask-item-icon {
   flex-shrink: 0;
   color: var(--plugin-label-color);
