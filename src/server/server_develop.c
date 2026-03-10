@@ -32,6 +32,7 @@
 #include "common/debug.h"
 
 #include <float.h>
+#include <math.h>
 #include <string.h>
 
 // Mirror of dt_iop_exposure_params_t from iop/exposure.c
@@ -3597,6 +3598,561 @@ char *dt_server_develop_get_masks(dt_server_t *server, const dt_server_request_t
         json_builder_set_member_name(b, "state");
         json_builder_add_int_value(b, pt->state);
         json_builder_end_object(b);
+      }
+    }
+
+    // Transform control points through the distortion pipeline so the client
+    // can render masks in output (display) coordinate space.
+    {
+      dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+      if(pipe && pipe->processed_width > 0 && pipe->processed_height > 0)
+      {
+        const float iw = (float)pipe->iwidth;
+        const float ih = (float)pipe->iheight;
+        const float pw = (float)pipe->processed_width;
+        const float ph = (float)pipe->processed_height;
+
+        if(base_type == DT_MASKS_CIRCLE)
+        {
+          const dt_masks_point_circle_t *cpt = g_list_nth_data(form->points, 0);
+          if(cpt)
+          {
+            const float dim = MIN(iw, ih);
+            const float r = cpt->radius * dim;
+            // Match DT: sample count = max(10, circumference in pixels)
+            const int n_samples = MAX(10, (int)(2.0f * M_PI * r));
+            // center + n_samples on main circle + n_samples on border circle
+            const int total = 1 + n_samples + n_samples;
+            float *pts = malloc(total * 2 * sizeof(float));
+            if(pts)
+            {
+              const float cx = cpt->center[0] * iw;
+              const float cy = cpt->center[1] * ih;
+              const float rb = (cpt->radius + cpt->border) * dim;
+              pts[0] = cx;
+              pts[1] = cy;
+              for(int i = 0; i < n_samples; i++)
+              {
+                const float angle = 2.0f * M_PI * i / n_samples;
+                const float ca = cosf(angle), sa = sinf(angle);
+                pts[2 + i * 2]     = cx + r * ca;
+                pts[2 + i * 2 + 1] = cy + r * sa;
+                pts[2 + n_samples * 2 + i * 2]     = cx + rb * ca;
+                pts[2 + n_samples * 2 + i * 2 + 1] = cy + rb * sa;
+              }
+
+              if(dt_dev_distort_transform_plus(&session->dev, pipe,
+                                                0.0, DT_DEV_TRANSFORM_DIR_ALL, pts, total))
+              {
+                json_builder_set_member_name(b, "transformed");
+                json_builder_begin_object(b);
+                json_builder_set_member_name(b, "center");
+                json_builder_begin_array(b);
+                json_builder_add_double_value(b, pts[0] / pw);
+                json_builder_add_double_value(b, pts[1] / ph);
+                json_builder_end_array(b);
+                json_builder_set_member_name(b, "main_polyline");
+                json_builder_begin_array(b);
+                for(int i = 0; i < n_samples; i++)
+                {
+                  json_builder_add_double_value(b, pts[2 + i * 2] / pw);
+                  json_builder_add_double_value(b, pts[2 + i * 2 + 1] / ph);
+                }
+                json_builder_end_array(b);
+                json_builder_set_member_name(b, "border_polyline");
+                json_builder_begin_array(b);
+                for(int i = 0; i < n_samples; i++)
+                {
+                  json_builder_add_double_value(b, pts[2 + n_samples * 2 + i * 2] / pw);
+                  json_builder_add_double_value(b, pts[2 + n_samples * 2 + i * 2 + 1] / ph);
+                }
+                json_builder_end_array(b);
+                // Also emit radius/border for handle positioning
+                const float odim = MIN(pw, ph);
+                const float dx_r = pts[2] - pts[0], dy_r = pts[3] - pts[1];
+                const float r_out = sqrtf(dx_r * dx_r + dy_r * dy_r);
+                const float dx_b = pts[2 + n_samples * 2] - pts[0], dy_b = pts[2 + n_samples * 2 + 1] - pts[1];
+                const float rb_out = sqrtf(dx_b * dx_b + dy_b * dy_b);
+                json_builder_set_member_name(b, "radius");
+                json_builder_add_double_value(b, r_out / odim);
+                json_builder_set_member_name(b, "border");
+                json_builder_add_double_value(b, (rb_out - r_out) / odim);
+                json_builder_end_object(b);
+              }
+              free(pts);
+            }
+          }
+        }
+        else if(base_type == DT_MASKS_ELLIPSE)
+        {
+          const dt_masks_point_ellipse_t *ept = g_list_nth_data(form->points, 0);
+          if(ept)
+          {
+            const float dim = MIN(iw, ih);
+            // Match DT's _points_to_transform: swap axes so a >= b
+            const float v1 = ept->rotation * (M_PI / 180.0f);
+            const float v2 = v1 - M_PI / 2.0f;
+            float a, b_ax, v;
+            if(ept->radius[0] >= ept->radius[1])
+            { a = ept->radius[0] * dim; b_ax = ept->radius[1] * dim; v = v1; }
+            else
+            { a = ept->radius[1] * dim; b_ax = ept->radius[0] * dim; v = v2; }
+
+            const float sinv = sinf(v), cosv = cosf(v);
+
+            // Border radii (match DT's proportional vs absolute)
+            const int prop = ept->flags & 1; // DT_MASKS_ELLIPSE_PROPORTIONAL
+            float ab, bb;
+            if(prop)
+            { ab = a * (1.0f + ept->border); bb = b_ax * (1.0f + ept->border); }
+            else
+            { ab = a + ept->border * dim; bb = b_ax + ept->border * dim; }
+
+            // Sample count: Ramanujan approximation (match DT)
+            const float lambda = (a - b_ax) / (a + b_ax + 1e-10f);
+            const int n_el = MAX(100, (int)((M_PI * (a + b_ax)
+                * (1.0f + (3.0f * lambda * lambda)
+                   / (10.0f + sqrtf(4.0f - 3.0f * lambda * lambda)))) / 10));
+
+            // center + n_el main ellipse pts + n_el border ellipse pts
+            const int total = 1 + n_el + n_el;
+            float *pts = malloc(total * 2 * sizeof(float));
+            if(pts)
+            {
+              const float cx = ept->center[0] * iw;
+              const float cy = ept->center[1] * ih;
+              pts[0] = cx;
+              pts[1] = cy;
+              for(int i = 0; i < n_el; i++)
+              {
+                const float alpha = i * 2.0f * M_PI / (float)n_el;
+                const float cos_a = cosf(alpha), sin_a = sinf(alpha);
+                // Main ellipse contour
+                pts[2 + i * 2]     = cx + a * cos_a * cosv - b_ax * sin_a * sinv;
+                pts[2 + i * 2 + 1] = cy + a * cos_a * sinv + b_ax * sin_a * cosv;
+                // Border ellipse contour
+                pts[2 + n_el * 2 + i * 2]     = cx + ab * cos_a * cosv - bb * sin_a * sinv;
+                pts[2 + n_el * 2 + i * 2 + 1] = cy + ab * cos_a * sinv + bb * sin_a * cosv;
+              }
+
+              if(dt_dev_distort_transform_plus(&session->dev, pipe,
+                                                0.0, DT_DEV_TRANSFORM_DIR_ALL, pts, total))
+              {
+                json_builder_set_member_name(b, "transformed");
+                json_builder_begin_object(b);
+                json_builder_set_member_name(b, "center");
+                json_builder_begin_array(b);
+                json_builder_add_double_value(b, pts[0] / pw);
+                json_builder_add_double_value(b, pts[1] / ph);
+                json_builder_end_array(b);
+                json_builder_set_member_name(b, "main_polyline");
+                json_builder_begin_array(b);
+                for(int i = 0; i < n_el; i++)
+                {
+                  json_builder_add_double_value(b, pts[2 + i * 2] / pw);
+                  json_builder_add_double_value(b, pts[2 + i * 2 + 1] / ph);
+                }
+                json_builder_end_array(b);
+                json_builder_set_member_name(b, "border_polyline");
+                json_builder_begin_array(b);
+                for(int i = 0; i < n_el; i++)
+                {
+                  json_builder_add_double_value(b, pts[2 + n_el * 2 + i * 2] / pw);
+                  json_builder_add_double_value(b, pts[2 + n_el * 2 + i * 2 + 1] / ph);
+                }
+                json_builder_end_array(b);
+                json_builder_end_object(b);
+              }
+              free(pts);
+            }
+          }
+        }
+        else if(base_type == DT_MASKS_PATH)
+        {
+          const int n = g_list_length(form->points);
+          if(n > 0)
+          {
+            // Control points + border polyline generated in input space
+            const int border_samples = 20;
+            const int polyline_per_seg = border_samples + 1;
+            const int border_pts = n * polyline_per_seg;
+            const int ctrl_pts = n * 3;
+            const int total_pts = ctrl_pts + border_pts;
+            float *pts = malloc(total_pts * 2 * sizeof(float));
+            if(pts)
+            {
+              int idx = 0;
+              for(GList *p = form->points; p; p = g_list_next(p))
+              {
+                const dt_masks_point_path_t *ppt = p->data;
+                if(!ppt) { idx += 6; continue; }
+                pts[idx++] = ppt->corner[0] * iw;
+                pts[idx++] = ppt->corner[1] * ih;
+                pts[idx++] = ppt->ctrl1[0] * iw;
+                pts[idx++] = ppt->ctrl1[1] * ih;
+                pts[idx++] = ppt->ctrl2[0] * iw;
+                pts[idx++] = ppt->ctrl2[1] * ih;
+              }
+
+              // Winding direction
+              float area = 0;
+              for(GList *p = form->points; p; p = g_list_next(p))
+              {
+                const dt_masks_point_path_t *curr = p->data;
+                const dt_masks_point_path_t *next = g_list_next(p)
+                  ? g_list_next(p)->data : form->points->data;
+                area += (next->corner[0] - curr->corner[0])
+                      * (next->corner[1] + curr->corner[1]);
+              }
+              const float cw = area < 0 ? 1.0f : -1.0f;
+              const float idim = MIN(iw, ih);
+
+              // Sample border polyline in input space
+              idx = ctrl_pts * 2;
+              for(GList *p = form->points; p; p = g_list_next(p))
+              {
+                const dt_masks_point_path_t *pt1 = p->data;
+                const dt_masks_point_path_t *pt2 = g_list_next(p)
+                  ? g_list_next(p)->data : form->points->data;
+                const float p0x = pt1->corner[0]*iw, p0y = pt1->corner[1]*ih;
+                const float p1x = pt1->ctrl2[0]*iw,  p1y = pt1->ctrl2[1]*ih;
+                const float p2x = pt2->ctrl1[0]*iw,  p2y = pt2->ctrl1[1]*ih;
+                const float p3x = pt2->corner[0]*iw, p3y = pt2->corner[1]*ih;
+                const float rs = cw * pt1->border[1] * idim;
+                const float re = cw * pt2->border[0] * idim;
+
+                for(int s = 0; s <= border_samples; s++)
+                {
+                  const float t = (float)s / border_samples;
+                  const float rad = rs + (re - rs) * t;
+                  const float ti = 1.0f - t;
+                  const float ti2 = ti*ti, ti3 = ti2*ti;
+                  const float t2 = t*t, t3 = t2*t;
+                  const float cx = ti3*p0x + 3*ti2*t*p1x + 3*ti*t2*p2x + t3*p3x;
+                  const float cy = ti3*p0y + 3*ti2*t*p1y + 3*ti*t2*p2y + t3*p3y;
+                  const float a3 = 3*ti*ti, bv = 3*(ti*ti - 2*t*ti);
+                  const float cv = 3*(2*t*ti - t*t), d3 = 3*t*t;
+                  const float dx = -p0x*a3 + p1x*bv + p2x*cv + p3x*d3;
+                  const float dy = -p0y*a3 + p1y*bv + p2y*cv + p3y*d3;
+                  const float len = sqrtf(dx*dx + dy*dy);
+                  if(len > 1e-10f)
+                  { pts[idx++] = cx + rad*dy/len; pts[idx++] = cy - rad*dx/len; }
+                  else
+                  { pts[idx++] = cx; pts[idx++] = cy; }
+                }
+              }
+
+              if(dt_dev_distort_transform_plus(&session->dev, pipe,
+                                                0.0, DT_DEV_TRANSFORM_DIR_ALL, pts, total_pts))
+              {
+                json_builder_set_member_name(b, "transformed");
+                json_builder_begin_object(b);
+                json_builder_set_member_name(b, "controls");
+                json_builder_begin_array(b);
+                idx = 0;
+                GList *pp = form->points;
+                for(int i = 0; i < n; i++)
+                {
+                  const dt_masks_point_path_t *ppt = pp ? pp->data : NULL;
+                  json_builder_begin_object(b);
+                  json_builder_set_member_name(b, "corner");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, pts[idx] / pw);
+                  json_builder_add_double_value(b, pts[idx + 1] / ph);
+                  json_builder_end_array(b);
+                  json_builder_set_member_name(b, "ctrl1");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, pts[idx + 2] / pw);
+                  json_builder_add_double_value(b, pts[idx + 3] / ph);
+                  json_builder_end_array(b);
+                  json_builder_set_member_name(b, "ctrl2");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, pts[idx + 4] / pw);
+                  json_builder_add_double_value(b, pts[idx + 5] / ph);
+                  json_builder_end_array(b);
+                  json_builder_set_member_name(b, "border");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, ppt ? ppt->border[0] : 0.0);
+                  json_builder_add_double_value(b, ppt ? ppt->border[1] : 0.0);
+                  json_builder_end_array(b);
+                  json_builder_end_object(b);
+                  idx += 6;
+                  if(pp) pp = g_list_next(pp);
+                }
+                json_builder_end_array(b);
+
+                json_builder_set_member_name(b, "border_polyline");
+                json_builder_begin_array(b);
+                idx = ctrl_pts * 2;
+                for(int i = 0; i < border_pts; i++)
+                {
+                  json_builder_add_double_value(b, pts[idx] / pw);
+                  json_builder_add_double_value(b, pts[idx + 1] / ph);
+                  idx += 2;
+                }
+                json_builder_end_array(b);
+                json_builder_end_object(b);
+              }
+              free(pts);
+            }
+          }
+        }
+        else if(base_type == DT_MASKS_BRUSH)
+        {
+          const int n = g_list_length(form->points);
+          if(n > 1)
+          {
+            const int border_samples = 40;
+            const int polyline_per_seg = border_samples + 1;
+            const int n_segs = n - 1;
+            const int border_pts_per_side = n_segs * polyline_per_seg;
+            const int ctrl_pts = n * 3;
+            const int total_pts = ctrl_pts + border_pts_per_side * 2;
+            float *pts = malloc(total_pts * 2 * sizeof(float));
+            if(pts)
+            {
+              int idx = 0;
+              for(GList *p = form->points; p; p = g_list_next(p))
+              {
+                const dt_masks_point_brush_t *bpt = p->data;
+                if(!bpt) { idx += 6; continue; }
+                pts[idx++] = bpt->corner[0] * iw;
+                pts[idx++] = bpt->corner[1] * ih;
+                pts[idx++] = bpt->ctrl1[0] * iw;
+                pts[idx++] = bpt->ctrl1[1] * ih;
+                pts[idx++] = bpt->ctrl2[0] * iw;
+                pts[idx++] = bpt->ctrl2[1] * ih;
+              }
+
+              const float idim = MIN(iw, ih);
+              for(int side = 0; side < 2; side++)
+              {
+                const float sign = (side == 0) ? 1.0f : -1.0f;
+                GList *p = form->points;
+                for(int k = 0; k < n_segs; k++)
+                {
+                  const dt_masks_point_brush_t *pt1 = p->data;
+                  const dt_masks_point_brush_t *pt2 = g_list_next(p)->data;
+                  const float p0x = pt1->corner[0]*iw, p0y = pt1->corner[1]*ih;
+                  const float p1x = pt1->ctrl2[0]*iw,  p1y = pt1->ctrl2[1]*ih;
+                  const float p2x = pt2->ctrl1[0]*iw,  p2y = pt2->ctrl1[1]*ih;
+                  const float p3x = pt2->corner[0]*iw, p3y = pt2->corner[1]*ih;
+                  const float rs = sign * pt1->border[1] * idim;
+                  const float re = sign * pt2->border[0] * idim;
+
+                  for(int s = 0; s <= border_samples; s++)
+                  {
+                    const float t = (float)s / border_samples;
+                    const float rad = rs + (re - rs) * t;
+                    const float ti = 1.0f - t;
+                    const float ti2 = ti*ti, ti3 = ti2*ti;
+                    const float t2 = t*t, t3 = t2*t;
+                    const float cx = ti3*p0x + 3*ti2*t*p1x + 3*ti*t2*p2x + t3*p3x;
+                    const float cy = ti3*p0y + 3*ti2*t*p1y + 3*ti*t2*p2y + t3*p3y;
+                    const float a3 = 3*ti*ti, bv = 3*(ti*ti - 2*t*ti);
+                    const float cv = 3*(2*t*ti - t*t), d3 = 3*t*t;
+                    const float dx = -p0x*a3 + p1x*bv + p2x*cv + p3x*d3;
+                    const float dy = -p0y*a3 + p1y*bv + p2y*cv + p3y*d3;
+                    const float len = sqrtf(dx*dx + dy*dy);
+                    if(len > 1e-10f)
+                    { pts[idx++] = cx + rad*dy/len; pts[idx++] = cy - rad*dx/len; }
+                    else
+                    { pts[idx++] = cx; pts[idx++] = cy; }
+                  }
+                  p = g_list_next(p);
+                }
+              }
+
+              if(dt_dev_distort_transform_plus(&session->dev, pipe,
+                                                0.0, DT_DEV_TRANSFORM_DIR_ALL, pts, total_pts))
+              {
+                json_builder_set_member_name(b, "transformed");
+                json_builder_begin_object(b);
+                json_builder_set_member_name(b, "controls");
+                json_builder_begin_array(b);
+                idx = 0;
+                for(GList *p = form->points; p; p = g_list_next(p))
+                {
+                  const dt_masks_point_brush_t *bpt = p->data;
+                  json_builder_begin_object(b);
+                  json_builder_set_member_name(b, "corner");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, pts[idx] / pw);
+                  json_builder_add_double_value(b, pts[idx + 1] / ph);
+                  json_builder_end_array(b);
+                  json_builder_set_member_name(b, "ctrl1");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, pts[idx + 2] / pw);
+                  json_builder_add_double_value(b, pts[idx + 3] / ph);
+                  json_builder_end_array(b);
+                  json_builder_set_member_name(b, "ctrl2");
+                  json_builder_begin_array(b);
+                  json_builder_add_double_value(b, pts[idx + 4] / pw);
+                  json_builder_add_double_value(b, pts[idx + 5] / ph);
+                  json_builder_end_array(b);
+                  if(bpt)
+                  {
+                    json_builder_set_member_name(b, "border");
+                    json_builder_begin_array(b);
+                    json_builder_add_double_value(b, bpt->border[0]);
+                    json_builder_add_double_value(b, bpt->border[1]);
+                    json_builder_end_array(b);
+                    json_builder_set_member_name(b, "density");
+                    json_builder_add_double_value(b, bpt->density);
+                    json_builder_set_member_name(b, "hardness");
+                    json_builder_add_double_value(b, bpt->hardness);
+                    json_builder_set_member_name(b, "state");
+                    json_builder_add_int_value(b, bpt->state);
+                  }
+                  json_builder_end_object(b);
+                  idx += 6;
+                }
+                json_builder_end_array(b);
+
+                idx = ctrl_pts * 2;
+                for(int side = 0; side < 2; side++)
+                {
+                  json_builder_set_member_name(b, side == 0 ? "border_polyline1" : "border_polyline2");
+                  json_builder_begin_array(b);
+                  for(int i = 0; i < border_pts_per_side; i++)
+                  {
+                    json_builder_add_double_value(b, pts[idx] / pw);
+                    json_builder_add_double_value(b, pts[idx + 1] / ph);
+                    idx += 2;
+                  }
+                  json_builder_end_array(b);
+                }
+                json_builder_end_object(b);
+              }
+              free(pts);
+            }
+          }
+        }
+        else if(base_type == DT_MASKS_GRADIENT)
+        {
+          const dt_masks_point_gradient_t *gpt = g_list_nth_data(form->points, 0);
+          if(gpt)
+          {
+            // Match DT's _gradient_get_points: sample line + two border lines
+            const float scale = sqrtf(iw * iw + ih * ih);
+            const float v = -(gpt->rotation) * (M_PI / 180.0f);
+            const float cosv = cosf(v);
+            const float sinv = sinf(v);
+            const float curv = gpt->curvature;
+            const float comp = gpt->compression;
+            const float ax = gpt->anchor[0], ay = gpt->anchor[1];
+
+            // Line sample count (match DT)
+            const int n_line = (int)scale;
+            const float xstart = fabsf(curv) > 1.0f ? -sqrtf(1.0f / fabsf(curv)) : -1.0f;
+            const float xdelta = -2.0f * xstart / (float)(n_line > 1 ? n_line - 1 : 1);
+
+            // 3 lines: main + border1 + border2, plus anchor point
+            // anchor + ref_point + n_line * 3
+            const int total = 2 + n_line * 3;
+            float *pts = malloc(total * 2 * sizeof(float));
+            if(pts)
+            {
+              // Anchor + reference point for rotation recovery
+              const float ref_dist = 0.1f * MIN(iw, ih);
+              const float rot_rad = gpt->rotation * (M_PI / 180.0f);
+              pts[0] = ax * iw;
+              pts[1] = ay * ih;
+              pts[2] = pts[0] + ref_dist * sinf(rot_rad);
+              pts[3] = pts[1] + ref_dist * cosf(rot_rad);
+
+              // Border offset directions: -(rotation ± 90°)
+              const float v1 = -(gpt->rotation - 90.0f) * (M_PI / 180.0f);
+              const float v2 = -(gpt->rotation + 90.0f) * (M_PI / 180.0f);
+              // Offset anchor positions for border lines
+              const float b1x = (ax * iw + comp * scale * cosf(v1)) / iw;
+              const float b1y = (ay * ih + comp * scale * sinf(v1)) / ih;
+              const float b2x = (ax * iw + comp * scale * cosf(v2)) / iw;
+              const float b2y = (ay * ih + comp * scale * sinf(v2)) / ih;
+
+              int idx = 4; // after anchor + ref point
+              // Generate 3 lines: main, border1, border2
+              const float centers[3][2] = {
+                { ax, ay }, { b1x, b1y }, { b2x, b2y }
+              };
+              for(int line = 0; line < 3; line++)
+              {
+                const float cx = centers[line][0];
+                const float cy = centers[line][1];
+                for(int i = 0; i < n_line; i++)
+                {
+                  const float xi = xstart + i * xdelta;
+                  const float yi = curv * xi * xi;
+                  const float xii = (cosv * xi + sinv * yi) * scale;
+                  const float yii = (sinv * xi - cosv * yi) * scale;
+                  pts[idx++] = cx * iw + xii;
+                  pts[idx++] = cy * ih + yii;
+                }
+              }
+
+              if(dt_dev_distort_transform_plus(&session->dev, pipe,
+                                                0.0, DT_DEV_TRANSFORM_DIR_ALL, pts, total))
+              {
+                json_builder_set_member_name(b, "transformed");
+                json_builder_begin_object(b);
+                // Anchor
+                json_builder_set_member_name(b, "anchor");
+                json_builder_begin_array(b);
+                json_builder_add_double_value(b, pts[0] / pw);
+                json_builder_add_double_value(b, pts[1] / ph);
+                json_builder_end_array(b);
+                // Recover rotation from transformed ref point
+                const float odim = MIN(pw, ph);
+                const float rdx = (pts[2] - pts[0]) / odim;
+                const float rdy = (pts[3] - pts[1]) / odim;
+                json_builder_set_member_name(b, "rotation");
+                json_builder_add_double_value(b, atan2f(rdx, rdy) * (180.0f / M_PI));
+                // Main line polyline
+                json_builder_set_member_name(b, "main_polyline");
+                json_builder_begin_array(b);
+                idx = 4;
+                for(int i = 0; i < n_line; i++)
+                {
+                  json_builder_add_double_value(b, pts[idx] / pw);
+                  json_builder_add_double_value(b, pts[idx + 1] / ph);
+                  idx += 2;
+                }
+                json_builder_end_array(b);
+                // Border line 1
+                json_builder_set_member_name(b, "border_polyline1");
+                json_builder_begin_array(b);
+                for(int i = 0; i < n_line; i++)
+                {
+                  json_builder_add_double_value(b, pts[idx] / pw);
+                  json_builder_add_double_value(b, pts[idx + 1] / ph);
+                  idx += 2;
+                }
+                json_builder_end_array(b);
+                // Border line 2
+                json_builder_set_member_name(b, "border_polyline2");
+                json_builder_begin_array(b);
+                for(int i = 0; i < n_line; i++)
+                {
+                  json_builder_add_double_value(b, pts[idx] / pw);
+                  json_builder_add_double_value(b, pts[idx + 1] / ph);
+                  idx += 2;
+                }
+                json_builder_end_array(b);
+                // Pass through other params
+                json_builder_set_member_name(b, "compression");
+                json_builder_add_double_value(b, comp);
+                json_builder_set_member_name(b, "steepness");
+                json_builder_add_double_value(b, gpt->steepness);
+                json_builder_set_member_name(b, "curvature");
+                json_builder_add_double_value(b, curv);
+                json_builder_set_member_name(b, "state");
+                json_builder_add_int_value(b, gpt->state);
+                json_builder_end_object(b);
+              }
+              free(pts);
+            }
+          }
+        }
       }
     }
 

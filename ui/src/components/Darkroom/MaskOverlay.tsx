@@ -8,6 +8,11 @@ import type {
   MaskPointPath,
   MaskPointBrush,
   MaskPointsGradient,
+  MaskTransformedCircle,
+  MaskTransformedEllipse,
+  MaskTransformedGradient,
+  MaskTransformedPath,
+  MaskTransformedBrush,
 } from "../../types/protocol";
 
 interface Props {
@@ -107,6 +112,24 @@ function drawCircle(ctx: CanvasRenderingContext2D, w: number, h: number, pts: Ma
   drawHandle(ctx, cx + borderR, cy, mx, my);
 }
 
+function drawCirclePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedCircle, hovered = false, mx: number | null = null, my: number | null = null) {
+  // Main circle — solid polyline
+  const mainPath = buildPolylinePath2D(t.main_polyline, w, h, true);
+  dualStrokePath2D(ctx, mainPath, false, hovered);
+
+  // Feather border — dashed polyline
+  const borderPath = buildPolylinePath2D(t.border_polyline, w, h, true);
+  dualStrokePath2D(ctx, borderPath, true, hovered);
+
+  // Handles: pick first point on each polyline (angle=0, rightmost)
+  if (t.main_polyline.length >= 2) {
+    drawHandle(ctx, t.main_polyline[0] * w, t.main_polyline[1] * h, mx, my);
+  }
+  if (t.border_polyline.length >= 2) {
+    drawHandle(ctx, t.border_polyline[0] * w, t.border_polyline[1] * h, mx, my);
+  }
+}
+
 function hitTestCircle(w: number, h: number, pts: MaskPointsCircle, px: number, py: number): boolean {
   const cx = pts.center[0] * w;
   const cy = pts.center[1] * h;
@@ -118,6 +141,14 @@ function hitTestCircle(w: number, h: number, pts: MaskPointsCircle, px: number, 
   if (dx * dx + dy * dy <= borderR * borderR) return true;
   if (isNearHandle(cx + r, cy, px, py)) return true;
   if (isNearHandle(cx + borderR, cy, px, py)) return true;
+  return false;
+}
+
+function hitTestCirclePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedCircle, px: number, py: number): boolean {
+  const borderPath = buildPolylinePath2D(t.border_polyline, w, h, true);
+  if (ctx.isPointInPath(borderPath, px, py)) return true;
+  if (t.main_polyline.length >= 2 && isNearHandle(t.main_polyline[0] * w, t.main_polyline[1] * h, px, py)) return true;
+  if (t.border_polyline.length >= 2 && isNearHandle(t.border_polyline[0] * w, t.border_polyline[1] * h, px, py)) return true;
   return false;
 }
 
@@ -154,6 +185,27 @@ function drawEllipse(ctx: CanvasRenderingContext2D, w: number, h: number, pts: M
   drawHandle(ctx, cx + borderRy * sinR, cy - borderRy * cosR, mx, my);
 }
 
+function drawEllipsePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedEllipse, hovered = false, mx: number | null = null, my: number | null = null) {
+  // Main ellipse — solid polyline
+  const mainPath = buildPolylinePath2D(t.main_polyline, w, h, true);
+  dualStrokePath2D(ctx, mainPath, false, hovered);
+
+  // Feather border — dashed polyline
+  const borderPath = buildPolylinePath2D(t.border_polyline, w, h, true);
+  dualStrokePath2D(ctx, borderPath, true, hovered);
+
+  // Handles: pick 4 axis points from main polyline (at 0°, 90°, 180°, 270°)
+  // and corresponding border points
+  const nMain = t.main_polyline.length / 2;
+  const nBorder = t.border_polyline.length / 2;
+  for (let q = 0; q < 4; q++) {
+    const mi = Math.round(q * nMain / 4) % nMain;
+    drawHandle(ctx, t.main_polyline[mi * 2] * w, t.main_polyline[mi * 2 + 1] * h, mx, my);
+    const bi = Math.round(q * nBorder / 4) % nBorder;
+    drawHandle(ctx, t.border_polyline[bi * 2] * w, t.border_polyline[bi * 2 + 1] * h, mx, my);
+  }
+}
+
 function hitTestEllipse(w: number, h: number, pts: MaskPointsEllipse, px: number, py: number): boolean {
   const cx = pts.center[0] * w;
   const cy = pts.center[1] * h;
@@ -183,6 +235,21 @@ function hitTestEllipse(w: number, h: number, pts: MaskPointsEllipse, px: number
   return false;
 }
 
+function hitTestEllipsePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedEllipse, px: number, py: number): boolean {
+  const borderPath = buildPolylinePath2D(t.border_polyline, w, h, true);
+  if (ctx.isPointInPath(borderPath, px, py)) return true;
+  // Check handle proximity at 4 axis points
+  const nMain = t.main_polyline.length / 2;
+  const nBorder = t.border_polyline.length / 2;
+  for (let q = 0; q < 4; q++) {
+    const mi = Math.round(q * nMain / 4) % nMain;
+    if (isNearHandle(t.main_polyline[mi * 2] * w, t.main_polyline[mi * 2 + 1] * h, px, py)) return true;
+    const bi = Math.round(q * nBorder / 4) % nBorder;
+    if (isNearHandle(t.border_polyline[bi * 2] * w, t.border_polyline[bi * 2 + 1] * h, px, py)) return true;
+  }
+  return false;
+}
+
 function drawCtrlHandle(ctx: CanvasRenderingContext2D, x: number, y: number, mx: number | null, my: number | null) {
   const near = isNearHandle(x, y, mx, my);
   const r = near ? 4 : 3;
@@ -195,7 +262,19 @@ function drawCtrlHandle(ctx: CanvasRenderingContext2D, x: number, y: number, mx:
   ctx.stroke();
 }
 
-function drawPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointPath[], hovered = false, mx: number | null = null, my: number | null = null, editedIdx: number | null = null) {
+/** Build a Path2D from a flat array of pre-transformed border coordinates [x,y,x,y,...] in normalized space */
+function buildPolylinePath2D(polyline: number[], w: number, h: number, close: boolean): Path2D {
+  const p = new Path2D();
+  if (polyline.length < 4) return p;
+  p.moveTo(polyline[0] * w, polyline[1] * h);
+  for (let i = 2; i < polyline.length; i += 2) {
+    p.lineTo(polyline[i] * w, polyline[i + 1] * h);
+  }
+  if (close) p.closePath();
+  return p;
+}
+
+function drawPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointPath[], hovered = false, mx: number | null = null, my: number | null = null, editedIdx: number | null = null, serverBorderPolyline?: number[]) {
   if (pts.length < 2) return;
 
   // Main path — solid
@@ -213,13 +292,27 @@ function drawPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: Mask
   ctx.closePath();
   dualStroke(ctx, false, hovered);
 
-  // Feather border — dashed polyline (sampled like DT)
-  const cw = pathWindingCW(pts);
-  const borderPath = buildBorderPolyline(pts, w, h, cw);
+  // Feather border — use server-side polyline if available, else compute client-side
+  let borderPath: Path2D;
+  let borderAnchors: BorderAnchor[];
+  if (serverBorderPolyline && serverBorderPolyline.length >= 4) {
+    borderPath = buildPolylinePath2D(serverBorderPolyline, w, h, true);
+    // Border anchors from polyline: each anchor is at segment boundary
+    // Server emits (BORDER_SAMPLES+1) points per segment, anchor is at index k*(BORDER_SAMPLES+1)
+    const samplesPerSeg = Math.round(serverBorderPolyline.length / 2 / pts.length);
+    borderAnchors = pts.map((p, i) => {
+      const idx = i * samplesPerSeg * 2;
+      if (idx + 1 < serverBorderPolyline.length) {
+        return { x: serverBorderPolyline[idx] * w, y: serverBorderPolyline[idx + 1] * h };
+      }
+      return { x: p.corner[0] * w, y: p.corner[1] * h };
+    });
+  } else {
+    const cw = pathWindingCW(pts);
+    borderPath = buildBorderPolyline(pts, w, h, cw);
+    borderAnchors = computeBorderAnchors(pts, w, h, cw);
+  }
   dualStrokePath2D(ctx, borderPath, true, hovered);
-
-  // Border anchor handles
-  const borderAnchors = computeBorderAnchors(pts, w, h, cw);
 
   // Handles at each corner + border handles with connecting line on border hover
   for (let i = 0; i < pts.length; i++) {
@@ -328,7 +421,7 @@ function buildBrushBorderOutline(pts: MaskPointBrush[], w: number, h: number): P
   return p;
 }
 
-function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], hovered = false, mx: number | null = null, my: number | null = null) {
+function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], hovered = false, mx: number | null = null, my: number | null = null, serverPolyline1?: number[], serverPolyline2?: number[]) {
   if (pts.length < 2) return;
 
   // Main brush spline — solid (open path)
@@ -347,9 +440,44 @@ function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: Mas
   ctx.lineJoin = "round";
   dualStroke(ctx, false, hovered);
 
-  // Feather border — dashed outline with rounded end caps
-  const borderPath = buildBrushBorderOutline(pts, w, h);
-  dualStrokePath2D(ctx, borderPath, true, hovered);
+  // Feather border — use server-side polylines if available
+  if (serverPolyline1 && serverPolyline1.length >= 4 && serverPolyline2 && serverPolyline2.length >= 4) {
+    // Build a closed outline: side1 forward, end cap, side2 backward, start cap
+    const outline = new Path2D();
+    outline.moveTo(serverPolyline1[0] * w, serverPolyline1[1] * h);
+    for (let i = 2; i < serverPolyline1.length; i += 2) {
+      outline.lineTo(serverPolyline1[i] * w, serverPolyline1[i + 1] * h);
+    }
+    // End cap arc
+    const endPt = pts[pts.length - 1];
+    const endCx = endPt.corner[0] * w, endCy = endPt.corner[1] * h;
+    const endS1x = serverPolyline1[serverPolyline1.length - 2] * w;
+    const endS1y = serverPolyline1[serverPolyline1.length - 1] * h;
+    const endS2x = serverPolyline2[serverPolyline2.length - 2] * w;
+    const endS2y = serverPolyline2[serverPolyline2.length - 1] * h;
+    const endRad = Math.sqrt((endS1x - endCx) ** 2 + (endS1y - endCy) ** 2);
+    const endAngle1 = Math.atan2(endS1y - endCy, endS1x - endCx);
+    const endAngle2 = Math.atan2(endS2y - endCy, endS2x - endCx);
+    outline.arc(endCx, endCy, endRad, endAngle1, endAngle2, false);
+    // Side2 backward
+    for (let i = serverPolyline2.length - 2; i >= 0; i -= 2) {
+      outline.lineTo(serverPolyline2[i] * w, serverPolyline2[i + 1] * h);
+    }
+    // Start cap arc
+    const startPt = pts[0];
+    const startCx = startPt.corner[0] * w, startCy = startPt.corner[1] * h;
+    const startS2x = serverPolyline2[0] * w, startS2y = serverPolyline2[1] * h;
+    const startS1x = serverPolyline1[0] * w, startS1y = serverPolyline1[1] * h;
+    const startRad = Math.sqrt((startS2x - startCx) ** 2 + (startS2y - startCy) ** 2);
+    const startAngle2 = Math.atan2(startS2y - startCy, startS2x - startCx);
+    const startAngle1 = Math.atan2(startS1y - startCy, startS1x - startCx);
+    outline.arc(startCx, startCy, startRad, startAngle2, startAngle1, false);
+    outline.closePath();
+    dualStrokePath2D(ctx, outline, true, hovered);
+  } else {
+    const borderPath = buildBrushBorderOutline(pts, w, h);
+    dualStrokePath2D(ctx, borderPath, true, hovered);
+  }
 
   // Corner handles
   for (let i = 0; i < pts.length; i++) {
@@ -461,6 +589,60 @@ function drawGradient(ctx: CanvasRenderingContext2D, w: number, h: number, pts: 
 
   // Anchor handle
   drawHandle(ctx, ax, ay, mx, my);
+}
+
+function drawGradientPolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedGradient, hovered = false, mx: number | null = null, my: number | null = null) {
+  const ax = t.anchor[0] * w;
+  const ay = t.anchor[1] * h;
+
+  // Main gradient line — solid polyline
+  const mainPath = buildPolylinePath2D(t.main_polyline, w, h, false);
+  dualStrokePath2D(ctx, mainPath, false, hovered);
+
+  // Border lines — dashed polylines
+  if (t.border_polyline1.length >= 4) {
+    const b1 = buildPolylinePath2D(t.border_polyline1, w, h, false);
+    dualStrokePath2D(ctx, b1, true, hovered);
+  }
+  if (t.border_polyline2.length >= 4) {
+    const b2 = buildPolylinePath2D(t.border_polyline2, w, h, false);
+    dualStrokePath2D(ctx, b2, true, hovered);
+  }
+
+  // Arrow — use transformed rotation
+  const rot = (t.rotation * Math.PI) / 180;
+  const dx = Math.sin(rot);
+  const dy = Math.cos(rot);
+  const pivotDist = 0.1 * Math.min(w, h);
+  const tailX = ax - dx * pivotDist, tailY = ay - dy * pivotDist;
+  const headX = ax + dx * pivotDist, headY = ay + dy * pivotDist;
+  const arrowLw = LW_MASK * (hovered ? LW_SEL_MULT : 1);
+  ctx.lineWidth = arrowLw;
+  ctx.strokeStyle = hovered ? DARK_SEL : DARK;
+  drawArrow(ctx, tailX, tailY, headX, headY);
+  ctx.lineWidth = hovered ? arrowLw : arrowLw / 2;
+  ctx.strokeStyle = hovered ? BRIGHT_SEL : BRIGHT;
+  drawArrow(ctx, tailX, tailY, headX, headY);
+
+  // Anchor handle
+  drawHandle(ctx, ax, ay, mx, my);
+}
+
+function hitTestGradientPolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedGradient, px: number, py: number): boolean {
+  // Check if point is between the two border lines by testing stroke proximity
+  ctx.lineWidth = 10;
+  const mainPath = buildPolylinePath2D(t.main_polyline, w, h, false);
+  if (ctx.isPointInStroke(mainPath, px, py)) return true;
+  if (t.border_polyline1.length >= 4) {
+    const b1 = buildPolylinePath2D(t.border_polyline1, w, h, false);
+    if (ctx.isPointInStroke(b1, px, py)) return true;
+  }
+  if (t.border_polyline2.length >= 4) {
+    const b2 = buildPolylinePath2D(t.border_polyline2, w, h, false);
+    if (ctx.isPointInStroke(b2, px, py)) return true;
+  }
+  if (isNearHandle(t.anchor[0] * w, t.anchor[1] * h, px, py)) return true;
+  return false;
 }
 
 function hitTestGradient(w: number, h: number, pts: MaskPointsGradient, px: number, py: number): boolean {
@@ -616,7 +798,7 @@ function pathWindingCW(pts: MaskPointPath[]): number {
   return area < 0 ? 1 : -1;
 }
 
-function hitTestPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointPath[], px: number, py: number): boolean {
+function hitTestPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointPath[], px: number, py: number, serverBorderPolyline?: number[]): boolean {
   if (pts.length < 2) return false;
 
   // Check inside main bezier path
@@ -624,34 +806,74 @@ function hitTestPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: M
   if (ctx.isPointInPath(mainPath, px, py)) return true;
 
   // Check inside border polyline path
-  const cw = pathWindingCW(pts);
-  const borderPath = buildBorderPolyline(pts, w, h, cw);
+  let borderPath: Path2D;
+  if (serverBorderPolyline && serverBorderPolyline.length >= 4) {
+    borderPath = buildPolylinePath2D(serverBorderPolyline, w, h, true);
+  } else {
+    const cw = pathWindingCW(pts);
+    borderPath = buildBorderPolyline(pts, w, h, cw);
+  }
   if (ctx.isPointInPath(borderPath, px, py)) return true;
 
-  // Check handle proximity (corner + border)
-  const borderAnchors = computeBorderAnchors(pts, w, h, cw);
+  // Check handle proximity (corner)
   for (let i = 0; i < pts.length; i++) {
     if (isNearHandle(pts[i].corner[0] * w, pts[i].corner[1] * h, px, py)) return true;
-    if (isNearHandle(borderAnchors[i].x, borderAnchors[i].y, px, py)) return true;
   }
   return false;
 }
 
+/** Type guards for server-side polyline format */
+function isTransformedPolyline(t: unknown): t is MaskTransformedCircle | MaskTransformedEllipse {
+  const o = t as Record<string, unknown>;
+  return t !== null && typeof t === "object" && "main_polyline" in o && !("border_polyline1" in o);
+}
+
+function isTransformedGradient(t: unknown): t is MaskTransformedGradient {
+  const o = t as Record<string, unknown>;
+  return t !== null && typeof t === "object" && "main_polyline" in o && "border_polyline1" in o;
+}
+
+function isTransformedPath(t: unknown): t is MaskTransformedPath {
+  return t !== null && typeof t === "object" && "controls" in (t as Record<string, unknown>);
+}
+
+function isTransformedBrush(t: unknown): t is MaskTransformedBrush {
+  return t !== null && typeof t === "object" && "border_polyline1" in (t as Record<string, unknown>);
+}
+
 function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, px: number, py: number): boolean {
   if (!form.points) return false;
-  const pts = form.transformed || form.points;
   const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
   switch (baseType) {
-    case MASKS_TYPE.CIRCLE:
-      return hitTestCircle(w, h, pts as MaskPointsCircle, px, py);
-    case MASKS_TYPE.ELLIPSE:
-      return hitTestEllipse(w, h, pts as MaskPointsEllipse, px, py);
-    case MASKS_TYPE.PATH:
-      return hitTestPath(ctx, w, h, pts as MaskPointPath[], px, py);
-    case MASKS_TYPE.BRUSH:
-      return hitTestBrush(ctx, w, h, pts as MaskPointBrush[], px, py);
-    case MASKS_TYPE.GRADIENT:
-      return hitTestGradient(w, h, pts as MaskPointsGradient, px, py);
+    case MASKS_TYPE.CIRCLE: {
+      const t = form.transformed;
+      if (t && isTransformedPolyline(t)) return hitTestCirclePolyline(ctx, w, h, t as MaskTransformedCircle, px, py);
+      return hitTestCircle(w, h, (t || form.points) as MaskPointsCircle, px, py);
+    }
+    case MASKS_TYPE.ELLIPSE: {
+      const t = form.transformed;
+      if (t && isTransformedPolyline(t)) return hitTestEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, px, py);
+      return hitTestEllipse(w, h, (t || form.points) as MaskPointsEllipse, px, py);
+    }
+    case MASKS_TYPE.PATH: {
+      const t = form.transformed;
+      if (t && isTransformedPath(t)) {
+        return hitTestPath(ctx, w, h, t.controls, px, py, t.border_polyline);
+      }
+      return hitTestPath(ctx, w, h, (t || form.points) as MaskPointPath[], px, py);
+    }
+    case MASKS_TYPE.BRUSH: {
+      const t = form.transformed;
+      if (t && isTransformedBrush(t)) {
+        return hitTestBrush(ctx, w, h, t.controls, px, py);
+      }
+      return hitTestBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], px, py);
+    }
+    case MASKS_TYPE.GRADIENT: {
+      const t = form.transformed;
+      if (t && isTransformedGradient(t)) return hitTestGradientPolyline(ctx, w, h, t, px, py);
+      return hitTestGradient(w, h, (t || form.points) as MaskPointsGradient, px, py);
+    }
     default:
       return false;
   }
@@ -659,29 +881,46 @@ function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: 
 
 function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, hovered = false, mx: number | null = null, my: number | null = null, editedPoint: { formid: number; index: number } | null = null) {
   if (!form.points) return;
-  // Use distortion-transformed control points when available (corrects for rawprepare,
-  // lens correction, crop, etc.). Fall back to raw points for JPEG/untransformed images.
-  const pts = form.transformed || form.points;
   const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
 
   switch (baseType) {
-    case MASKS_TYPE.CIRCLE:
-      drawCircle(ctx, w, h, pts as MaskPointsCircle, hovered, mx, my);
-      break;
-    case MASKS_TYPE.ELLIPSE:
-      drawEllipse(ctx, w, h, pts as MaskPointsEllipse, hovered, mx, my);
-      break;
-    case MASKS_TYPE.PATH: {
-      const editIdx = editedPoint?.formid === form.formid ? editedPoint.index : null;
-      drawPath(ctx, w, h, pts as MaskPointPath[], hovered, mx, my, editIdx);
+    case MASKS_TYPE.CIRCLE: {
+      const t = form.transformed;
+      if (t && isTransformedPolyline(t)) drawCirclePolyline(ctx, w, h, t as MaskTransformedCircle, hovered, mx, my);
+      else drawCircle(ctx, w, h, (t || form.points) as MaskPointsCircle, hovered, mx, my);
       break;
     }
-    case MASKS_TYPE.BRUSH:
-      drawBrush(ctx, w, h, pts as MaskPointBrush[], hovered, mx, my);
+    case MASKS_TYPE.ELLIPSE: {
+      const t = form.transformed;
+      if (t && isTransformedPolyline(t)) drawEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, hovered, mx, my);
+      else drawEllipse(ctx, w, h, (t || form.points) as MaskPointsEllipse, hovered, mx, my);
       break;
-    case MASKS_TYPE.GRADIENT:
-      drawGradient(ctx, w, h, pts as MaskPointsGradient, hovered, mx, my);
+    }
+    case MASKS_TYPE.PATH: {
+      const editIdx = editedPoint?.formid === form.formid ? editedPoint.index : null;
+      const t = form.transformed;
+      if (t && isTransformedPath(t)) {
+        drawPath(ctx, w, h, t.controls, hovered, mx, my, editIdx, t.border_polyline);
+      } else {
+        drawPath(ctx, w, h, (t || form.points) as MaskPointPath[], hovered, mx, my, editIdx);
+      }
       break;
+    }
+    case MASKS_TYPE.BRUSH: {
+      const t = form.transformed;
+      if (t && isTransformedBrush(t)) {
+        drawBrush(ctx, w, h, t.controls, hovered, mx, my, t.border_polyline1, t.border_polyline2);
+      } else {
+        drawBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], hovered, mx, my);
+      }
+      break;
+    }
+    case MASKS_TYPE.GRADIENT: {
+      const t = form.transformed;
+      if (t && isTransformedGradient(t)) drawGradientPolyline(ctx, w, h, t, hovered, mx, my);
+      else drawGradient(ctx, w, h, (t || form.points) as MaskPointsGradient, hovered, mx, my);
+      break;
+    }
   }
 }
 

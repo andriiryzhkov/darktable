@@ -326,6 +326,45 @@ export interface MaskPointsGradient {
   state: number; // 1=linear, 2=sigmoidal
 }
 
+/** Transformed circle/ellipse with server-side polylines */
+export interface MaskTransformedCircle {
+  center: [number, number];
+  main_polyline: number[];
+  border_polyline: number[];
+}
+
+export interface MaskTransformedEllipse {
+  center: [number, number];
+  main_polyline: number[];
+  border_polyline: number[];
+}
+
+/** Transformed gradient with server-side polylines */
+export interface MaskTransformedGradient {
+  anchor: [number, number];
+  rotation: number;
+  compression: number;
+  steepness: number;
+  curvature: number;
+  state: number;
+  main_polyline: number[];
+  border_polyline1: number[];
+  border_polyline2: number[];
+}
+
+/** Transformed path/brush with server-side border polyline */
+export interface MaskTransformedPath {
+  controls: MaskPointPath[];
+  /** Dense border polyline: flat array of [x,y,x,y,...] normalized coords */
+  border_polyline: number[];
+}
+
+export interface MaskTransformedBrush {
+  controls: MaskPointBrush[];
+  border_polyline1: number[];
+  border_polyline2: number[];
+}
+
 export interface MaskForm {
   formid: number;
   name: string;
@@ -336,7 +375,9 @@ export interface MaskForm {
   children?: MaskGroupChild[];
   points?: MaskPointsCircle | MaskPointsEllipse | MaskPointPath[] | MaskPointBrush[] | MaskPointsGradient;
   /** Control points transformed through distortion pipeline (output-normalized space) */
-  transformed?: MaskPointsCircle | MaskPointsEllipse | MaskPointPath[] | MaskPointBrush[] | MaskPointsGradient;
+  transformed?: MaskPointsCircle | MaskPointsEllipse | MaskPointPath[] | MaskPointBrush[]
+    | MaskPointsGradient | MaskTransformedCircle | MaskTransformedEllipse
+    | MaskTransformedGradient | MaskTransformedPath | MaskTransformedBrush;
 }
 
 export interface MaskUsage {
