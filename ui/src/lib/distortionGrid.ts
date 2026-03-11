@@ -283,6 +283,7 @@ export function generateGradientPolylines(
   anchor: [number, number],
   rotation: number,
   compression: number,
+  curvature = 0,
 ): {
   anchor: [number, number];
   rotation: number;
@@ -292,64 +293,72 @@ export function generateGradientPolylines(
 } {
   const iw = grid.iwidth;
   const ih = grid.iheight;
-  const rot = (rotation * Math.PI) / 180;
+  const scale = Math.sqrt(iw * iw + ih * ih);
 
-  // Gradient direction in raw pixel space: (sin(rot), cos(rot))
-  const gdx = Math.sin(rot);
-  const gdy = Math.cos(rot);
+  // Match DT's _gradient_get_points: v = -(rotation) * PI/180
+  const v = -(rotation * Math.PI) / 180;
+  const cosv = Math.cos(v);
+  const sinv = Math.sin(v);
 
-  // Line direction (perpendicular to gradient) in raw pixel space
-  const ldx = Math.cos(rot);
-  const ldy = -Math.sin(rot);
-
-  // Border offset in raw pixels: compression * diagonal
-  const diag = Math.sqrt(iw * iw + ih * ih);
-  const borderOffset = compression * diag;
+  // Border offset: compression * diagonal, perpendicular to gradient line
+  const borderOffset = compression * scale;
+  const v1 = -(rotation - 90) * (Math.PI / 180);
+  const v2 = -(rotation + 90) * (Math.PI / 180);
 
   // Anchor in raw pixels
   const ax_px = anchor[0] * iw;
   const ay_px = anchor[1] * ih;
 
+  // Border anchor centers (offset perpendicular to gradient direction)
+  const b1cx = (ax_px + borderOffset * Math.cos(v1)) / iw;
+  const b1cy = (ay_px + borderOffset * Math.sin(v1)) / ih;
+  const b2cx = (ax_px + borderOffset * Math.cos(v2)) / iw;
+  const b2cy = (ay_px + borderOffset * Math.sin(v2)) / ih;
+
   // Transform anchor
   const tAnchor = forwardTransform(grid, anchor[0], anchor[1]);
 
-  // Estimate transformed rotation from local gradient direction
-  const delta = 0.001;
-  const [gx1, gy1] = forwardTransform(
-    grid,
-    anchor[0] + (gdx * delta) / iw,
-    anchor[1] + (gdy * delta) / ih,
-  );
-  const tRot = Math.atan2(gx1 - tAnchor[0], gy1 - tAnchor[1]) * (180 / Math.PI);
+  // Estimate transformed rotation from reference point (matches server approach)
+  // Server: atan2(pixel_dx / odim, pixel_dy / odim) — both divided by same value, so equivalent to pixel-space atan2
+  const refDist = 0.1 * Math.min(iw, ih);
+  const rotRad = rotation * (Math.PI / 180);
+  const refX = (ax_px + refDist * Math.sin(rotRad)) / iw;
+  const refY = (ay_px + refDist * Math.cos(rotRad)) / ih;
+  const [trx, try_] = forwardTransform(grid, refX, refY);
+  const pw = grid.processed_width;
+  const ph = grid.processed_height;
+  const tRot = Math.atan2((trx - tAnchor[0]) * pw, (try_ - tAnchor[1]) * ph) * (180 / Math.PI);
 
-  // Sample points along all 3 lines in raw pixel space, transform to output
-  const nSamples = 50;
-  const lineLen = diag * 1.5;
+  // Parametric x range — matches DT: if |curvature| > 1, limit range
+  const xstart = Math.abs(curvature) > 1 ? -Math.sqrt(1 / Math.abs(curvature)) : -1;
+  const nSamples = Math.max(50, Math.round(scale));
+  const xdelta = -2 * xstart / (nSamples > 1 ? nSamples - 1 : 1);
 
   const mainPoly: number[] = [];
   const border1Poly: number[] = [];
   const border2Poly: number[] = [];
 
-  for (let i = 0; i <= nSamples; i++) {
-    const t = -lineLen + (2 * lineLen * i) / nSamples;
+  // Centers for 3 lines: main, border1, border2
+  const centers: [number, number][] = [
+    [anchor[0], anchor[1]],
+    [b1cx, b1cy],
+    [b2cx, b2cy],
+  ];
+  const polys = [mainPoly, border1Poly, border2Poly];
 
-    // Main line point (raw pixels → raw normalized → grid transform)
-    const mx = (ax_px + ldx * t) / iw;
-    const my = (ay_px + ldy * t) / ih;
-    const [tmx, tmy] = forwardTransform(grid, mx, my);
-    mainPoly.push(tmx, tmy);
-
-    // Border line 1 (positive offset along gradient direction)
-    const b1x = (ax_px + gdx * borderOffset + ldx * t) / iw;
-    const b1y = (ay_px + gdy * borderOffset + ldy * t) / ih;
-    const [tb1x, tb1y] = forwardTransform(grid, b1x, b1y);
-    border1Poly.push(tb1x, tb1y);
-
-    // Border line 2 (negative offset)
-    const b2x = (ax_px - gdx * borderOffset + ldx * t) / iw;
-    const b2y = (ay_px - gdy * borderOffset + ldy * t) / ih;
-    const [tb2x, tb2y] = forwardTransform(grid, b2x, b2y);
-    border2Poly.push(tb2x, tb2y);
+  for (let line = 0; line < 3; line++) {
+    const cx = centers[line][0];
+    const cy = centers[line][1];
+    for (let i = 0; i < nSamples; i++) {
+      const xi = xstart + i * xdelta;
+      const yi = curvature * xi * xi;
+      const xii = (cosv * xi + sinv * yi) * scale;
+      const yii = (sinv * xi - cosv * yi) * scale;
+      const rawX = cx + xii / iw;
+      const rawY = cy + yii / ih;
+      const [tx, ty] = forwardTransform(grid, rawX, rawY);
+      polys[line].push(tx, ty);
+    }
   }
 
   return {

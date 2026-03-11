@@ -4560,6 +4560,33 @@ char *dt_server_develop_create_mask(dt_server_t *server, const dt_server_request
       : DT_MASKS_ELLIPSE_EQUIDISTANT;
     form->points = g_list_append(form->points, ellipse);
   }
+  else if(mask_type == DT_MASKS_GRADIENT)
+  {
+    dt_masks_point_gradient_t *gradient = calloc(1, sizeof(dt_masks_point_gradient_t));
+    if(json_object_has_member(req->params, "anchor"))
+    {
+      JsonArray *a = json_object_get_array_member(req->params, "anchor");
+      gradient->anchor[0] = (float)json_array_get_double_element(a, 0);
+      gradient->anchor[1] = (float)json_array_get_double_element(a, 1);
+    }
+    else
+    {
+      gradient->anchor[0] = 0.5f;
+      gradient->anchor[1] = 0.5f;
+    }
+    gradient->rotation = json_object_has_member(req->params, "rotation")
+      ? (float)json_object_get_double_member(req->params, "rotation") : 0.0f;
+    gradient->compression = json_object_has_member(req->params, "compression")
+      ? (float)json_object_get_double_member(req->params, "compression") : 0.5f;
+    gradient->steepness = json_object_has_member(req->params, "steepness")
+      ? (float)json_object_get_double_member(req->params, "steepness") : 0.0f;
+    gradient->curvature = json_object_has_member(req->params, "curvature")
+      ? (float)json_object_get_double_member(req->params, "curvature") : 0.0f;
+    gradient->state = json_object_has_member(req->params, "state")
+      ? (dt_masks_gradient_states_t)json_object_get_int_member(req->params, "state")
+      : DT_MASKS_GRADIENT_STATE_SIGMOIDAL;
+    form->points = g_list_append(form->points, gradient);
+  }
 
   // Register form
   session->dev.forms = g_list_append(session->dev.forms, form);
@@ -4679,10 +4706,32 @@ char *dt_server_develop_update_mask(dt_server_t *server, const dt_server_request
     if(json_object_has_member(req->params, "flags"))
       ellipse->flags = (dt_masks_ellipse_flags_t)json_object_get_int_member(req->params, "flags");
   }
+  else if(base_type == DT_MASKS_GRADIENT)
+  {
+    dt_masks_point_gradient_t *gradient = g_list_nth_data(form->points, 0);
+    if(!gradient)
+      return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Gradient has no points");
+    if(json_object_has_member(req->params, "anchor"))
+    {
+      JsonArray *a = json_object_get_array_member(req->params, "anchor");
+      gradient->anchor[0] = (float)json_array_get_double_element(a, 0);
+      gradient->anchor[1] = (float)json_array_get_double_element(a, 1);
+    }
+    if(json_object_has_member(req->params, "rotation"))
+      gradient->rotation = (float)json_object_get_double_member(req->params, "rotation");
+    if(json_object_has_member(req->params, "compression"))
+      gradient->compression = (float)json_object_get_double_member(req->params, "compression");
+    if(json_object_has_member(req->params, "steepness"))
+      gradient->steepness = (float)json_object_get_double_member(req->params, "steepness");
+    if(json_object_has_member(req->params, "curvature"))
+      gradient->curvature = (float)json_object_get_double_member(req->params, "curvature");
+    if(json_object_has_member(req->params, "state"))
+      gradient->state = (dt_masks_gradient_states_t)json_object_get_int_member(req->params, "state");
+  }
   else
   {
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
-                                 "update_mask currently supports circle and ellipse only");
+                                 "update_mask currently supports circle, ellipse, and gradient only");
   }
 
   // Opacity is stored on the group child entry, not on the form itself

@@ -501,6 +501,13 @@ function hitTestGradientPolyline(ctx: CanvasRenderingContext2D, w: number, h: nu
     if (ctx.isPointInStroke(b2, px, py)) return true;
   }
   if (isNearHandle(t.anchor[0] * w, t.anchor[1] * h, px, py)) return true;
+  // Arrow endpoints (rotation handles)
+  const rot = (t.rotation * Math.PI) / 180;
+  const arrowDist = 0.1 * Math.min(w, h);
+  const ax = t.anchor[0] * w, ay = t.anchor[1] * h;
+  const headX = ax + Math.sin(rot) * arrowDist, headY = ay + Math.cos(rot) * arrowDist;
+  const tailX = ax - Math.sin(rot) * arrowDist, tailY = ay - Math.cos(rot) * arrowDist;
+  if (isNearHandle(headX, headY, px, py) || isNearHandle(tailX, tailY, px, py)) return true;
   return false;
 }
 
@@ -696,14 +703,9 @@ function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: 
     case MASKS_TYPE.GRADIENT: {
       if (!grid) return false;
       const pts = form.points as MaskPointsGradient;
-      const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
-      const tGrad: MaskTransformedGradient = {
-        ...poly,
-        compression: pts.compression,
-        steepness: pts.steepness,
-        curvature: pts.curvature,
-        state: pts.state,
-      };
+      const tGrad = (form.transformed as MaskTransformedGradient | undefined)
+        ?? { ...generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression, pts.curvature),
+            compression: pts.compression, steepness: pts.steepness, curvature: pts.curvature, state: pts.state };
       return hitTestGradientPolyline(ctx, w, h, tGrad, px, py);
     }
     default:
@@ -748,14 +750,9 @@ function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: Mas
     case MASKS_TYPE.GRADIENT: {
       if (!grid) break;
       const pts = form.points as MaskPointsGradient;
-      const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
-      const tGrad: MaskTransformedGradient = {
-        ...poly,
-        compression: pts.compression,
-        steepness: pts.steepness,
-        curvature: pts.curvature,
-        state: pts.state,
-      };
+      const tGrad = (form.transformed as MaskTransformedGradient | undefined)
+        ?? { ...generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression, pts.curvature),
+            compression: pts.compression, steepness: pts.steepness, curvature: pts.curvature, state: pts.state };
       drawGradientPolyline(ctx, w, h, tGrad, hovered, mx, my);
       break;
     }
@@ -778,6 +775,7 @@ interface DragState {
   origBorder: number;
   dragAxis?: 0 | 1;
   lastAngle?: number;
+  origCompression?: number;
 }
 
 function hitTestDragTarget(
@@ -825,6 +823,32 @@ function hitTestDragTarget(
       // Grab anywhere inside the border to move (form_dragging)
       const borderPath = buildPolylinePath2D(poly.border_polyline, w, h, true);
       if (ctx.isPointInPath(borderPath, px, py)) return { kind: "center", formid: form.formid };
+    } else if (baseType === MASKS_TYPE.GRADIENT) {
+      const pts = form.points as MaskPointsGradient;
+      const poly = form.transformed
+        ? form.transformed as MaskTransformedGradient
+        : { ...generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression, pts.curvature),
+            compression: pts.compression, steepness: pts.steepness, curvature: pts.curvature, state: pts.state };
+      const ax = poly.anchor[0] * w, ay = poly.anchor[1] * h;
+      // Arrow endpoint handles for rotation
+      const rot = (poly.rotation * Math.PI) / 180;
+      const arrowDist = 0.1 * Math.min(w, h);
+      const headX = ax + Math.sin(rot) * arrowDist, headY = ay + Math.cos(rot) * arrowDist;
+      const tailX = ax - Math.sin(rot) * arrowDist, tailY = ay - Math.cos(rot) * arrowDist;
+      if (isNearHandle(headX, headY, px, py) || isNearHandle(tailX, tailY, px, py))
+        return { kind: "rotate", formid: form.formid };
+      // Anchor handle — move
+      if (isNearHandle(ax, ay, px, py)) return { kind: "center", formid: form.formid };
+      // Border lines — compression drag
+      const b1Path = buildPolylinePath2D(poly.border_polyline1, w, h, false);
+      const b2Path = buildPolylinePath2D(poly.border_polyline2, w, h, false);
+      ctx.lineWidth = 16;
+      if (ctx.isPointInStroke(b1Path, px, py) || ctx.isPointInStroke(b2Path, px, py))
+        return { kind: "border", formid: form.formid };
+      // Main line — drag to move
+      const mainPath = buildPolylinePath2D(poly.main_polyline, w, h, false);
+      if (ctx.isPointInStroke(mainPath, px, py))
+        return { kind: "center", formid: form.formid };
     }
     return null;
   }
@@ -894,8 +918,14 @@ export default function MaskOverlay({ targetRef }: Props) {
             const form = drawableFormsRef.current.find((f) => f.formid === state.creatingMaskId);
             if (form) {
               const rawCenter = inverseTransform(grid, outPos[0], outPos[1]);
-              const pts = form.points as { center: [number, number] } | undefined;
-              if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+              const bType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+              if (bType === MASKS_TYPE.GRADIENT) {
+                const gpts = form.points as MaskPointsGradient | undefined;
+                if (gpts) { gpts.anchor[0] = rawCenter[0]; gpts.anchor[1] = rawCenter[1]; }
+              } else {
+                const pts = form.points as { center: [number, number] } | undefined;
+                if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+              }
             }
           }
         }
@@ -984,7 +1014,7 @@ export default function MaskOverlay({ targetRef }: Props) {
         const selF = drawableFormsRef.current.find((f) => f.formid === selId);
         if (selF) {
           const hit = hitTestDragTarget(ctx, w, h, selF, m.x, m.y, distortionGrid);
-          canvas.style.cursor = hit ? (hit.kind === "center" ? "grab" : "crosshair") : "";
+          canvas.style.cursor = hit ? (hit.kind === "center" ? "grab" : hit.kind === "rotate" ? "alias" : "crosshair") : "";
         } else {
           canvas.style.cursor = "";
         }
@@ -1016,12 +1046,24 @@ export default function MaskOverlay({ targetRef }: Props) {
         if (grid) {
           const form = drawableFormsRef.current.find((f) => f.formid === currentCreatingId);
           if (form) {
-            const rawCenter = inverseTransform(grid, cx, cy);
-            const pts = form.points as { center: [number, number] } | undefined;
-            if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+            const rawPos = inverseTransform(grid, cx, cy);
+            const bType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+            if (bType === MASKS_TYPE.GRADIENT) {
+              const gpts = form.points as MaskPointsGradient | undefined;
+              if (gpts) { gpts.anchor[0] = rawPos[0]; gpts.anchor[1] = rawPos[1]; }
+            } else {
+              const pts = form.points as { center: [number, number] } | undefined;
+              if (pts) { pts.center[0] = rawPos[0]; pts.center[1] = rawPos[1]; }
+            }
           }
-          // Background server sync — send raw-space center
-          previewMaskParam(currentCreatingId, { center: inverseTransform(grid, cx, cy) });
+          // Background server sync — send raw-space position
+          const rawSync = inverseTransform(grid, cx, cy);
+          const bType2 = form?.type ? (form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE)) : 0;
+          if (bType2 === MASKS_TYPE.GRADIENT) {
+            previewMaskParam(currentCreatingId, { anchor: rawSync });
+          } else {
+            previewMaskParam(currentCreatingId, { center: rawSync });
+          }
         }
         draw();
         return;
@@ -1042,8 +1084,14 @@ export default function MaskOverlay({ targetRef }: Props) {
 
         if (drag.target.kind === "center") {
           const rawStart = inverseTransform(grid, drag.startX / w, drag.startY / h);
-          pts.center[0] = drag.origCenter[0] + (rawMouse[0] - rawStart[0]);
-          pts.center[1] = drag.origCenter[1] + (rawMouse[1] - rawStart[1]);
+          const newX = drag.origCenter[0] + (rawMouse[0] - rawStart[0]);
+          const newY = drag.origCenter[1] + (rawMouse[1] - rawStart[1]);
+          if (baseType === MASKS_TYPE.GRADIENT) {
+            const gp = form.points as MaskPointsGradient;
+            gp.anchor[0] = newX; gp.anchor[1] = newY;
+          } else {
+            pts.center[0] = newX; pts.center[1] = newY;
+          }
         } else if (drag.target.kind === "radius") {
           const dx = (rawMouse[0] - pts.center[0]) * iw;
           const dy = (rawMouse[1] - pts.center[1]) * ih;
@@ -1062,30 +1110,51 @@ export default function MaskOverlay({ targetRef }: Props) {
             }
           }
         } else if (drag.target.kind === "border") {
-          const dx = (rawMouse[0] - pts.center[0]) * iw;
-          const dy = (rawMouse[1] - pts.center[1]) * ih;
-          if (baseType === MASKS_TYPE.CIRCLE) {
-            const cp = pts as MaskPointsCircle;
-            cp.border = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / dim - cp.radius);
+          if (baseType === MASKS_TYPE.GRADIENT) {
+            // Compression drag: distance from mouse to anchor along gradient direction
+            const gp = form.points as MaskPointsGradient;
+            const rot = (gp.rotation * Math.PI) / 180;
+            const gdx = Math.sin(rot), gdy = Math.cos(rot);
+            const dx = (rawMouse[0] - gp.anchor[0]) * iw;
+            const dy = (rawMouse[1] - gp.anchor[1]) * ih;
+            const diag = Math.sqrt(iw * iw + ih * ih);
+            const proj = Math.abs(dx * gdx + dy * gdy);
+            gp.compression = Math.max(0.001, Math.min(1, proj / diag));
           } else {
-            const ep = pts as MaskPointsEllipse;
-            const rot = (ep.rotation ?? 0) * Math.PI / 180;
-            if (drag.dragAxis === 0) {
-              const proj = Math.abs(dx * Math.cos(rot) + dy * Math.sin(rot)) / dim;
-              ep.border = Math.max(0.001, proj - ep.radius[0]);
+            const dx = (rawMouse[0] - pts.center[0]) * iw;
+            const dy = (rawMouse[1] - pts.center[1]) * ih;
+            if (baseType === MASKS_TYPE.CIRCLE) {
+              const cp = pts as MaskPointsCircle;
+              cp.border = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / dim - cp.radius);
             } else {
-              const proj = Math.abs(-dx * Math.sin(rot) + dy * Math.cos(rot)) / dim;
-              ep.border = Math.max(0.001, proj - ep.radius[1]);
+              const ep = pts as MaskPointsEllipse;
+              const rot = (ep.rotation ?? 0) * Math.PI / 180;
+              if (drag.dragAxis === 0) {
+                const proj = Math.abs(dx * Math.cos(rot) + dy * Math.sin(rot)) / dim;
+                ep.border = Math.max(0.001, proj - ep.radius[0]);
+              } else {
+                const proj = Math.abs(-dx * Math.sin(rot) + dy * Math.cos(rot)) / dim;
+                ep.border = Math.max(0.001, proj - ep.radius[1]);
+              }
             }
           }
         } else if (drag.target.kind === "rotate") {
           // Delta-based rotation (matches DT's Ctrl+drag)
-          const ep = pts as MaskPointsEllipse;
-          const tc = forwardTransform(grid, ep.center[0], ep.center[1]);
+          const refPt = baseType === MASKS_TYPE.GRADIENT
+            ? (form.points as MaskPointsGradient).anchor
+            : (pts as MaskPointsEllipse).center;
+          const tc = forwardTransform(grid, refPt[0], refPt[1]);
           const curAngle = Math.atan2(py / h - tc[1], px / w - tc[0]);
           const delta = (curAngle - (drag.lastAngle ?? curAngle)) * (180 / Math.PI);
-          ep.rotation = ((ep.rotation ?? 0) + delta) % 360;
-          if (ep.rotation < 0) ep.rotation += 360;
+          if (baseType === MASKS_TYPE.GRADIENT) {
+            const gp = form.points as MaskPointsGradient;
+            gp.rotation = ((gp.rotation ?? 0) - delta) % 360;
+            if (gp.rotation < 0) gp.rotation += 360;
+          } else {
+            const ep = pts as MaskPointsEllipse;
+            ep.rotation = ((ep.rotation ?? 0) + delta) % 360;
+            if (ep.rotation < 0) ep.rotation += 360;
+          }
           drag.lastAngle = curAngle;
         }
         // Live server sync for slider feedback — only send changed params
@@ -1101,6 +1170,11 @@ export default function MaskOverlay({ targetRef }: Props) {
           else if (dk === "radius") previewMaskParam(drag.target.formid, { radius: [ep.radius[0], ep.radius[1]] });
           else if (dk === "border") previewMaskParam(drag.target.formid, { border: ep.border });
           else if (dk === "rotate") previewMaskParam(drag.target.formid, { rotation: ep.rotation });
+        } else if (baseType === MASKS_TYPE.GRADIENT) {
+          const gp = form.points as MaskPointsGradient;
+          if (dk === "center") previewMaskParam(drag.target.formid, { anchor: [gp.anchor[0], gp.anchor[1]] });
+          else if (dk === "border") previewMaskParam(drag.target.formid, { compression: gp.compression });
+          else if (dk === "rotate") previewMaskParam(drag.target.formid, { rotation: gp.rotation });
         }
         draw();
         return;
@@ -1141,10 +1215,17 @@ export default function MaskOverlay({ targetRef }: Props) {
           const form = drawableFormsRef.current.find((f) => f.formid === currentCreatingId);
           if (form) {
             const rawCenter = inverseTransform(grid, 0.5, 0.5);
-            const pts = form.points as { center: [number, number] } | undefined;
-            if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+            const bType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+            if (bType === MASKS_TYPE.GRADIENT) {
+              const gpts = form.points as MaskPointsGradient | undefined;
+              if (gpts) { gpts.anchor[0] = rawCenter[0]; gpts.anchor[1] = rawCenter[1]; }
+              previewMaskParam(currentCreatingId, { anchor: rawCenter });
+            } else {
+              const pts = form.points as { center: [number, number] } | undefined;
+              if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+              previewMaskParam(currentCreatingId, { center: rawCenter });
+            }
           }
-          previewMaskParam(currentCreatingId, { center: inverseTransform(grid, 0.5, 0.5) });
         }
       }
       draw();
@@ -1164,10 +1245,10 @@ export default function MaskOverlay({ targetRef }: Props) {
         const cx = px / w;
         const cy = py / h;
         creationCursorRef.current = [cx, cy];
-        // Server expects raw-space center
+        // Server expects raw-space position (center for circle/ellipse, anchor for gradient)
         const grid = useDevelopStore.getState().distortionGrid;
-        const rawCenter = grid ? inverseTransform(grid, cx, cy) as [number, number] : [cx, cy] as [number, number];
-        saveCreation(rawCenter);
+        const rawPos = grid ? inverseTransform(grid, cx, cy) as [number, number] : [cx, cy] as [number, number];
+        saveCreation(rawPos);
         return;
       }
 
@@ -1181,16 +1262,25 @@ export default function MaskOverlay({ targetRef }: Props) {
         const grid = useDevelopStore.getState().distortionGrid;
         const center = grid ? inverseTransform(grid, outCx, outCy) : [outCx, outCy];
         const params: Record<string, unknown> = {
-          center,
           op: mod.op,
           instance: mod.instance,
         };
-        if (tool === "circle") {
-          params.radius = 0.05;
-          params.border = 0.025;
+        if (tool === "gradient") {
+          params.anchor = center;
+          params.rotation = 0;
+          params.compression = 0.05;
+          params.steepness = 0;
+          params.curvature = 0;
+          params.state = 2; // DT_MASKS_GRADIENT_STATE_SIGMOIDAL
         } else {
-          params.radius = [0.05, 0.05];
-          params.border = 0.025;
+          params.center = center;
+          if (tool === "circle") {
+            params.radius = 0.05;
+            params.border = 0.025;
+          } else {
+            params.radius = [0.05, 0.05];
+            params.border = 0.025;
+          }
         }
         resetCreation();
         createMask(tool, params).then((formid) => {
@@ -1224,6 +1314,20 @@ export default function MaskOverlay({ targetRef }: Props) {
             origRadius: [el.radius[0], el.radius[1]], origBorder: el.border,
             dragAxis,
           };
+        } else if (baseType === MASKS_TYPE.GRADIENT) {
+          const g = form.points as MaskPointsGradient;
+          let startAngle: number | undefined;
+          if (target.kind === "rotate" && distortionGrid) {
+            const tc = forwardTransform(distortionGrid, g.anchor[0], g.anchor[1]);
+            startAngle = Math.atan2(py / h - tc[1], px / w - tc[0]);
+          }
+          dragRef.current = {
+            target, startX: px, startY: py,
+            origCenter: [g.anchor[0], g.anchor[1]],
+            origRadius: 0, origBorder: 0,
+            origCompression: g.compression,
+            lastAngle: startAngle,
+          };
         } else {
           return false;
         }
@@ -1237,18 +1341,21 @@ export default function MaskOverlay({ targetRef }: Props) {
         const selForm = drawableFormsRef.current.find((f) => f.formid === currentSelectedId);
         if (selForm) {
           const baseType = selForm.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
-          // Ctrl+click on ellipse → rotation mode
-          if (e.ctrlKey && baseType === MASKS_TYPE.ELLIPSE && hitTestForm(ctx2, w, h, selForm, px, py, distortionGrid)) {
-            const el = selForm.points as MaskPointsEllipse;
+          // Ctrl+click on ellipse or gradient → rotation mode
+          if (e.ctrlKey && (baseType === MASKS_TYPE.ELLIPSE || baseType === MASKS_TYPE.GRADIENT) && hitTestForm(ctx2, w, h, selForm, px, py, distortionGrid)) {
             const grid = useDevelopStore.getState().distortionGrid;
             if (grid) {
-              const tc = forwardTransform(grid, el.center[0], el.center[1]);
+              // Get the reference point (center for ellipse, anchor for gradient)
+              const refPt = baseType === MASKS_TYPE.GRADIENT
+                ? (selForm.points as MaskPointsGradient).anchor
+                : (selForm.points as MaskPointsEllipse).center;
+              const tc = forwardTransform(grid, refPt[0], refPt[1]);
               const startAngle = Math.atan2(py / h - tc[1], px / w - tc[0]);
               dragRef.current = {
                 target: { kind: "rotate", formid: selForm.formid },
                 startX: px, startY: py,
-                origCenter: [el.center[0], el.center[1]],
-                origRadius: [el.radius[0], el.radius[1]], origBorder: el.border,
+                origCenter: [refPt[0], refPt[1]],
+                origRadius: 0, origBorder: 0,
                 lastAngle: startAngle,
               };
               e.preventDefault();
@@ -1336,6 +1443,16 @@ export default function MaskOverlay({ targetRef }: Props) {
           radius: [pts.radius[0], pts.radius[1]],
           border: pts.border,
           rotation: pts.rotation,
+        }).then(() => requestPreview());
+      } else if (baseType === MASKS_TYPE.GRADIENT) {
+        const gp = form.points as MaskPointsGradient;
+        updateMask(form.formid, {
+          anchor: [gp.anchor[0], gp.anchor[1]],
+          rotation: gp.rotation,
+          compression: gp.compression,
+          steepness: gp.steepness,
+          curvature: gp.curvature,
+          state: gp.state,
         }).then(() => requestPreview());
       }
     };

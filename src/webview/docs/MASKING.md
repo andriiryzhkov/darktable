@@ -65,7 +65,7 @@ The grid is fetched by the client on every `preview_ready` event (pipeline repro
 - **`generateEllipsePolyline(grid, center, radius, rotation, border, flags)`** — ellipse polyline
 - **`transformPathPoints(grid, points)`** — transforms path bezier control points
 - **`transformBrushPoints(grid, points)`** — transforms brush stroke points
-- **`generateGradientPolylines(grid, anchor, rotation, compression)`** — gradient lines
+- **`generateGradientPolylines(grid, anchor, rotation, compression, curvature)`** — gradient lines
 
 All polyline generators take raw-space mask parameters, sample points in raw space, and transform each point through the forward grid to output space. The result is a dense polyline in output normalized [0,1] coordinates ready for canvas rendering.
 
@@ -116,11 +116,11 @@ Matches DT's `gui->creation` lifecycle.
 
 1. **Tool selected** (`creationTool` + `creationModule`): User clicked "add circle/ellipse" in blending toolbar. Canvas shows crosshair cursor. No form exists yet on server.
 
-2. **Form created, following cursor** (`creatingMaskId`): User clicked on canvas (or toolbar button called `createMask` with `_creation: true`). Server creates the form with initial params. The form follows the cursor — on each `mousemove`, `inverseTransform` converts output-space cursor to raw-space center, and `previewMaskParam` sends coalesced updates to server.
+2. **Form created, following cursor** (`creatingMaskId`): User clicked on canvas (or toolbar button called `createMask` with `_creation: true`). Server creates the form with initial params. The form follows the cursor — on each `mousemove`, `inverseTransform` converts output-space cursor to raw-space position (center for circle/ellipse, anchor for gradient), and `previewMaskParam` sends coalesced updates to server.
 
-3. **Cursor outside image during creation**: Mask centers at (0.5, 0.5) in output space. Slider adjustments (radius, border) use this centered position until cursor returns to the image.
+3. **Cursor outside image during creation**: Mask position defaults to (0.5, 0.5) in output space. Slider adjustments (radius, border, compression) use this default position until cursor returns to the image.
 
-4. **Click to commit** (`saveCreation`): Final raw-space center is sent to server as a history-writing update. Creation mode exits, form becomes selected for editing.
+4. **Click to commit** (`saveCreation`): Final raw-space position is sent to server as a history-writing update. Creation mode exits, form becomes selected for editing.
 
 5. **Escape to cancel** (`cancelCreation`): Form is deleted from server, creation mode exits.
 
@@ -134,13 +134,14 @@ DT creates the form in-memory during `gui->creation` and only writes to history 
 
 | DragTarget.kind | DT equivalent | What it controls |
 | --------------- | ------------- | ---------------- |
-| `"center"` | `gui->form_dragging` | Entire mask position |
+| `"center"` | `gui->form_dragging` | Entire mask position (center for circle/ellipse, anchor for gradient) |
 | `"radius"` | `gui->point_dragging` | Mask size (radius for circle, axis radii for ellipse) |
-| `"border"` | `gui->point_border_dragging` | Feather/border width |
+| `"border"` | `gui->point_border_dragging` | Feather/border width (circle/ellipse) or compression (gradient) |
+| `"rotate"` | Ctrl+drag / `gui->form_rotating` | Rotation angle (ellipse, gradient) |
 
 ### Drag Flow
 
-1. **mousedown**: `hitTestDragTarget` generates polylines from grid to find handle positions in output space. If a handle is near the click, captures `origCenter`/`origRadius`/`origBorder` from `form.points` (raw space).
+1. **mousedown**: `hitTestDragTarget` generates polylines from grid to find handle positions in output space. If a handle is near the click, captures original values from `form.points` (raw space). For gradient, arrow endpoints serve as rotation handles.
 
 2. **mousemove**: Converts mouse position to raw space via `inverseTransform`. Computes delta from drag start (also in raw space). Updates `form.points` directly for instant visual feedback (grid regenerates polylines from updated raw-space params).
 
@@ -169,7 +170,7 @@ Conversions:
 | -------- | ------- |
 | `develop.get_distortion_grid` | Returns 64×64 forward + inverse grids |
 | `develop.get_masks` | Returns all mask forms with raw-space `points` |
-| `develop.create_mask` | Creates a new mask form (circle/ellipse) |
+| `develop.create_mask` | Creates a new mask form (circle/ellipse/gradient) |
 | `develop.update_mask` | Updates mask params; `preview_only` flag skips history |
 | `develop.assign_mask` | Assigns a form to a module's blend group |
 
@@ -190,15 +191,16 @@ Nova masking code aligns with the GTK darktable C codebase (`src/develop/masks/`
 | Nova term | DT C equivalent | Description |
 | --------- | -------------- | ----------- |
 | `creatingMaskId` | `gui->creation` | A mask form is being created — follows cursor, not yet committed to history |
-| `creationTool` | `gui->creation` (type) | Which mask type is selected for creation (`"circle"`, `"ellipse"`) |
+| `creationTool` | `gui->creation` (type) | Which mask type is selected for creation (`"circle"`, `"ellipse"`, `"gradient"`) |
 | `creationModule` | `gui->creation_module` | The IOP module that initiated mask creation |
 | `saveCreation()` | `dt_masks_gui_form_save_creation()` | Commit the mask being created (write to history, exit creation mode) |
 | `cancelCreation()` | Right-click during `gui->creation` | Cancel mask creation and delete the uncommitted form |
 | `resetCreation()` | Deselect creation tool | Clear tool selection without deleting any form (pre-creation state) |
-| `creationCursorRef` | `gui->posx` / `gui->posy` | Cursor position tracked during creation for center placement |
-| `DragTarget.kind: "center"` | `gui->form_dragging` | Entire mask is being dragged (center handle) |
+| `creationCursorRef` | `gui->posx` / `gui->posy` | Cursor position tracked during creation for position placement |
+| `DragTarget.kind: "center"` | `gui->form_dragging` | Entire mask is being dragged (center/anchor) |
 | `DragTarget.kind: "radius"` | `gui->point_dragging` | Radius handle is being dragged |
-| `DragTarget.kind: "border"` | `gui->point_border_dragging` / `gui->feather_dragging` | Border/feather handle is being dragged |
+| `DragTarget.kind: "border"` | `gui->point_border_dragging` / `gui->feather_dragging` | Border/feather (circle/ellipse) or compression (gradient) handle |
+| `DragTarget.kind: "rotate"` | `gui->form_rotating` | Rotation handle (ellipse Ctrl+drag, gradient arrow endpoints) |
 | `distortionGrid` | `dt_dev_distort_transform_plus()` | Precomputed 64×64 coordinate transform grid |
 | `forwardTransform()` | `DT_DEV_TRANSFORM_DIR_ALL` | Raw normalized coords → output normalized coords |
 | `inverseTransform()` | `DT_DEV_TRANSFORM_DIR_BACK_ALL` | Output normalized coords → raw normalized coords |

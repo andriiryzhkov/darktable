@@ -166,7 +166,7 @@ interface DevelopState {
   selectedMaskId: number | null;
   /** Distortion grid for client-side mask coordinate transforms */
   distortionGrid: DistortionGrid | null;
-  creationTool: "circle" | "ellipse" | null;
+  creationTool: "circle" | "ellipse" | "gradient" | null;
   creationModule: { op: string; instance: number } | null;
   /** Form ID of mask currently being placed (follows cursor until clicked) */
   creatingMaskId: number | null;
@@ -219,14 +219,14 @@ interface DevelopState {
   fetchDistortionGrid: () => Promise<void>;
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
-  createMask: (type: "circle" | "ellipse", params: Record<string, unknown>) => Promise<number | null>;
+  createMask: (type: "circle" | "ellipse" | "gradient", params: Record<string, unknown>) => Promise<number | null>;
   updateMask: (formid: number, params: Record<string, unknown>) => Promise<void>;
-  startCreation: (tool: "circle" | "ellipse", op: string, instance: number) => void;
+  startCreation: (tool: "circle" | "ellipse" | "gradient", op: string, instance: number) => void;
   resetCreation: () => void;
   /** Send lightweight mask update to server (no history write) and refresh polylines */
   previewMaskParam: (formid: number, updates: Record<string, unknown>) => void;
   /** Save mask creation (commit position, exit creation mode) */
-  saveCreation: (center: [number, number]) => Promise<void>;
+  saveCreation: (position: [number, number]) => Promise<void>;
   /** Cancel mask creation and delete the form being created */
   cancelCreation: () => Promise<void>;
   toggleMasks: () => void;
@@ -886,7 +886,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       if (Object.keys(geomUpdates).length > 0) {
         const idx = updated.findIndex((f) => f.formid === formid);
         if (idx >= 0) {
-          updated[idx] = { ...updated[idx], points: { ...(updated[idx].points as unknown as Record<string, unknown>), ...geomUpdates } as unknown as MaskForm["points"] };
+          updated[idx] = { ...updated[idx], points: { ...(updated[idx].points as unknown as Record<string, unknown>), ...geomUpdates } as unknown as MaskForm["points"], transformed: undefined };
           changed = true;
         }
       }
@@ -935,20 +935,26 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     return fn;
   })(),
 
-  saveCreation: async (center) => {
+  saveCreation: async (position) => {
     const { creatingMaskId, sessionId } = get();
     if (!creatingMaskId || !sessionId) return;
     const form = get().maskForms.find((f) => f.formid === creatingMaskId);
     if (!form) return;
     const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
-    const params: Record<string, unknown> = { center };
+    const params: Record<string, unknown> = {};
     // Include current geometry so server gets the full update
     if (baseType === MASKS_TYPE.CIRCLE) {
+      params.center = position;
       const pts = form.points as { radius: number; border: number };
       if (pts) { params.radius = pts.radius; params.border = pts.border; }
     } else if (baseType === MASKS_TYPE.ELLIPSE) {
+      params.center = position;
       const pts = form.points as { radius: [number, number]; border: number; rotation: number; flags: number };
       if (pts) { params.radius = [pts.radius[0], pts.radius[1]]; params.border = pts.border; params.rotation = pts.rotation; }
+    } else if (baseType === MASKS_TYPE.GRADIENT) {
+      params.anchor = position;
+      const pts = form.points as { rotation: number; compression: number; steepness: number; curvature: number; state: number };
+      if (pts) { params.rotation = pts.rotation; params.compression = pts.compression; params.steepness = pts.steepness; params.curvature = pts.curvature; params.state = pts.state; }
     }
     try {
       // Stop background preview sync and wait for in-flight to complete,

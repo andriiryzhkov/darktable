@@ -8,7 +8,7 @@ import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCollapsible from "../../controls/BauhausCollapsible";
 import { useDevelopStore } from "../../../stores/developStore";
 import { MASKS_TYPE } from "../../../types/protocol";
-import type { MaskPointsCircle, MaskPointsEllipse } from "../../../types/protocol";
+import type { MaskPointsCircle, MaskPointsEllipse, MaskPointsGradient } from "../../../types/protocol";
 import type { MaskForm, MaskUsage } from "../../../types/protocol";
 
 const ICON_SIZE = 12;
@@ -294,7 +294,14 @@ export default function MaskManagerModule() {
               <BauhausButton icon={<SplinePointer size={ICON_SIZE} />} transparent disabled />
             </BauhausTooltip>
             <BauhausTooltip content="add gradient" placement="bottom">
-              <BauhausButton icon={<ArrowDownRight size={ICON_SIZE} />} transparent disabled />
+              <BauhausButton
+                icon={<ArrowDownRight size={ICON_SIZE} />}
+                transparent
+                active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "gradient"}
+                onClick={() => {
+                  createMask("gradient", { anchor: [0.5, 0.5], rotation: 0, compression: 0.05, steepness: 0, curvature: 0, state: 2, _creation: true });
+                }}
+              />
             </BauhausTooltip>
           </span>
         </div>
@@ -432,6 +439,48 @@ export default function MaskManagerModule() {
                   format={(v) => `${(v * 100).toFixed(2)}%`}
                   onChange={(v: number) => { previewMaskParam(selForm.formid, { border: v }); }}
                   onRelease={(v: number) => { updateMask(selForm.formid, { border: v }).then(() => requestPreview()); }}
+                />
+              </BauhausCollapsible>
+            );
+          }
+
+          if (baseType === MASKS_TYPE.GRADIENT) {
+            const g = pts as MaskPointsGradient;
+            return (
+              <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                {opacitySlider}
+                <BauhausSlider
+                  label="rotation"
+                  value={g.rotation}
+                  min={0}
+                  max={360}
+                  step={1}
+                  defaultValue={0}
+                  format={(v) => `${v.toFixed(0)}°`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { rotation: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { rotation: v }).then(() => requestPreview()); }}
+                />
+                <BauhausSlider
+                  label="curvature"
+                  value={g.curvature}
+                  min={-2}
+                  max={2}
+                  step={0.01}
+                  defaultValue={0}
+                  format={(v) => `${v.toFixed(2)}`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { curvature: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { curvature: v }).then(() => requestPreview()); }}
+                />
+                <BauhausSlider
+                  label="compression"
+                  value={g.compression}
+                  min={0.001}
+                  max={1}
+                  step={0.001}
+                  defaultValue={0.05}
+                  format={(v) => `${(v * 100).toFixed(1)}%`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { compression: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { compression: v }).then(() => requestPreview()); }}
                 />
               </BauhausCollapsible>
             );

@@ -250,7 +250,12 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
             <BauhausButton icon={<Brush size={12} />} transparent disabled />
           </BauhausTooltip>
           <BauhausTooltip content="add gradient" placement="bottom">
-            <BauhausButton icon={<ArrowDownRight size={12} />} transparent disabled />
+            <BauhausButton
+              icon={<ArrowDownRight size={12} />}
+              transparent
+              active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "gradient"}
+              onClick={() => createMask("gradient", { anchor: [0.5, 0.5], rotation: 0, compression: 0.05, steepness: 4, curvature: 0, state: 2, op, instance, _creation: true })}
+            />
           </BauhausTooltip>
         </div>
       )}
