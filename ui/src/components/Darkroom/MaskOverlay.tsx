@@ -13,7 +13,9 @@ import type {
   MaskTransformedGradient,
   MaskTransformedPath,
   MaskTransformedBrush,
+  DistortionGrid,
 } from "../../types/protocol";
+import { generateCirclePolyline, generateEllipsePolyline, transformPathPoints, transformBrushPoints, generateGradientPolylines } from "../../lib/distortionGrid";
 
 interface Props {
   targetRef: React.RefObject<HTMLElement | null>;
@@ -849,84 +851,154 @@ function isTransformedBrush(t: unknown): t is MaskTransformedBrush {
   return t !== null && typeof t === "object" && "border_polyline1" in (t as Record<string, unknown>);
 }
 
-function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, px: number, py: number): boolean {
+function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, px: number, py: number, grid: DistortionGrid | null = null): boolean {
   if (!form.points) return false;
   const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
   switch (baseType) {
     case MASKS_TYPE.CIRCLE: {
+      if (grid) {
+        const pts = form.points as MaskPointsCircle;
+        const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
+        return hitTestCirclePolyline(ctx, w, h, poly, px, py);
+      }
       const t = form.transformed;
       if (t && isTransformedPolyline(t)) return hitTestCirclePolyline(ctx, w, h, t as MaskTransformedCircle, px, py);
       return hitTestCircle(w, h, (t || form.points) as MaskPointsCircle, px, py);
     }
     case MASKS_TYPE.ELLIPSE: {
+      if (grid) {
+        const pts = form.points as MaskPointsEllipse;
+        const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
+        return hitTestEllipsePolyline(ctx, w, h, poly, px, py);
+      }
       const t = form.transformed;
       if (t && isTransformedPolyline(t)) return hitTestEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, px, py);
       return hitTestEllipse(w, h, (t || form.points) as MaskPointsEllipse, px, py);
     }
     case MASKS_TYPE.PATH: {
-      const t = form.transformed;
-      if (t && isTransformedPath(t)) {
-        return hitTestPath(ctx, w, h, t.controls, px, py, t.border_polyline);
+      if (grid) {
+        const pts = form.points as MaskPointPath[];
+        const tPts = transformPathPoints(grid, pts);
+        return hitTestPath(ctx, w, h, tPts, px, py);
       }
-      return hitTestPath(ctx, w, h, (t || form.points) as MaskPointPath[], px, py);
+      const tP = form.transformed;
+      if (tP && isTransformedPath(tP)) {
+        return hitTestPath(ctx, w, h, tP.controls, px, py, tP.border_polyline);
+      }
+      return hitTestPath(ctx, w, h, (tP || form.points) as MaskPointPath[], px, py);
     }
     case MASKS_TYPE.BRUSH: {
-      const t = form.transformed;
-      if (t && isTransformedBrush(t)) {
-        return hitTestBrush(ctx, w, h, t.controls, px, py);
+      if (grid) {
+        const pts = form.points as MaskPointBrush[];
+        const tPts = transformBrushPoints(grid, pts);
+        return hitTestBrush(ctx, w, h, tPts, px, py);
       }
-      return hitTestBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], px, py);
+      const tB = form.transformed;
+      if (tB && isTransformedBrush(tB)) {
+        return hitTestBrush(ctx, w, h, tB.controls, px, py);
+      }
+      return hitTestBrush(ctx, w, h, (tB || form.points) as MaskPointBrush[], px, py);
     }
     case MASKS_TYPE.GRADIENT: {
-      const t = form.transformed;
-      if (t && isTransformedGradient(t)) return hitTestGradientPolyline(ctx, w, h, t, px, py);
-      return hitTestGradient(w, h, (t || form.points) as MaskPointsGradient, px, py);
+      if (grid) {
+        const pts = form.points as MaskPointsGradient;
+        const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
+        const tGrad: MaskTransformedGradient = {
+          ...poly,
+          compression: pts.compression,
+          steepness: pts.steepness,
+          curvature: pts.curvature,
+          state: pts.state,
+        };
+        return hitTestGradientPolyline(ctx, w, h, tGrad, px, py);
+      }
+      const tG = form.transformed;
+      if (tG && isTransformedGradient(tG)) return hitTestGradientPolyline(ctx, w, h, tG, px, py);
+      return hitTestGradient(w, h, (tG || form.points) as MaskPointsGradient, px, py);
     }
     default:
       return false;
   }
 }
 
-function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, hovered = false, mx: number | null = null, my: number | null = null, editedPoint: { formid: number; index: number } | null = null, hoveredSeg = -1) {
+function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, hovered = false, mx: number | null = null, my: number | null = null, editedPoint: { formid: number; index: number } | null = null, hoveredSeg = -1, grid: DistortionGrid | null = null) {
   if (!form.points) return;
   const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
 
   switch (baseType) {
     case MASKS_TYPE.CIRCLE: {
-      const t = form.transformed;
-      if (t && isTransformedPolyline(t)) drawCirclePolyline(ctx, w, h, t as MaskTransformedCircle, hovered, mx, my);
-      else drawCircle(ctx, w, h, (t || form.points) as MaskPointsCircle, hovered, mx, my);
+      // Prefer client-side polyline from distortion grid (instant, no server round-trip)
+      if (grid) {
+        const pts = form.points as MaskPointsCircle;
+        const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
+        drawCirclePolyline(ctx, w, h, poly, hovered, mx, my);
+      } else {
+        const t = form.transformed;
+        if (t && isTransformedPolyline(t)) drawCirclePolyline(ctx, w, h, t as MaskTransformedCircle, hovered, mx, my);
+        else drawCircle(ctx, w, h, (t || form.points) as MaskPointsCircle, hovered, mx, my);
+      }
       break;
     }
     case MASKS_TYPE.ELLIPSE: {
-      const t = form.transformed;
-      if (t && isTransformedPolyline(t)) drawEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, hovered, mx, my);
-      else drawEllipse(ctx, w, h, (t || form.points) as MaskPointsEllipse, hovered, mx, my);
+      if (grid) {
+        const pts = form.points as MaskPointsEllipse;
+        const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
+        drawEllipsePolyline(ctx, w, h, poly, hovered, mx, my);
+      } else {
+        const t = form.transformed;
+        if (t && isTransformedPolyline(t)) drawEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, hovered, mx, my);
+        else drawEllipse(ctx, w, h, (t || form.points) as MaskPointsEllipse, hovered, mx, my);
+      }
       break;
     }
     case MASKS_TYPE.PATH: {
       const editIdx = editedPoint?.formid === form.formid ? editedPoint.index : null;
-      const t = form.transformed;
-      if (t && isTransformedPath(t)) {
-        drawPath(ctx, w, h, t.controls, hovered, mx, my, editIdx, t.border_polyline);
+      if (grid) {
+        const pts = form.points as MaskPointPath[];
+        const tPts = transformPathPoints(grid, pts);
+        drawPath(ctx, w, h, tPts, hovered, mx, my, editIdx);
       } else {
-        drawPath(ctx, w, h, (t || form.points) as MaskPointPath[], hovered, mx, my, editIdx);
+        const t = form.transformed;
+        if (t && isTransformedPath(t)) {
+          drawPath(ctx, w, h, t.controls, hovered, mx, my, editIdx, t.border_polyline);
+        } else {
+          drawPath(ctx, w, h, (t || form.points) as MaskPointPath[], hovered, mx, my, editIdx);
+        }
       }
       break;
     }
     case MASKS_TYPE.BRUSH: {
-      const t = form.transformed;
-      if (t && isTransformedBrush(t)) {
-        drawBrush(ctx, w, h, t.controls, hovered, mx, my, t.border_polyline1, t.border_polyline2, hoveredSeg);
+      if (grid) {
+        const pts = form.points as MaskPointBrush[];
+        const tPts = transformBrushPoints(grid, pts);
+        drawBrush(ctx, w, h, tPts, hovered, mx, my, undefined, undefined, hoveredSeg);
       } else {
-        drawBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], hovered, mx, my, undefined, undefined, hoveredSeg);
+        const t = form.transformed;
+        if (t && isTransformedBrush(t)) {
+          drawBrush(ctx, w, h, t.controls, hovered, mx, my, t.border_polyline1, t.border_polyline2, hoveredSeg);
+        } else {
+          drawBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], hovered, mx, my, undefined, undefined, hoveredSeg);
+        }
       }
       break;
     }
     case MASKS_TYPE.GRADIENT: {
-      const t = form.transformed;
-      if (t && isTransformedGradient(t)) drawGradientPolyline(ctx, w, h, t, hovered, mx, my);
-      else drawGradient(ctx, w, h, (t || form.points) as MaskPointsGradient, hovered, mx, my);
+      if (grid) {
+        const pts = form.points as MaskPointsGradient;
+        const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
+        const tGrad: MaskTransformedGradient = {
+          ...poly,
+          compression: pts.compression,
+          steepness: pts.steepness,
+          curvature: pts.curvature,
+          state: pts.state,
+        };
+        drawGradientPolyline(ctx, w, h, tGrad, hovered, mx, my);
+      } else {
+        const t = form.transformed;
+        if (t && isTransformedGradient(t)) drawGradientPolyline(ctx, w, h, t, hovered, mx, my);
+        else drawGradient(ctx, w, h, (t || form.points) as MaskPointsGradient, hovered, mx, my);
+      }
       break;
     }
   }
@@ -937,6 +1009,7 @@ export default function MaskOverlay({ targetRef }: Props) {
   const maskForms = useDevelopStore((s) => s.maskForms);
   const maskUsage = useDevelopStore((s) => s.maskUsage);
   const selectedMaskId = useDevelopStore((s) => s.selectedMaskId);
+  const distortionGrid = useDevelopStore((s) => s.distortionGrid);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoveredIdRef = useRef<number | null>(null);
   const hoveredSegRef = useRef<number>(-1);
@@ -1028,7 +1101,7 @@ export default function MaskOverlay({ targetRef }: Props) {
       for (const form of drawableForms) {
         const hovered = hoveredIdRef.current === form.formid;
         const seg = hovered ? hoveredSegRef.current : -1;
-        drawForm(ctx, w, h, form, hovered, m?.x ?? null, m?.y ?? null, ep, seg);
+        drawForm(ctx, w, h, form, hovered, m?.x ?? null, m?.y ?? null, ep, seg, distortionGrid);
       }
     };
 
@@ -1044,7 +1117,7 @@ export default function MaskOverlay({ targetRef }: Props) {
       let newSeg = -1;
       for (const form of drawableForms) {
         const ctx2 = canvas.getContext("2d");
-        if (ctx2 && hitTestForm(ctx2, w, h, form, px, py)) {
+        if (ctx2 && hitTestForm(ctx2, w, h, form, px, py, distortionGrid)) {
           newHovered = form.formid;
           // Detect per-segment hover for brush masks
           const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
@@ -1117,7 +1190,7 @@ export default function MaskOverlay({ targetRef }: Props) {
       canvas.removeEventListener("mouseleave", onMouseLeave);
       canvas.removeEventListener("pointerup", onClick);
     };
-  }, [showMasks, maskForms, maskUsage, selectedMaskId, targetRef]);
+  }, [showMasks, maskForms, maskUsage, selectedMaskId, targetRef, distortionGrid]);
 
   return <canvas ref={canvasRef} className="mask-overlay" />;
 }

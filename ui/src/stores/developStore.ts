@@ -27,12 +27,13 @@ import {
   developRenameMask,
   developDeleteMask,
   developSetBlendParam,
+  developGetDistortionGrid,
   getPreviewFrame,
   getFramePort,
 } from "../api/commands";
 import { on } from "../events/eventBus";
 import { useCatalogStore } from "./catalogStore";
-import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult, MaskForm, MaskUsage } from "../types/protocol";
+import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult, MaskForm, MaskUsage, DistortionGrid } from "../types/protocol";
 
 // Cached frame server port (resolved once, never changes)
 let _cachedFramePort: number | undefined;
@@ -160,6 +161,8 @@ interface DevelopState {
   maskUsage: MaskUsage[];
   showMasks: boolean;
   selectedMaskId: number | null;
+  /** Distortion grid for client-side mask coordinate transforms */
+  distortionGrid: DistortionGrid | null;
   loading: boolean;
   previewError: string | null;
 
@@ -206,6 +209,7 @@ interface DevelopState {
   renameInstance: (op: string, instance: number, name: string) => Promise<void>;
   fetchIntrospection: (op: string) => Promise<IntrospectionResult | null>;
   fetchMasks: () => Promise<void>;
+  fetchDistortionGrid: () => Promise<void>;
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
   toggleMasks: () => void;
@@ -258,6 +262,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   maskUsage: [],
   showMasks: false,
   selectedMaskId: null,
+  distortionGrid: null,
   loading: false,
   previewError: null,
   focusModuleOp: null,
@@ -376,6 +381,7 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       showMasks: false,
       selectedMaskId: null,
       sequence: 0,
+      distortionGrid: null,
     });
   },
 
@@ -388,6 +394,17 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       await developRequestPreview(sessionId);
     } catch (e) {
       console.error("develop.request_preview failed:", e);
+    }
+  },
+
+  fetchDistortionGrid: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      const grid = await developGetDistortionGrid(sessionId);
+      set({ distortionGrid: grid });
+    } catch (e) {
+      console.error("fetchDistortionGrid failed:", e);
     }
   },
 
@@ -838,4 +855,7 @@ on("develop.preview_ready", (data) => {
   // Re-fetch masks now that the pipeline has completed — this enables
   // gui_points (distortion-transformed coordinates) which require pipe dimensions.
   state.fetchMasks();
+
+  // Refresh distortion grid (used for client-side mask polyline computation)
+  state.fetchDistortionGrid();
 });
