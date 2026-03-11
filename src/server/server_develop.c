@@ -4685,6 +4685,24 @@ char *dt_server_develop_update_mask(dt_server_t *server, const dt_server_request
                                  "update_mask currently supports circle and ellipse only");
   }
 
+  // Opacity is stored on the group child entry, not on the form itself
+  if(json_object_has_member(req->params, "opacity"))
+  {
+    const float opacity = (float)json_object_get_double_member(req->params, "opacity");
+    // Find all group children referencing this form and update opacity
+    for(GList *f = session->dev.forms; f; f = g_list_next(f))
+    {
+      dt_masks_form_t *grp = f->data;
+      if((grp->type & DT_MASKS_GROUP) == 0) continue;
+      for(GList *p = grp->points; p; p = g_list_next(p))
+      {
+        dt_masks_point_group_t *grpt = p->data;
+        if(grpt->formid == formid)
+          grpt->opacity = opacity;
+      }
+    }
+  }
+
   const gboolean preview_only = json_object_has_member(req->params, "preview_only")
     && json_object_get_boolean_member(req->params, "preview_only");
 

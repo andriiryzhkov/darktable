@@ -879,12 +879,31 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       if (stopped) return;
       // Update store immediately for instant bidirectional feedback (sliders ↔ canvas)
       const forms = get().maskForms;
-      const idx = forms.findIndex((f) => f.formid === formid);
-      if (idx >= 0) {
-        const updated = [...forms];
-        updated[idx] = { ...updated[idx], points: { ...(updated[idx].points as unknown as Record<string, unknown>), ...updates } as unknown as MaskForm["points"] };
-        set({ maskForms: updated });
+      const updated = [...forms];
+      let changed = false;
+      // Update form geometry (center, radius, border, rotation, etc.)
+      const { opacity: _opacity, ...geomUpdates } = updates;
+      if (Object.keys(geomUpdates).length > 0) {
+        const idx = updated.findIndex((f) => f.formid === formid);
+        if (idx >= 0) {
+          updated[idx] = { ...updated[idx], points: { ...(updated[idx].points as unknown as Record<string, unknown>), ...geomUpdates } as unknown as MaskForm["points"] };
+          changed = true;
+        }
       }
+      // Update opacity on group children referencing this form
+      if (typeof _opacity === "number") {
+        for (let i = 0; i < updated.length; i++) {
+          if (!updated[i].children) continue;
+          const ci = updated[i].children!.findIndex((c) => c.formid === formid);
+          if (ci >= 0) {
+            const newChildren = [...updated[i].children!];
+            newChildren[ci] = { ...newChildren[ci], opacity: _opacity };
+            updated[i] = { ...updated[i], children: newChildren };
+            changed = true;
+          }
+        }
+      }
+      if (changed) set({ maskForms: updated });
       pending = { formid, updates };
       if (busy) return;
       busy = true;

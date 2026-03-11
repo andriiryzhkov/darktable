@@ -338,12 +338,36 @@ export default function MaskManagerModule() {
           const baseType = selForm.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
           const pts = selForm.points;
 
+          // Find opacity from group child entry
+          let selOpacity = 1.0;
+          for (const form of maskForms) {
+            if (form.children) {
+              const child = form.children.find((c) => c.formid === selectedMaskId);
+              if (child) { selOpacity = child.opacity; break; }
+            }
+          }
+
           const isCreating = creatingMaskId === selectedMaskId;
+
+          const opacitySlider = (
+            <BauhausSlider
+              label="opacity"
+              value={selOpacity}
+              min={0.05}
+              max={1}
+              step={0.01}
+              defaultValue={1}
+              format={(v) => `${(v * 100).toFixed(0)}%`}
+              onChange={(v: number) => { previewMaskParam(selForm.formid, { opacity: v }); }}
+              onRelease={(v: number) => { updateMask(selForm.formid, { opacity: v }).then(() => requestPreview()); }}
+            />
+          );
 
           if (baseType === MASKS_TYPE.CIRCLE) {
             const c = pts as MaskPointsCircle;
             return (
               <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                {opacitySlider}
                 <BauhausSlider
                   label="size"
                   value={c.radius}
@@ -375,6 +399,7 @@ export default function MaskManagerModule() {
             const aspect = el.radius[1] / (el.radius[0] || 0.001);
             return (
               <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                {opacitySlider}
                 <BauhausSlider
                   label="size"
                   value={el.radius[0]}
