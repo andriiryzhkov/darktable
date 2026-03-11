@@ -4428,3 +4428,344 @@ char *dt_server_develop_get_distortion_grid(dt_server_t *server, const dt_server
   g_object_unref(b);
   return dt_server_make_response(req->id, root);
 }
+
+// Ensure a form ID is unique within the session's forms list
+static void _server_check_mask_id(dt_develop_t *dev, dt_masks_form_t *form)
+{
+  dt_mask_id_t nid = 100;
+  for(GList *forms = dev->forms; forms; )
+  {
+    const dt_masks_form_t *ff = forms->data;
+    if(ff->formid == form->formid)
+    {
+      form->formid = nid++;
+      forms = dev->forms; // restart scan
+    }
+    else
+      forms = g_list_next(forms);
+  }
+}
+
+// Auto-generate a unique name like "circle #1", "ellipse #2"
+static void _server_set_form_name(dt_develop_t *dev, dt_masks_form_t *form)
+{
+  guint nb = 0;
+  for(GList *l = dev->forms; l; l = g_list_next(l))
+  {
+    const dt_masks_form_t *f = l->data;
+    if(f->type == form->type) nb++;
+  }
+  gboolean exist;
+  do
+  {
+    exist = FALSE;
+    nb++;
+    if(form->functions && form->functions->set_form_name)
+      form->functions->set_form_name(form, nb);
+    for(GList *l = dev->forms; l; l = g_list_next(l))
+    {
+      const dt_masks_form_t *f = l->data;
+      if(!strcmp(f->name, form->name)) { exist = TRUE; break; }
+    }
+  } while(exist);
+}
+
+char *dt_server_develop_create_mask(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "type"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or type parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const char *type_str = json_object_get_string_member(req->params, "type");
+  if(!type_str)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "type must be a string");
+
+  dt_masks_type_t mask_type = DT_MASKS_NONE;
+  if(!strcmp(type_str, "circle")) mask_type = DT_MASKS_CIRCLE;
+  else if(!strcmp(type_str, "ellipse")) mask_type = DT_MASKS_ELLIPSE;
+  else if(!strcmp(type_str, "path")) mask_type = DT_MASKS_PATH;
+  else if(!strcmp(type_str, "brush")) mask_type = DT_MASKS_BRUSH;
+  else if(!strcmp(type_str, "gradient")) mask_type = DT_MASKS_GRADIENT;
+  else
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Unknown mask type");
+
+  // Create the form
+  dt_masks_form_t *form = dt_masks_create(mask_type);
+  if(!form)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Failed to create mask form");
+
+  _server_check_mask_id(&session->dev, form);
+  _server_set_form_name(&session->dev, form);
+
+  // Set geometry from params
+  if(mask_type == DT_MASKS_CIRCLE)
+  {
+    dt_masks_point_circle_t *circle = calloc(1, sizeof(dt_masks_point_circle_t));
+    if(json_object_has_member(req->params, "center"))
+    {
+      JsonArray *c = json_object_get_array_member(req->params, "center");
+      circle->center[0] = (float)json_array_get_double_element(c, 0);
+      circle->center[1] = (float)json_array_get_double_element(c, 1);
+    }
+    else
+    {
+      circle->center[0] = 0.5f;
+      circle->center[1] = 0.5f;
+    }
+    circle->radius = json_object_has_member(req->params, "radius")
+      ? (float)json_object_get_double_member(req->params, "radius") : 0.1f;
+    circle->border = json_object_has_member(req->params, "border")
+      ? (float)json_object_get_double_member(req->params, "border") : 0.05f;
+    form->points = g_list_append(form->points, circle);
+  }
+  else if(mask_type == DT_MASKS_ELLIPSE)
+  {
+    dt_masks_point_ellipse_t *ellipse = calloc(1, sizeof(dt_masks_point_ellipse_t));
+    if(json_object_has_member(req->params, "center"))
+    {
+      JsonArray *c = json_object_get_array_member(req->params, "center");
+      ellipse->center[0] = (float)json_array_get_double_element(c, 0);
+      ellipse->center[1] = (float)json_array_get_double_element(c, 1);
+    }
+    else
+    {
+      ellipse->center[0] = 0.5f;
+      ellipse->center[1] = 0.5f;
+    }
+    if(json_object_has_member(req->params, "radius"))
+    {
+      JsonArray *r = json_object_get_array_member(req->params, "radius");
+      ellipse->radius[0] = (float)json_array_get_double_element(r, 0);
+      ellipse->radius[1] = (float)json_array_get_double_element(r, 1);
+    }
+    else
+    {
+      ellipse->radius[0] = 0.1f;
+      ellipse->radius[1] = 0.1f;
+    }
+    ellipse->rotation = json_object_has_member(req->params, "rotation")
+      ? (float)json_object_get_double_member(req->params, "rotation") : 0.0f;
+    ellipse->border = json_object_has_member(req->params, "border")
+      ? (float)json_object_get_double_member(req->params, "border") : 0.05f;
+    ellipse->flags = json_object_has_member(req->params, "flags")
+      ? (dt_masks_ellipse_flags_t)json_object_get_int_member(req->params, "flags")
+      : DT_MASKS_ELLIPSE_EQUIDISTANT;
+    form->points = g_list_append(form->points, ellipse);
+  }
+
+  // Register form
+  session->dev.forms = g_list_append(session->dev.forms, form);
+  dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
+
+  // If module specified, assign to its mask group
+  if(json_object_has_member(req->params, "op"))
+  {
+    const char *op = json_object_get_string_member(req->params, "op");
+    const int instance = json_object_has_member(req->params, "instance")
+      ? (int)json_object_get_int_member(req->params, "instance") : 0;
+    dt_iop_module_t *module = _find_module(session, op, instance);
+    if(module && (module->flags() & IOP_FLAGS_SUPPORTS_BLENDING) && module->blend_params)
+    {
+      // Get or create group
+      dt_masks_form_t *grp = dt_masks_get_from_id_ext(session->dev.forms,
+                                                       module->blend_params->mask_id);
+      if(!grp || !(grp->type & DT_MASKS_GROUP))
+      {
+        grp = dt_masks_create(DT_MASKS_GROUP);
+        _server_check_mask_id(&session->dev, grp);
+        snprintf(grp->name, sizeof(grp->name), "group %s", op);
+        session->dev.forms = g_list_append(session->dev.forms, grp);
+        module->blend_params->mask_id = grp->formid;
+      }
+
+      // Add form to group
+      dt_masks_point_group_t *grpt = malloc(sizeof(dt_masks_point_group_t));
+      grpt->formid = form->formid;
+      grpt->parentid = grp->formid;
+      grpt->state = DT_MASKS_STATE_SHOW | DT_MASKS_STATE_USE;
+      if(grp->points)
+        grpt->state |= DT_MASKS_STATE_UNION;
+      grpt->opacity = 1.0f;
+      grp->points = g_list_append(grp->points, grpt);
+
+      // Enable drawn mask mode if not already
+      if(!(module->blend_params->mask_mode & DEVELOP_MASK_MASK))
+        module->blend_params->mask_mode |= DEVELOP_MASK_MASK;
+
+      dt_iop_commit_blend_params(module, module->blend_params);
+      dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
+      dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
+    }
+  }
+
+  dt_dev_write_history(&session->dev);
+
+  // Return the new formid
+  JsonObject *result = json_object_new();
+  json_object_set_int_member(result, "formid", form->formid);
+  json_object_set_string_member(result, "name", form->name);
+  JsonNode *node = json_node_new(JSON_NODE_OBJECT);
+  json_node_set_object(node, result);
+  json_object_unref(result);
+  return dt_server_make_response(req->id, node);
+}
+
+char *dt_server_develop_update_mask(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "formid"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id or formid parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_mask_id_t formid = (dt_mask_id_t)json_object_get_int_member(req->params, "formid");
+  dt_masks_form_t *form = dt_masks_get_from_id_ext(session->dev.forms, formid);
+  if(!form)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Mask form not found");
+
+  const dt_masks_type_t base_type = form->type & ~(DT_MASKS_CLONE | DT_MASKS_NON_CLONE);
+
+  if(base_type == DT_MASKS_CIRCLE)
+  {
+    dt_masks_point_circle_t *circle = g_list_nth_data(form->points, 0);
+    if(!circle)
+      return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Circle has no points");
+    if(json_object_has_member(req->params, "center"))
+    {
+      JsonArray *c = json_object_get_array_member(req->params, "center");
+      circle->center[0] = (float)json_array_get_double_element(c, 0);
+      circle->center[1] = (float)json_array_get_double_element(c, 1);
+    }
+    if(json_object_has_member(req->params, "radius"))
+      circle->radius = (float)json_object_get_double_member(req->params, "radius");
+    if(json_object_has_member(req->params, "border"))
+      circle->border = (float)json_object_get_double_member(req->params, "border");
+  }
+  else if(base_type == DT_MASKS_ELLIPSE)
+  {
+    dt_masks_point_ellipse_t *ellipse = g_list_nth_data(form->points, 0);
+    if(!ellipse)
+      return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Ellipse has no points");
+    if(json_object_has_member(req->params, "center"))
+    {
+      JsonArray *c = json_object_get_array_member(req->params, "center");
+      ellipse->center[0] = (float)json_array_get_double_element(c, 0);
+      ellipse->center[1] = (float)json_array_get_double_element(c, 1);
+    }
+    if(json_object_has_member(req->params, "radius"))
+    {
+      JsonArray *r = json_object_get_array_member(req->params, "radius");
+      ellipse->radius[0] = (float)json_array_get_double_element(r, 0);
+      ellipse->radius[1] = (float)json_array_get_double_element(r, 1);
+    }
+    if(json_object_has_member(req->params, "rotation"))
+      ellipse->rotation = (float)json_object_get_double_member(req->params, "rotation");
+    if(json_object_has_member(req->params, "border"))
+      ellipse->border = (float)json_object_get_double_member(req->params, "border");
+    if(json_object_has_member(req->params, "flags"))
+      ellipse->flags = (dt_masks_ellipse_flags_t)json_object_get_int_member(req->params, "flags");
+  }
+  else
+  {
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "update_mask currently supports circle and ellipse only");
+  }
+
+  const gboolean preview_only = json_object_has_member(req->params, "preview_only")
+    && json_object_get_boolean_member(req->params, "preview_only");
+
+  if(!preview_only)
+  {
+    dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
+    dt_dev_write_history(&session->dev);
+  }
+
+  return dt_server_make_response(req->id, json_node_new(JSON_NODE_NULL));
+}
+
+char *dt_server_develop_assign_mask(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id")
+     || !json_object_has_member(req->params, "formid")
+     || !json_object_has_member(req->params, "op"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
+                                 "Missing session_id, formid, or op parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  const dt_mask_id_t formid = (dt_mask_id_t)json_object_get_int_member(req->params, "formid");
+  const char *op = json_object_get_string_member(req->params, "op");
+  const int instance = json_object_has_member(req->params, "instance")
+    ? (int)json_object_get_int_member(req->params, "instance") : 0;
+
+  dt_masks_form_t *form = dt_masks_get_from_id_ext(session->dev.forms, formid);
+  if(!form)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Mask form not found");
+
+  dt_iop_module_t *module = _find_module(session, op, instance);
+  if(!module)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Module not found");
+  if(!(module->flags() & IOP_FLAGS_SUPPORTS_BLENDING) || !module->blend_params)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Module does not support blending");
+
+  // Get or create mask group
+  dt_masks_form_t *grp = dt_masks_get_from_id_ext(session->dev.forms,
+                                                   module->blend_params->mask_id);
+  if(!grp || !(grp->type & DT_MASKS_GROUP))
+  {
+    grp = dt_masks_create(DT_MASKS_GROUP);
+    _server_check_mask_id(&session->dev, grp);
+    snprintf(grp->name, sizeof(grp->name), "group %s", op);
+    session->dev.forms = g_list_append(session->dev.forms, grp);
+    module->blend_params->mask_id = grp->formid;
+  }
+
+  // Check if already in group
+  for(GList *p = grp->points; p; p = g_list_next(p))
+  {
+    dt_masks_point_group_t *grpt = p->data;
+    if(grpt->formid == formid)
+      return dt_server_make_response(req->id, json_node_new(JSON_NODE_NULL));
+  }
+
+  // Add form to group
+  dt_masks_point_group_t *grpt = malloc(sizeof(dt_masks_point_group_t));
+  grpt->formid = form->formid;
+  grpt->parentid = grp->formid;
+  grpt->state = DT_MASKS_STATE_SHOW | DT_MASKS_STATE_USE;
+  if(grp->points)
+    grpt->state |= DT_MASKS_STATE_UNION;
+  grpt->opacity = json_object_has_member(req->params, "opacity")
+    ? (float)json_object_get_double_member(req->params, "opacity") : 1.0f;
+  grp->points = g_list_append(grp->points, grpt);
+
+  // Enable drawn mask mode
+  if(!(module->blend_params->mask_mode & DEVELOP_MASK_MASK))
+    module->blend_params->mask_mode |= DEVELOP_MASK_MASK;
+
+  dt_iop_commit_blend_params(module, module->blend_params);
+  dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
+  dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
+  dt_dev_write_history(&session->dev);
+
+  return dt_server_make_response(req->id, json_node_new(JSON_NODE_NULL));
+}

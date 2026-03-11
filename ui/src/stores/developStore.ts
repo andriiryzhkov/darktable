@@ -26,6 +26,8 @@ import {
   developGetMasks,
   developRenameMask,
   developDeleteMask,
+  developCreateMask,
+  developUpdateMask,
   developSetBlendParam,
   developGetDistortionGrid,
   getPreviewFrame,
@@ -34,6 +36,7 @@ import {
 import { on } from "../events/eventBus";
 import { useCatalogStore } from "./catalogStore";
 import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult, MaskForm, MaskUsage, DistortionGrid } from "../types/protocol";
+import { MASKS_TYPE } from "../types/protocol";
 
 // Cached frame server port (resolved once, never changes)
 let _cachedFramePort: number | undefined;
@@ -163,6 +166,10 @@ interface DevelopState {
   selectedMaskId: number | null;
   /** Distortion grid for client-side mask coordinate transforms */
   distortionGrid: DistortionGrid | null;
+  creationTool: "circle" | "ellipse" | null;
+  creationModule: { op: string; instance: number } | null;
+  /** Form ID of mask currently being placed (follows cursor until clicked) */
+  creatingMaskId: number | null;
   loading: boolean;
   previewError: string | null;
 
@@ -212,6 +219,16 @@ interface DevelopState {
   fetchDistortionGrid: () => Promise<void>;
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
+  createMask: (type: "circle" | "ellipse", params: Record<string, unknown>) => Promise<number | null>;
+  updateMask: (formid: number, params: Record<string, unknown>) => Promise<void>;
+  startCreation: (tool: "circle" | "ellipse", op: string, instance: number) => void;
+  resetCreation: () => void;
+  /** Send lightweight mask update to server (no history write) and refresh polylines */
+  previewMaskParam: (formid: number, updates: Record<string, unknown>) => void;
+  /** Save mask creation (commit position, exit creation mode) */
+  saveCreation: (center: [number, number]) => Promise<void>;
+  /** Cancel mask creation and delete the form being created */
+  cancelCreation: () => Promise<void>;
   toggleMasks: () => void;
   selectMask: (formid: number | null) => void;
   setBlendParam: (op: string, instance: number, param: string, value: number, skipRefresh?: boolean) => Promise<void>;
@@ -223,7 +240,6 @@ function getPreviewDimensions() {
   const h = Math.min(window.innerHeight, 1200);
   return { width: Math.max(w, 640), height: Math.max(h, 480) };
 }
-
 // Generation counter to detect stale async operations
 let sessionGeneration = 0;
 
@@ -263,6 +279,9 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   showMasks: false,
   selectedMaskId: null,
   distortionGrid: null,
+  creationTool: null,
+  creationModule: null,
+  creatingMaskId: null,
   loading: false,
   previewError: null,
   focusModuleOp: null,
@@ -380,6 +399,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       maskUsage: [],
       showMasks: false,
       selectedMaskId: null,
+      creationTool: null,
+      creationModule: null,
       sequence: 0,
       distortionGrid: null,
     });
@@ -801,6 +822,135 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     } catch (e) {
       console.error("delete mask failed:", e);
     }
+  },
+
+  createMask: async (type, params) => {
+    const { sessionId } = get();
+    if (!sessionId) return null;
+    try {
+      const creation = !!(params as Record<string, unknown>)._creation;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _creation, ...serverParams } = params as Record<string, unknown> & { _creation?: boolean };
+      const result = await developCreateMask(sessionId, { type, ...serverParams });
+      await get().fetchMasks();
+      await get().fetchHistory();
+      // Refresh modules to get updated blend params (mask_mode, mask_id)
+      const mods = await developGetModules(sessionId);
+      set({
+        modules: mods.modules,
+        selectedMaskId: result.formid,
+        showMasks: true,
+        creatingMaskId: creation ? result.formid : null,
+      });
+      return result.formid;
+    } catch (e) {
+      console.error("create mask failed:", e);
+      return null;
+    }
+  },
+
+  updateMask: async (formid, params) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developUpdateMask(sessionId, { formid, ...params });
+      await get().fetchMasks();
+    } catch (e) {
+      console.error("update mask failed:", e);
+    }
+  },
+
+  startCreation: (tool, op, instance) => {
+    set({ creationTool: tool, creationModule: { op, instance }, showMasks: true });
+  },
+
+  resetCreation: () => {
+    set({ creationTool: null, creationModule: null });
+  },
+
+  previewMaskParam: (() => {
+    // Coalescing state — only the latest update matters, skip intermediate ones
+    let busy = false;
+    let pending: { formid: number; updates: Record<string, unknown> } | null = null;
+    let stopped = false;
+    let idleResolvers: (() => void)[] = [];
+
+    const fn = (formid: number, updates: Record<string, unknown>) => {
+      if (stopped) return;
+      // Update store immediately for instant bidirectional feedback (sliders ↔ canvas)
+      const forms = get().maskForms;
+      const idx = forms.findIndex((f) => f.formid === formid);
+      if (idx >= 0) {
+        const updated = [...forms];
+        updated[idx] = { ...updated[idx], points: { ...(updated[idx].points as unknown as Record<string, unknown>), ...updates } as unknown as MaskForm["points"] };
+        set({ maskForms: updated });
+      }
+      pending = { formid, updates };
+      if (busy) return;
+      busy = true;
+      (async () => {
+        try {
+          const { sessionId } = get();
+          if (!sessionId) return;
+          while (pending && !stopped) {
+            const { formid: fid, updates: upd } = pending;
+            pending = null;
+            await developUpdateMask(sessionId, { formid: fid, ...upd, preview_only: true });
+          }
+        } finally {
+          busy = false;
+          for (const r of idleResolvers) r();
+          idleResolvers = [];
+        }
+      })();
+    };
+
+    // Stop accepting new requests and wait for in-flight request to complete
+    fn.drain = async () => {
+      stopped = true;
+      pending = null;
+      if (busy) await new Promise<void>(r => idleResolvers.push(r));
+      stopped = false;
+    };
+
+    return fn;
+  })(),
+
+  saveCreation: async (center) => {
+    const { creatingMaskId, sessionId } = get();
+    if (!creatingMaskId || !sessionId) return;
+    const form = get().maskForms.find((f) => f.formid === creatingMaskId);
+    if (!form) return;
+    const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+    const params: Record<string, unknown> = { center };
+    // Include current geometry so server gets the full update
+    if (baseType === MASKS_TYPE.CIRCLE) {
+      const pts = form.points as { radius: number; border: number };
+      if (pts) { params.radius = pts.radius; params.border = pts.border; }
+    } else if (baseType === MASKS_TYPE.ELLIPSE) {
+      const pts = form.points as { radius: [number, number]; border: number; rotation: number; flags: number };
+      if (pts) { params.radius = [pts.radius[0], pts.radius[1]]; params.border = pts.border; params.rotation = pts.rotation; }
+    }
+    try {
+      // Stop background preview sync and wait for in-flight to complete,
+      // preventing race where preview_only overwrites our committed position
+      await (get().previewMaskParam as { drain: () => Promise<void> }).drain();
+      // Commit final position (writes history, unlike preview_only)
+      await developUpdateMask(sessionId, { formid: creatingMaskId, ...params });
+      await get().fetchMasks();
+      set({ creatingMaskId: null, selectedMaskId: creatingMaskId });
+      get().requestPreview();
+    } catch (e) {
+      console.error("save creation failed:", e);
+      set({ creatingMaskId: null });
+    }
+  },
+
+  cancelCreation: async () => {
+    const { creatingMaskId } = get();
+    if (!creatingMaskId) return;
+    set({ creatingMaskId: null, selectedMaskId: null });
+    get().deleteMask(creatingMaskId);
   },
 
   toggleMasks: () => set((s) => ({ showMasks: !s.showMasks })),

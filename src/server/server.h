@@ -177,6 +177,9 @@ char *dt_server_develop_get_introspection(dt_server_t *server, const dt_server_r
 char *dt_server_develop_get_masks(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_rename_mask(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_delete_mask(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_create_mask(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_update_mask(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_assign_mask(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_set_blend_param(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_get_distortion_grid(dt_server_t *server, const dt_server_request_t *req);
 

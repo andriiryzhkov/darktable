@@ -53,6 +53,9 @@ interface Props {
 
 export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
   const setBlendParam = useDevelopStore((s) => s.setBlendParam);
+  const createMask = useDevelopStore((s) => s.createMask);
+  const creatingMaskId = useDevelopStore((s) => s.creatingMaskId);
+  const maskForms = useDevelopStore((s) => s.maskForms);
 
   const blend = moduleInfo.blend;
   if (!blend) return null;
@@ -225,10 +228,20 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
       {isActive && hasMasks && (maskMode & MASK_MODE.DRAWN) !== 0 && (
         <div className="blending-shapes">
           <BauhausTooltip content="add circle" placement="bottom">
-            <BauhausButton icon={<Circle size={12} />} transparent disabled />
+            <BauhausButton
+              icon={<Circle size={12} />}
+              transparent
+              active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "circle"}
+              onClick={() => createMask("circle", { center: [0.5, 0.5], radius: 0.05, border: 0.05, op, instance, _creation: true })}
+            />
           </BauhausTooltip>
           <BauhausTooltip content="add ellipse" placement="bottom">
-            <BauhausButton icon={<Circle size={12} style={{ transform: "scaleX(0.7)" }} />} transparent disabled />
+            <BauhausButton
+              icon={<Circle size={12} style={{ transform: "scaleX(0.7)" }} />}
+              transparent
+              active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "ellipse"}
+              onClick={() => createMask("ellipse", { center: [0.5, 0.5], radius: [0.05, 0.03535], border: 0.05, rotation: 90, op, instance, _creation: true })}
+            />
           </BauhausTooltip>
           <BauhausTooltip content="add path" placement="bottom">
             <BauhausButton icon={<SplinePointer size={12} />} transparent disabled />

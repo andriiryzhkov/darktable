@@ -53,6 +53,9 @@ declare global {
     developGetMasks: (sessionId: string) => Promise<MaskListResult>;
     developRenameMask: (sessionId: string, formid: number, name: string) => Promise<unknown>;
     developDeleteMask: (sessionId: string, formid: number) => Promise<unknown>;
+    developCreateMask: (sessionId: string, params: string) => Promise<{ formid: number; name: string }>;
+    developUpdateMask: (sessionId: string, params: string) => Promise<unknown>;
+    developAssignMask: (sessionId: string, params: string) => Promise<unknown>;
     developSetBlendParam: (sessionId: string, op: string, instance: number, param: string, value: number) => Promise<unknown>;
     developGetDistortionGrid: (sessionId: string) => Promise<DistortionGrid>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
@@ -203,6 +206,15 @@ export const developRenameMask = (sessionId: string, formid: number, name: strin
 
 export const developDeleteMask = (sessionId: string, formid: number) =>
   window.developDeleteMask(sessionId, formid);
+
+export const developCreateMask = (sessionId: string, params: Record<string, unknown>) =>
+  window.developCreateMask(sessionId, JSON.stringify(params));
+
+export const developUpdateMask = (sessionId: string, params: Record<string, unknown>) =>
+  window.developUpdateMask(sessionId, JSON.stringify(params));
+
+export const developAssignMask = (sessionId: string, params: Record<string, unknown>) =>
+  window.developAssignMask(sessionId, JSON.stringify(params));
 
 export const developSetBlendParam = (sessionId: string, op: string, instance: number, param: string, value: number) =>
   window.developSetBlendParam(sessionId, op, instance, param, value);

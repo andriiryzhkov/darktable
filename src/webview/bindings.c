@@ -819,6 +819,127 @@ static void on_develop_delete_mask(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+static void on_develop_create_mask(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developCreateMask requires (sessionId, paramsJson)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *params_json = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  // Parse the params JSON and inject session_id
+  JsonParser *p2 = json_parser_new();
+  if(!json_parser_load_from_data(p2, params_json, -1, NULL))
+  {
+    _return_error(ctx, id, "Invalid params JSON");
+    g_free(session_id);
+    g_free(params_json);
+    g_object_unref(p2);
+    return;
+  }
+  JsonObject *obj = json_node_get_object(json_parser_get_root(p2));
+  json_object_set_string_member(obj, "session_id", session_id);
+
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, json_parser_get_root(p2));
+  char *final_params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  g_object_unref(p2);
+  g_free(session_id);
+  g_free(params_json);
+
+  _ipc_passthrough(ctx, id, "develop.create_mask", final_params);
+  g_free(final_params);
+}
+
+static void on_develop_update_mask(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developUpdateMask requires (sessionId, paramsJson)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *params_json = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  JsonParser *p2 = json_parser_new();
+  if(!json_parser_load_from_data(p2, params_json, -1, NULL))
+  {
+    _return_error(ctx, id, "Invalid params JSON");
+    g_free(session_id);
+    g_free(params_json);
+    g_object_unref(p2);
+    return;
+  }
+  JsonObject *obj = json_node_get_object(json_parser_get_root(p2));
+  json_object_set_string_member(obj, "session_id", session_id);
+
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, json_parser_get_root(p2));
+  char *final_params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  g_object_unref(p2);
+  g_free(session_id);
+  g_free(params_json);
+
+  _ipc_passthrough(ctx, id, "develop.update_mask", final_params);
+  g_free(final_params);
+}
+
+static void on_develop_assign_mask(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 2)
+  {
+    _return_error(ctx, id, "developAssignMask requires (sessionId, paramsJson)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  char *params_json = _get_string_arg(args, 1);
+  g_object_unref(parser);
+
+  JsonParser *p2 = json_parser_new();
+  if(!json_parser_load_from_data(p2, params_json, -1, NULL))
+  {
+    _return_error(ctx, id, "Invalid params JSON");
+    g_free(session_id);
+    g_free(params_json);
+    g_object_unref(p2);
+    return;
+  }
+  JsonObject *obj = json_node_get_object(json_parser_get_root(p2));
+  json_object_set_string_member(obj, "session_id", session_id);
+
+  JsonGenerator *gen = json_generator_new();
+  json_generator_set_root(gen, json_parser_get_root(p2));
+  char *final_params = json_generator_to_data(gen, NULL);
+  g_object_unref(gen);
+  g_object_unref(p2);
+  g_free(session_id);
+  g_free(params_json);
+
+  _ipc_passthrough(ctx, id, "develop.assign_mask", final_params);
+  g_free(final_params);
+}
+
 static void on_develop_set_blend_param(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -3209,6 +3330,9 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developGetMasks", on_develop_get_masks, ctx);
   webview_bind(ctx->webview, "developRenameMask", on_develop_rename_mask, ctx);
   webview_bind(ctx->webview, "developDeleteMask", on_develop_delete_mask, ctx);
+  webview_bind(ctx->webview, "developCreateMask", on_develop_create_mask, ctx);
+  webview_bind(ctx->webview, "developUpdateMask", on_develop_update_mask, ctx);
+  webview_bind(ctx->webview, "developAssignMask", on_develop_assign_mask, ctx);
   webview_bind(ctx->webview, "developSetBlendParam", on_develop_set_blend_param, ctx);
   webview_bind(ctx->webview, "developGetDistortionGrid", on_develop_get_distortion_grid, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);

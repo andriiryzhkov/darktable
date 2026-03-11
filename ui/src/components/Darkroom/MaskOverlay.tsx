@@ -11,11 +11,9 @@ import type {
   MaskTransformedCircle,
   MaskTransformedEllipse,
   MaskTransformedGradient,
-  MaskTransformedPath,
-  MaskTransformedBrush,
   DistortionGrid,
 } from "../../types/protocol";
-import { generateCirclePolyline, generateEllipsePolyline, transformPathPoints, transformBrushPoints, generateGradientPolylines } from "../../lib/distortionGrid";
+import { generateCirclePolyline, generateEllipsePolyline, transformPathPoints, transformBrushPoints, generateGradientPolylines, forwardTransform, inverseTransform } from "../../lib/distortionGrid";
 
 interface Props {
   targetRef: React.RefObject<HTMLElement | null>;
@@ -92,28 +90,6 @@ function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, mx: num
   ctx.strokeRect(x - hs / 2, y - hs / 2, hs, hs);
 }
 
-function drawCircle(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointsCircle, hovered = false, mx: number | null = null, my: number | null = null) {
-  const cx = pts.center[0] * w;
-  const cy = pts.center[1] * h;
-  const dim = Math.min(w, h);
-  const r = pts.radius * dim;
-  const borderR = (pts.radius + pts.border) * dim;
-
-  // Main circle — solid
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  dualStroke(ctx, false, hovered);
-
-  // Feather border — dashed
-  ctx.beginPath();
-  ctx.arc(cx, cy, borderR, 0, Math.PI * 2);
-  dualStroke(ctx, true, hovered);
-
-  // Handles
-  drawHandle(ctx, cx + r, cy, mx, my);
-  drawHandle(ctx, cx + borderR, cy, mx, my);
-}
-
 function drawCirclePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedCircle, hovered = false, mx: number | null = null, my: number | null = null) {
   // Main circle — solid polyline
   const mainPath = buildPolylinePath2D(t.main_polyline, w, h, true);
@@ -132,59 +108,12 @@ function drawCirclePolyline(ctx: CanvasRenderingContext2D, w: number, h: number,
   }
 }
 
-function hitTestCircle(w: number, h: number, pts: MaskPointsCircle, px: number, py: number): boolean {
-  const cx = pts.center[0] * w;
-  const cy = pts.center[1] * h;
-  const dim = Math.min(w, h);
-  const r = pts.radius * dim;
-  const borderR = (pts.radius + pts.border) * dim;
-  const dx = px - cx;
-  const dy = py - cy;
-  if (dx * dx + dy * dy <= borderR * borderR) return true;
-  if (isNearHandle(cx + r, cy, px, py)) return true;
-  if (isNearHandle(cx + borderR, cy, px, py)) return true;
-  return false;
-}
-
 function hitTestCirclePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedCircle, px: number, py: number): boolean {
   const borderPath = buildPolylinePath2D(t.border_polyline, w, h, true);
   if (ctx.isPointInPath(borderPath, px, py)) return true;
   if (t.main_polyline.length >= 2 && isNearHandle(t.main_polyline[0] * w, t.main_polyline[1] * h, px, py)) return true;
   if (t.border_polyline.length >= 2 && isNearHandle(t.border_polyline[0] * w, t.border_polyline[1] * h, px, py)) return true;
   return false;
-}
-
-function drawEllipse(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointsEllipse, hovered = false, mx: number | null = null, my: number | null = null) {
-  const cx = pts.center[0] * w;
-  const cy = pts.center[1] * h;
-  const dim = Math.min(w, h);
-  const rx = pts.radius[0] * dim;
-  const ry = pts.radius[1] * dim;
-  const rot = (pts.rotation * Math.PI) / 180;
-  const borderRx = (pts.radius[0] + pts.border) * dim;
-  const borderRy = (pts.radius[1] + pts.border) * dim;
-
-  // Main ellipse — solid
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, rot, 0, Math.PI * 2);
-  dualStroke(ctx, false, hovered);
-
-  // Feather border — dashed
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, borderRx, borderRy, rot, 0, Math.PI * 2);
-  dualStroke(ctx, true, hovered);
-
-  // Handles on all 4 sides of both ellipses (rotated)
-  const cosR = Math.cos(rot);
-  const sinR = Math.sin(rot);
-  drawHandle(ctx, cx + rx * cosR, cy + rx * sinR, mx, my);
-  drawHandle(ctx, cx - rx * cosR, cy - rx * sinR, mx, my);
-  drawHandle(ctx, cx - ry * sinR, cy + ry * cosR, mx, my);
-  drawHandle(ctx, cx + ry * sinR, cy - ry * cosR, mx, my);
-  drawHandle(ctx, cx + borderRx * cosR, cy + borderRx * sinR, mx, my);
-  drawHandle(ctx, cx - borderRx * cosR, cy - borderRx * sinR, mx, my);
-  drawHandle(ctx, cx - borderRy * sinR, cy + borderRy * cosR, mx, my);
-  drawHandle(ctx, cx + borderRy * sinR, cy - borderRy * cosR, mx, my);
 }
 
 function drawEllipsePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedEllipse, hovered = false, mx: number | null = null, my: number | null = null) {
@@ -206,35 +135,6 @@ function drawEllipsePolyline(ctx: CanvasRenderingContext2D, w: number, h: number
     const bi = Math.round(q * nBorder / 4) % nBorder;
     drawHandle(ctx, t.border_polyline[bi * 2] * w, t.border_polyline[bi * 2 + 1] * h, mx, my);
   }
-}
-
-function hitTestEllipse(w: number, h: number, pts: MaskPointsEllipse, px: number, py: number): boolean {
-  const cx = pts.center[0] * w;
-  const cy = pts.center[1] * h;
-  const dim = Math.min(w, h);
-  const rx = pts.radius[0] * dim;
-  const borderRx = (pts.radius[0] + pts.border) * dim;
-  const borderRy = (pts.radius[1] + pts.border) * dim;
-  const rot = (pts.rotation * Math.PI) / 180;
-  const cosR = Math.cos(-rot);
-  const sinR = Math.sin(-rot);
-  const dx = px - cx;
-  const dy = py - cy;
-  const lx = dx * cosR - dy * sinR;
-  const ly = dx * sinR + dy * cosR;
-  if ((lx * lx) / (borderRx * borderRx) + (ly * ly) / (borderRy * borderRy) <= 1) return true;
-  const ry = pts.radius[1] * dim;
-  const hCos = Math.cos(rot);
-  const hSin = Math.sin(rot);
-  if (isNearHandle(cx + rx * hCos, cy + rx * hSin, px, py)) return true;
-  if (isNearHandle(cx - rx * hCos, cy - rx * hSin, px, py)) return true;
-  if (isNearHandle(cx - ry * hSin, cy + ry * hCos, px, py)) return true;
-  if (isNearHandle(cx + ry * hSin, cy - ry * hCos, px, py)) return true;
-  if (isNearHandle(cx + borderRx * hCos, cy + borderRx * hSin, px, py)) return true;
-  if (isNearHandle(cx - borderRx * hCos, cy - borderRx * hSin, px, py)) return true;
-  if (isNearHandle(cx - borderRy * hSin, cy + borderRy * hCos, px, py)) return true;
-  if (isNearHandle(cx + borderRy * hSin, cy - borderRy * hCos, px, py)) return true;
-  return false;
 }
 
 function hitTestEllipsePolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedEllipse, px: number, py: number): boolean {
@@ -550,57 +450,6 @@ function drawArrow(ctx: CanvasRenderingContext2D, fromX: number, fromY: number, 
   ctx.stroke();
 }
 
-function drawGradient(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointsGradient, hovered = false, mx: number | null = null, my: number | null = null) {
-  const ax = pts.anchor[0] * w;
-  const ay = pts.anchor[1] * h;
-  const rot = (pts.rotation * Math.PI) / 180;
-  const comp = pts.compression;
-
-  // Border offset: DT uses compression * diagonal (see _gradient_get_pts_border)
-  const transitionHalf = comp * Math.sqrt(w * w + h * h);
-
-  // Gradient direction: DT uses -(rotation-90°) for pivot, giving (sin, cos) in y-down coords
-  const dx = Math.sin(rot);
-  const dy = Math.cos(rot);
-
-  // Line direction: DT uses v = -rotation, giving (cos, -sin)
-  const lineLen = Math.max(w, h) * 1.5;
-  const lx = Math.cos(rot);
-  const ly = -Math.sin(rot);
-
-  // Main gradient line — solid
-  ctx.beginPath();
-  ctx.moveTo(ax - lx * lineLen, ay - ly * lineLen);
-  ctx.lineTo(ax + lx * lineLen, ay + ly * lineLen);
-  dualStroke(ctx, false, hovered);
-
-  // Border lines — dashed
-  ctx.beginPath();
-  ctx.moveTo(ax + dx * transitionHalf - lx * lineLen, ay + dy * transitionHalf - ly * lineLen);
-  ctx.lineTo(ax + dx * transitionHalf + lx * lineLen, ay + dy * transitionHalf + ly * lineLen);
-  dualStroke(ctx, true, hovered);
-
-  ctx.beginPath();
-  ctx.moveTo(ax - dx * transitionHalf - lx * lineLen, ay - dy * transitionHalf - ly * lineLen);
-  ctx.lineTo(ax - dx * transitionHalf + lx * lineLen, ay - dy * transitionHalf + ly * lineLen);
-  dualStroke(ctx, true, hovered);
-
-  // Arrow — dual-stroke manually (dark bg then bright fg)
-  const pivotDist = 0.1 * Math.min(w, h);
-  const tailX = ax - dx * pivotDist, tailY = ay - dy * pivotDist;
-  const headX = ax + dx * pivotDist, headY = ay + dy * pivotDist;
-  const arrowLw = LW_MASK * (hovered ? LW_SEL_MULT : 1);
-  ctx.lineWidth = arrowLw;
-  ctx.strokeStyle = hovered ? DARK_SEL : DARK;
-  drawArrow(ctx, tailX, tailY, headX, headY);
-  ctx.lineWidth = hovered ? arrowLw : arrowLw / 2;
-  ctx.strokeStyle = hovered ? BRIGHT_SEL : BRIGHT;
-  drawArrow(ctx, tailX, tailY, headX, headY);
-
-  // Anchor handle
-  drawHandle(ctx, ax, ay, mx, my);
-}
-
 function drawGradientPolyline(ctx: CanvasRenderingContext2D, w: number, h: number, t: MaskTransformedGradient, hovered = false, mx: number | null = null, my: number | null = null) {
   const ax = t.anchor[0] * w;
   const ay = t.anchor[1] * h;
@@ -652,22 +501,6 @@ function hitTestGradientPolyline(ctx: CanvasRenderingContext2D, w: number, h: nu
     if (ctx.isPointInStroke(b2, px, py)) return true;
   }
   if (isNearHandle(t.anchor[0] * w, t.anchor[1] * h, px, py)) return true;
-  return false;
-}
-
-function hitTestGradient(w: number, h: number, pts: MaskPointsGradient, px: number, py: number): boolean {
-  const ax = pts.anchor[0] * w;
-  const ay = pts.anchor[1] * h;
-  const rot = (pts.rotation * Math.PI) / 180;
-  const comp = pts.compression;
-  const transitionHalf = comp * Math.sqrt(w * w + h * h);
-  const dx = Math.sin(rot);
-  const dy = Math.cos(rot);
-  const relX = px - ax;
-  const relY = py - ay;
-  const dist = Math.abs(relX * dx + relY * dy);
-  if (dist <= transitionHalf) return true;
-  if (isNearHandle(ax, ay, px, py)) return true;
   return false;
 }
 
@@ -832,89 +665,46 @@ function hitTestPath(ctx: CanvasRenderingContext2D, w: number, h: number, pts: M
   return false;
 }
 
-/** Type guards for server-side polyline format */
-function isTransformedPolyline(t: unknown): t is MaskTransformedCircle | MaskTransformedEllipse {
-  const o = t as Record<string, unknown>;
-  return t !== null && typeof t === "object" && "main_polyline" in o && !("border_polyline1" in o);
-}
-
-function isTransformedGradient(t: unknown): t is MaskTransformedGradient {
-  const o = t as Record<string, unknown>;
-  return t !== null && typeof t === "object" && "main_polyline" in o && "border_polyline1" in o;
-}
-
-function isTransformedPath(t: unknown): t is MaskTransformedPath {
-  return t !== null && typeof t === "object" && "controls" in (t as Record<string, unknown>);
-}
-
-function isTransformedBrush(t: unknown): t is MaskTransformedBrush {
-  return t !== null && typeof t === "object" && "border_polyline1" in (t as Record<string, unknown>);
-}
-
 function hitTestForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: MaskForm, px: number, py: number, grid: DistortionGrid | null = null): boolean {
   if (!form.points) return false;
   const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
   switch (baseType) {
     case MASKS_TYPE.CIRCLE: {
-      if (grid) {
-        const pts = form.points as MaskPointsCircle;
-        const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
-        return hitTestCirclePolyline(ctx, w, h, poly, px, py);
-      }
-      const t = form.transformed;
-      if (t && isTransformedPolyline(t)) return hitTestCirclePolyline(ctx, w, h, t as MaskTransformedCircle, px, py);
-      return hitTestCircle(w, h, (t || form.points) as MaskPointsCircle, px, py);
+      if (!grid) return false;
+      const pts = form.points as MaskPointsCircle;
+      const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
+      return hitTestCirclePolyline(ctx, w, h, poly, px, py);
     }
     case MASKS_TYPE.ELLIPSE: {
-      if (grid) {
-        const pts = form.points as MaskPointsEllipse;
-        const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
-        return hitTestEllipsePolyline(ctx, w, h, poly, px, py);
-      }
-      const t = form.transformed;
-      if (t && isTransformedPolyline(t)) return hitTestEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, px, py);
-      return hitTestEllipse(w, h, (t || form.points) as MaskPointsEllipse, px, py);
+      if (!grid) return false;
+      const pts = form.points as MaskPointsEllipse;
+      const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
+      return hitTestEllipsePolyline(ctx, w, h, poly, px, py);
     }
     case MASKS_TYPE.PATH: {
-      if (grid) {
-        const pts = form.points as MaskPointPath[];
-        const tPts = transformPathPoints(grid, pts);
-        return hitTestPath(ctx, w, h, tPts, px, py);
-      }
-      const tP = form.transformed;
-      if (tP && isTransformedPath(tP)) {
-        return hitTestPath(ctx, w, h, tP.controls, px, py, tP.border_polyline);
-      }
-      return hitTestPath(ctx, w, h, (tP || form.points) as MaskPointPath[], px, py);
+      if (!grid) return false;
+      const pts = form.points as MaskPointPath[];
+      const tPts = transformPathPoints(grid, pts);
+      return hitTestPath(ctx, w, h, tPts, px, py);
     }
     case MASKS_TYPE.BRUSH: {
-      if (grid) {
-        const pts = form.points as MaskPointBrush[];
-        const tPts = transformBrushPoints(grid, pts);
-        return hitTestBrush(ctx, w, h, tPts, px, py);
-      }
-      const tB = form.transformed;
-      if (tB && isTransformedBrush(tB)) {
-        return hitTestBrush(ctx, w, h, tB.controls, px, py);
-      }
-      return hitTestBrush(ctx, w, h, (tB || form.points) as MaskPointBrush[], px, py);
+      if (!grid) return false;
+      const pts = form.points as MaskPointBrush[];
+      const tPts = transformBrushPoints(grid, pts);
+      return hitTestBrush(ctx, w, h, tPts, px, py);
     }
     case MASKS_TYPE.GRADIENT: {
-      if (grid) {
-        const pts = form.points as MaskPointsGradient;
-        const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
-        const tGrad: MaskTransformedGradient = {
-          ...poly,
-          compression: pts.compression,
-          steepness: pts.steepness,
-          curvature: pts.curvature,
-          state: pts.state,
-        };
-        return hitTestGradientPolyline(ctx, w, h, tGrad, px, py);
-      }
-      const tG = form.transformed;
-      if (tG && isTransformedGradient(tG)) return hitTestGradientPolyline(ctx, w, h, tG, px, py);
-      return hitTestGradient(w, h, (tG || form.points) as MaskPointsGradient, px, py);
+      if (!grid) return false;
+      const pts = form.points as MaskPointsGradient;
+      const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
+      const tGrad: MaskTransformedGradient = {
+        ...poly,
+        compression: pts.compression,
+        steepness: pts.steepness,
+        curvature: pts.curvature,
+        state: pts.state,
+      };
+      return hitTestGradientPolyline(ctx, w, h, tGrad, px, py);
     }
     default:
       return false;
@@ -927,131 +717,211 @@ function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, form: Mas
 
   switch (baseType) {
     case MASKS_TYPE.CIRCLE: {
-      // Prefer client-side polyline from distortion grid (instant, no server round-trip)
-      if (grid) {
-        const pts = form.points as MaskPointsCircle;
-        const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
-        drawCirclePolyline(ctx, w, h, poly, hovered, mx, my);
-      } else {
-        const t = form.transformed;
-        if (t && isTransformedPolyline(t)) drawCirclePolyline(ctx, w, h, t as MaskTransformedCircle, hovered, mx, my);
-        else drawCircle(ctx, w, h, (t || form.points) as MaskPointsCircle, hovered, mx, my);
-      }
+      if (!grid) break;
+      const pts = form.points as MaskPointsCircle;
+      const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
+      drawCirclePolyline(ctx, w, h, poly, hovered, mx, my);
       break;
     }
     case MASKS_TYPE.ELLIPSE: {
-      if (grid) {
-        const pts = form.points as MaskPointsEllipse;
-        const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
-        drawEllipsePolyline(ctx, w, h, poly, hovered, mx, my);
-      } else {
-        const t = form.transformed;
-        if (t && isTransformedPolyline(t)) drawEllipsePolyline(ctx, w, h, t as MaskTransformedEllipse, hovered, mx, my);
-        else drawEllipse(ctx, w, h, (t || form.points) as MaskPointsEllipse, hovered, mx, my);
-      }
+      if (!grid) break;
+      const pts = form.points as MaskPointsEllipse;
+      const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
+      drawEllipsePolyline(ctx, w, h, poly, hovered, mx, my);
       break;
     }
     case MASKS_TYPE.PATH: {
+      if (!grid) break;
       const editIdx = editedPoint?.formid === form.formid ? editedPoint.index : null;
-      if (grid) {
-        const pts = form.points as MaskPointPath[];
-        const tPts = transformPathPoints(grid, pts);
-        drawPath(ctx, w, h, tPts, hovered, mx, my, editIdx);
-      } else {
-        const t = form.transformed;
-        if (t && isTransformedPath(t)) {
-          drawPath(ctx, w, h, t.controls, hovered, mx, my, editIdx, t.border_polyline);
-        } else {
-          drawPath(ctx, w, h, (t || form.points) as MaskPointPath[], hovered, mx, my, editIdx);
-        }
-      }
+      const pts = form.points as MaskPointPath[];
+      const tPts = transformPathPoints(grid, pts);
+      drawPath(ctx, w, h, tPts, hovered, mx, my, editIdx);
       break;
     }
     case MASKS_TYPE.BRUSH: {
-      if (grid) {
-        const pts = form.points as MaskPointBrush[];
-        const tPts = transformBrushPoints(grid, pts);
-        drawBrush(ctx, w, h, tPts, hovered, mx, my, undefined, undefined, hoveredSeg);
-      } else {
-        const t = form.transformed;
-        if (t && isTransformedBrush(t)) {
-          drawBrush(ctx, w, h, t.controls, hovered, mx, my, t.border_polyline1, t.border_polyline2, hoveredSeg);
-        } else {
-          drawBrush(ctx, w, h, (t || form.points) as MaskPointBrush[], hovered, mx, my, undefined, undefined, hoveredSeg);
-        }
-      }
+      if (!grid) break;
+      const pts = form.points as MaskPointBrush[];
+      const tPts = transformBrushPoints(grid, pts);
+      drawBrush(ctx, w, h, tPts, hovered, mx, my, undefined, undefined, hoveredSeg);
       break;
     }
     case MASKS_TYPE.GRADIENT: {
-      if (grid) {
-        const pts = form.points as MaskPointsGradient;
-        const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
-        const tGrad: MaskTransformedGradient = {
-          ...poly,
-          compression: pts.compression,
-          steepness: pts.steepness,
-          curvature: pts.curvature,
-          state: pts.state,
-        };
-        drawGradientPolyline(ctx, w, h, tGrad, hovered, mx, my);
-      } else {
-        const t = form.transformed;
-        if (t && isTransformedGradient(t)) drawGradientPolyline(ctx, w, h, t, hovered, mx, my);
-        else drawGradient(ctx, w, h, (t || form.points) as MaskPointsGradient, hovered, mx, my);
-      }
+      if (!grid) break;
+      const pts = form.points as MaskPointsGradient;
+      const poly = generateGradientPolylines(grid, pts.anchor, pts.rotation, pts.compression);
+      const tGrad: MaskTransformedGradient = {
+        ...poly,
+        compression: pts.compression,
+        steepness: pts.steepness,
+        curvature: pts.curvature,
+        state: pts.state,
+      };
+      drawGradientPolyline(ctx, w, h, tGrad, hovered, mx, my);
       break;
     }
   }
 }
 
+// Hit-test result for mask editing drag targets
+type DragTarget =
+  | { kind: "center"; formid: number }
+  | { kind: "radius"; formid: number; pointIndex?: number }
+  | { kind: "border"; formid: number; pointIndex?: number }
+  | { kind: "rotate"; formid: number };
+
+interface DragState {
+  target: DragTarget;
+  startX: number;
+  startY: number;
+  origCenter: [number, number];
+  origRadius: number | [number, number];
+  origBorder: number;
+  dragAxis?: 0 | 1;
+  lastAngle?: number;
+}
+
+function hitTestDragTarget(
+  ctx: CanvasRenderingContext2D, w: number, h: number,
+  form: MaskForm, px: number, py: number, grid: DistortionGrid | null = null,
+): DragTarget | null {
+  const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+
+  if (grid && form.points) {
+    // Grid mode: generate polylines to get handle positions in output space
+    if (baseType === MASKS_TYPE.CIRCLE) {
+      const pts = form.points as MaskPointsCircle;
+      const poly = generateCirclePolyline(grid, pts.center, pts.radius, pts.border);
+      const cx = poly.center[0] * w, cy = poly.center[1] * h;
+      if (isNearHandle(cx, cy, px, py)) return { kind: "center", formid: form.formid };
+      // Radius handle: first point of main polyline (angle=0)
+      if (poly.main_polyline.length >= 2) {
+        if (isNearHandle(poly.main_polyline[0] * w, poly.main_polyline[1] * h, px, py))
+          return { kind: "radius", formid: form.formid };
+      }
+      // Border handle: first point of border polyline
+      if (poly.border_polyline.length >= 2) {
+        if (isNearHandle(poly.border_polyline[0] * w, poly.border_polyline[1] * h, px, py))
+          return { kind: "border", formid: form.formid };
+      }
+      // Grab anywhere inside the border to move (form_dragging)
+      const borderPath = buildPolylinePath2D(poly.border_polyline, w, h, true);
+      if (ctx.isPointInPath(borderPath, px, py)) return { kind: "center", formid: form.formid };
+    } else if (baseType === MASKS_TYPE.ELLIPSE) {
+      const pts = form.points as MaskPointsEllipse;
+      const poly = generateEllipsePolyline(grid, pts.center, pts.radius, pts.rotation, pts.border, pts.flags);
+      const cx = poly.center[0] * w, cy = poly.center[1] * h;
+      if (isNearHandle(cx, cy, px, py)) return { kind: "center", formid: form.formid };
+      // Radius handles at 4 axis points from polyline
+      const nMain = poly.main_polyline.length / 2;
+      const nBorder = poly.border_polyline.length / 2;
+      for (let q = 0; q < 4; q++) {
+        const mi = Math.round(q * nMain / 4) % nMain;
+        if (isNearHandle(poly.main_polyline[mi * 2] * w, poly.main_polyline[mi * 2 + 1] * h, px, py))
+          return { kind: "radius", formid: form.formid, pointIndex: q };
+        const bi = Math.round(q * nBorder / 4) % nBorder;
+        if (isNearHandle(poly.border_polyline[bi * 2] * w, poly.border_polyline[bi * 2 + 1] * h, px, py))
+          return { kind: "border", formid: form.formid, pointIndex: q };
+      }
+      // Grab anywhere inside the border to move (form_dragging)
+      const borderPath = buildPolylinePath2D(poly.border_polyline, w, h, true);
+      if (ctx.isPointInPath(borderPath, px, py)) return { kind: "center", formid: form.formid };
+    }
+    return null;
+  }
+
+  return null;
+}
+
 export default function MaskOverlay({ targetRef }: Props) {
-  const showMasks = useDevelopStore((s) => s.showMasks);
-  const maskForms = useDevelopStore((s) => s.maskForms);
-  const maskUsage = useDevelopStore((s) => s.maskUsage);
-  const selectedMaskId = useDevelopStore((s) => s.selectedMaskId);
   const distortionGrid = useDevelopStore((s) => s.distortionGrid);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoveredIdRef = useRef<number | null>(null);
   const hoveredSegRef = useRef<number>(-1);
   const mouseRef = useRef<{ x: number; y: number } | null>(null);
   const editedPointRef = useRef<{ formid: number; index: number } | null>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const drawableFormsRef = useRef<MaskForm[]>([]);
+  const drawRef = useRef<(() => void) | null>(null);
+  // Normalized cursor position during creation — used by subscription to translate new server polylines
+  const creationCursorRef = useRef<[number, number] | null>(null);
+
+  // Recompute drawable forms when structure changes
+  useEffect(() => {
+    const computeDrawable = () => {
+      const forms = useDevelopStore.getState().maskForms;
+      const usage = useDevelopStore.getState().maskUsage;
+      const selId = useDevelopStore.getState().selectedMaskId;
+      const creating = useDevelopStore.getState().creatingMaskId;
+      const show = useDevelopStore.getState().showMasks;
+
+      const result: MaskForm[] = [];
+      if (show) {
+        const usedFormIds = new Set<number>();
+        for (const u of usage) {
+          const group = forms.find((f) => f.formid === u.mask_id);
+          if (group?.children) {
+            for (const c of group.children) usedFormIds.add(c.formid);
+          }
+        }
+        for (const form of forms) {
+          if (usedFormIds.has(form.formid)) result.push(form);
+        }
+      }
+      const selForm = selId !== null ? forms.find((f) => f.formid === selId) ?? null : null;
+      if (selForm && !result.some((f) => f.formid === selForm.formid)) {
+        result.push(selForm);
+      }
+      if (creating !== null && !result.some((f) => f.formid === creating)) {
+        const creatingForm = forms.find((f) => f.formid === creating);
+        if (creatingForm) result.push(creatingForm);
+      }
+      drawableFormsRef.current = result;
+    };
+    computeDrawable();
+    // Subscribe to store changes for lightweight redraw (no event listener teardown)
+    const unsub = useDevelopStore.subscribe((state, prev) => {
+      if (state.maskForms !== prev.maskForms || state.selectedMaskId !== prev.selectedMaskId
+          || state.creatingMaskId !== prev.creatingMaskId || state.showMasks !== prev.showMasks) {
+        computeDrawable();
+        // During creation, when server returns new polylines (e.g. from slider preview),
+        // update center to match cursor so next draw is correct
+        if (state.creatingMaskId !== null && state.maskForms !== prev.maskForms) {
+          const cursor = creationCursorRef.current;
+          // If mouse is outside image area, center the mask at (0.5, 0.5)
+          const outPos: [number, number] = cursor ?? [0.5, 0.5];
+          const grid = useDevelopStore.getState().distortionGrid;
+          if (grid) {
+            const form = drawableFormsRef.current.find((f) => f.formid === state.creatingMaskId);
+            if (form) {
+              const rawCenter = inverseTransform(grid, outPos[0], outPos[1]);
+              const pts = form.points as { center: [number, number] } | undefined;
+              if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+            }
+          }
+        }
+        drawRef.current?.();
+      }
+    });
+    return unsub;
+  }, []); // stable — reads from store directly
 
   useEffect(() => {
     const target = targetRef.current;
     const canvas = canvasRef.current;
     if (!target || !canvas) return;
 
-    const selectedForm = selectedMaskId !== null
-      ? maskForms.find((f) => f.formid === selectedMaskId) ?? null
-      : null;
-
-    const hasAnythingToDraw = (showMasks && maskForms.length > 0) || selectedForm;
-    if (!hasAnythingToDraw) {
-      canvas.style.display = "none";
-      canvas.style.pointerEvents = "none";
-      return;
-    }
-
-    canvas.style.pointerEvents = "auto";
-
-    const drawableForms: MaskForm[] = [];
-    if (showMasks) {
-      const usedFormIds = new Set<number>();
-      for (const u of maskUsage) {
-        const group = maskForms.find((f) => f.formid === u.mask_id);
-        if (group?.children) {
-          for (const c of group.children) usedFormIds.add(c.formid);
-        }
-      }
-      for (const form of maskForms) {
-        if (usedFormIds.has(form.formid)) drawableForms.push(form);
-      }
-    }
-    if (selectedForm && !drawableForms.some((f) => f.formid === selectedForm.formid)) {
-      drawableForms.push(selectedForm);
-    }
-
     const draw = () => {
+      // Check if there's anything to draw (read latest state)
+      const { maskForms, selectedMaskId: selId, showMasks: show,
+              creationTool: cTool, creatingMaskId: cMaskId } = useDevelopStore.getState();
+      const selForm = selId !== null ? maskForms.find((f) => f.formid === selId) ?? null : null;
+      const hasAnythingToDraw = (show && drawableFormsRef.current.length > 0) || selForm || cTool || cMaskId;
+      if (!hasAnythingToDraw) {
+        canvas.style.display = "none";
+        canvas.style.pointerEvents = "none";
+        return;
+      }
+      canvas.style.pointerEvents = "auto";
       const tr = target.getBoundingClientRect();
       const container = target.closest(".preview-container");
       if (!container) return;
@@ -1098,12 +968,35 @@ export default function MaskOverlay({ targetRef }: Props) {
 
       const m = mouseRef.current;
       const ep = editedPointRef.current;
-      for (const form of drawableForms) {
+      for (const form of drawableFormsRef.current) {
         const hovered = hoveredIdRef.current === form.formid;
         const seg = hovered ? hoveredSegRef.current : -1;
         drawForm(ctx, w, h, form, hovered, m?.x ?? null, m?.y ?? null, ep, seg, distortionGrid);
       }
+
+      // Compute cursor from current state — single source of truth
+      if (dragRef.current) {
+        const dk = dragRef.current.target.kind;
+        canvas.style.cursor = dk === "center" ? "grabbing" : dk === "rotate" ? "alias" : "crosshair";
+      } else if (cTool || cMaskId) {
+        canvas.style.cursor = "crosshair";
+      } else if (m && selId !== null) {
+        const selF = drawableFormsRef.current.find((f) => f.formid === selId);
+        if (selF) {
+          const hit = hitTestDragTarget(ctx, w, h, selF, m.x, m.y, distortionGrid);
+          canvas.style.cursor = hit ? (hit.kind === "center" ? "grab" : "crosshair") : "";
+        } else {
+          canvas.style.cursor = "";
+        }
+      } else {
+        canvas.style.cursor = "";
+      }
     };
+
+    drawRef.current = draw;
+
+    const { createMask, updateMask, resetCreation, requestPreview,
+            saveCreation, cancelCreation, previewMaskParam } = useDevelopStore.getState();
 
     const onMouseMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
@@ -1113,18 +1006,117 @@ export default function MaskOverlay({ targetRef }: Props) {
       const w = canvas.width;
       const h = canvas.height;
 
+      // Creation mode: update form.points.center to follow cursor
+      const currentCreatingId = useDevelopStore.getState().creatingMaskId;
+      if (currentCreatingId !== null) {
+        const cx = px / w;
+        const cy = py / h;
+        creationCursorRef.current = [cx, cy];
+        const grid = useDevelopStore.getState().distortionGrid;
+        if (grid) {
+          const form = drawableFormsRef.current.find((f) => f.formid === currentCreatingId);
+          if (form) {
+            const rawCenter = inverseTransform(grid, cx, cy);
+            const pts = form.points as { center: [number, number] } | undefined;
+            if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+          }
+          // Background server sync — send raw-space center
+          previewMaskParam(currentCreatingId, { center: inverseTransform(grid, cx, cy) });
+        }
+        draw();
+        return;
+      }
+
+      // Handle drag in progress (requires distortion grid for raw-space transforms)
+      const drag = dragRef.current;
+      if (drag) {
+        const grid = useDevelopStore.getState().distortionGrid;
+        if (!grid) { draw(); return; }
+        const form = drawableFormsRef.current.find((f) => f.formid === drag.target.formid);
+        if (!form) return;
+        const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+        const pts = form.points as MaskPointsCircle | MaskPointsEllipse;
+        const rawMouse = inverseTransform(grid, px / w, py / h);
+        const iw = grid.iwidth, ih = grid.iheight;
+        const dim = Math.min(iw, ih);
+
+        if (drag.target.kind === "center") {
+          const rawStart = inverseTransform(grid, drag.startX / w, drag.startY / h);
+          pts.center[0] = drag.origCenter[0] + (rawMouse[0] - rawStart[0]);
+          pts.center[1] = drag.origCenter[1] + (rawMouse[1] - rawStart[1]);
+        } else if (drag.target.kind === "radius") {
+          const dx = (rawMouse[0] - pts.center[0]) * iw;
+          const dy = (rawMouse[1] - pts.center[1]) * ih;
+          if (baseType === MASKS_TYPE.CIRCLE) {
+            (pts as MaskPointsCircle).radius = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / dim);
+          } else {
+            // DT approach: one axis at a time, axis locked at drag start
+            const ep = pts as MaskPointsEllipse;
+            const rot = (ep.rotation ?? 0) * Math.PI / 180;
+            if (drag.dragAxis === 0) {
+              const proj = Math.abs(dx * Math.cos(rot) + dy * Math.sin(rot)) / dim;
+              ep.radius[0] = Math.max(0.002, proj);
+            } else {
+              const proj = Math.abs(-dx * Math.sin(rot) + dy * Math.cos(rot)) / dim;
+              ep.radius[1] = Math.max(0.002, proj);
+            }
+          }
+        } else if (drag.target.kind === "border") {
+          const dx = (rawMouse[0] - pts.center[0]) * iw;
+          const dy = (rawMouse[1] - pts.center[1]) * ih;
+          if (baseType === MASKS_TYPE.CIRCLE) {
+            const cp = pts as MaskPointsCircle;
+            cp.border = Math.max(0.001, Math.sqrt(dx * dx + dy * dy) / dim - cp.radius);
+          } else {
+            const ep = pts as MaskPointsEllipse;
+            const rot = (ep.rotation ?? 0) * Math.PI / 180;
+            if (drag.dragAxis === 0) {
+              const proj = Math.abs(dx * Math.cos(rot) + dy * Math.sin(rot)) / dim;
+              ep.border = Math.max(0.001, proj - ep.radius[0]);
+            } else {
+              const proj = Math.abs(-dx * Math.sin(rot) + dy * Math.cos(rot)) / dim;
+              ep.border = Math.max(0.001, proj - ep.radius[1]);
+            }
+          }
+        } else if (drag.target.kind === "rotate") {
+          // Delta-based rotation (matches DT's Ctrl+drag)
+          const ep = pts as MaskPointsEllipse;
+          const tc = forwardTransform(grid, ep.center[0], ep.center[1]);
+          const curAngle = Math.atan2(py / h - tc[1], px / w - tc[0]);
+          const delta = (curAngle - (drag.lastAngle ?? curAngle)) * (180 / Math.PI);
+          ep.rotation = ((ep.rotation ?? 0) + delta) % 360;
+          if (ep.rotation < 0) ep.rotation += 360;
+          drag.lastAngle = curAngle;
+        }
+        // Live server sync for slider feedback — only send changed params
+        const dk = drag.target.kind;
+        if (baseType === MASKS_TYPE.CIRCLE) {
+          const cp = pts as MaskPointsCircle;
+          if (dk === "center") previewMaskParam(drag.target.formid, { center: [cp.center[0], cp.center[1]] });
+          else if (dk === "radius") previewMaskParam(drag.target.formid, { radius: cp.radius });
+          else if (dk === "border") previewMaskParam(drag.target.formid, { border: cp.border });
+        } else if (baseType === MASKS_TYPE.ELLIPSE) {
+          const ep = pts as MaskPointsEllipse;
+          if (dk === "center") previewMaskParam(drag.target.formid, { center: [ep.center[0], ep.center[1]] });
+          else if (dk === "radius") previewMaskParam(drag.target.formid, { radius: [ep.radius[0], ep.radius[1]] });
+          else if (dk === "border") previewMaskParam(drag.target.formid, { border: ep.border });
+          else if (dk === "rotate") previewMaskParam(drag.target.formid, { rotation: ep.rotation });
+        }
+        draw();
+        return;
+      }
+
+      // Normal hover detection
       let newHovered: number | null = null;
       let newSeg = -1;
-      for (const form of drawableForms) {
+      for (const form of drawableFormsRef.current) {
         const ctx2 = canvas.getContext("2d");
         if (ctx2 && hitTestForm(ctx2, w, h, form, px, py, distortionGrid)) {
           newHovered = form.formid;
-          // Detect per-segment hover for brush masks
           const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
-          if (baseType === MASKS_TYPE.BRUSH) {
-            const t = form.transformed;
-            const pts = (t && isTransformedBrush(t)) ? t.controls : (t || form.points) as MaskPointBrush[];
-            newSeg = hitTestBrushSegment(ctx2, w, h, pts, px, py);
+          if (baseType === MASKS_TYPE.BRUSH && distortionGrid && form.points) {
+            const tPts = transformBrushPoints(distortionGrid, form.points as MaskPointBrush[]);
+            newSeg = hitTestBrushSegment(ctx2, w, h, tPts, px, py);
           }
           break;
         }
@@ -1132,6 +1124,7 @@ export default function MaskOverlay({ targetRef }: Props) {
 
       hoveredIdRef.current = newHovered;
       hoveredSegRef.current = newSeg;
+
       draw();
     };
 
@@ -1139,58 +1132,251 @@ export default function MaskOverlay({ targetRef }: Props) {
       mouseRef.current = null;
       hoveredIdRef.current = null;
       hoveredSegRef.current = -1;
+      // During creation, center the mask when mouse leaves the image area
+      const currentCreatingId = useDevelopStore.getState().creatingMaskId;
+      if (currentCreatingId !== null) {
+        creationCursorRef.current = null;
+        const grid = useDevelopStore.getState().distortionGrid;
+        if (grid) {
+          const form = drawableFormsRef.current.find((f) => f.formid === currentCreatingId);
+          if (form) {
+            const rawCenter = inverseTransform(grid, 0.5, 0.5);
+            const pts = form.points as { center: [number, number] } | undefined;
+            if (pts) { pts.center[0] = rawCenter[0]; pts.center[1] = rawCenter[1]; }
+          }
+          previewMaskParam(currentCreatingId, { center: inverseTransform(grid, 0.5, 0.5) });
+        }
+      }
       draw();
     };
 
-    const onClick = (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;
       const rect = canvas.getBoundingClientRect();
       const px = e.clientX - rect.left;
       const py = e.clientY - rect.top;
       const w = canvas.width;
       const h = canvas.height;
 
-      // Check if a path corner handle was clicked
-      for (const form of drawableForms) {
+      // Creation mode: click to save mask position
+      const currentCreatingId = useDevelopStore.getState().creatingMaskId;
+      if (currentCreatingId !== null) {
+        const cx = px / w;
+        const cy = py / h;
+        creationCursorRef.current = [cx, cy];
+        // Server expects raw-space center
+        const grid = useDevelopStore.getState().distortionGrid;
+        const rawCenter = grid ? inverseTransform(grid, cx, cy) as [number, number] : [cx, cy] as [number, number];
+        saveCreation(rawCenter);
+        return;
+      }
+
+      // Creation mode (from blending toolbar): click to create mask
+      const tool = useDevelopStore.getState().creationTool;
+      const mod = useDevelopStore.getState().creationModule;
+      if (tool && mod) {
+        const outCx = px / w;
+        const outCy = py / h;
+        // Server expects raw-space center — convert from output space if grid available
+        const grid = useDevelopStore.getState().distortionGrid;
+        const center = grid ? inverseTransform(grid, outCx, outCy) : [outCx, outCy];
+        const params: Record<string, unknown> = {
+          center,
+          op: mod.op,
+          instance: mod.instance,
+        };
+        if (tool === "circle") {
+          params.radius = 0.05;
+          params.border = 0.025;
+        } else {
+          params.radius = [0.05, 0.05];
+          params.border = 0.025;
+        }
+        resetCreation();
+        createMask(tool, params).then((formid) => {
+          if (formid) requestPreview();
+        });
+        return;
+      }
+
+      // Try to start a drag on a form — returns true if drag started
+      const tryStartDrag = (form: MaskForm, ctx2: CanvasRenderingContext2D): boolean => {
+        const target = hitTestDragTarget(ctx2, w, h, form, px, py, distortionGrid);
+        if (!target) return false;
         const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
-        if (baseType !== MASKS_TYPE.PATH || !form.points) continue;
-        const pts = form.points as MaskPointPath[];
-        for (let i = 0; i < pts.length; i++) {
-          if (isNearHandle(pts[i].corner[0] * w, pts[i].corner[1] * h, px, py)) {
-            const cur = editedPointRef.current;
-            if (cur && cur.formid === form.formid && cur.index === i) {
-              editedPointRef.current = null; // toggle off
-            } else {
-              editedPointRef.current = { formid: form.formid, index: i };
+        if (baseType === MASKS_TYPE.CIRCLE) {
+          const c = form.points as MaskPointsCircle;
+          dragRef.current = {
+            target, startX: px, startY: py,
+            origCenter: [c.center[0], c.center[1]],
+            origRadius: c.radius, origBorder: c.border,
+          };
+        } else if (baseType === MASKS_TYPE.ELLIPSE) {
+          const el = form.points as MaskPointsEllipse;
+          // Lock axis at drag start: polyline q=0,2 → longer axis, q=1,3 → shorter
+          const pi = (target as { pointIndex?: number }).pointIndex ?? 0;
+          const isLongerAxis = (pi === 0 || pi === 2);
+          const swapped = el.radius[0] < el.radius[1];
+          const dragAxis: 0 | 1 = (isLongerAxis !== swapped) ? 0 : 1;
+          dragRef.current = {
+            target, startX: px, startY: py,
+            origCenter: [el.center[0], el.center[1]],
+            origRadius: [el.radius[0], el.radius[1]], origBorder: el.border,
+            dragAxis,
+          };
+        } else {
+          return false;
+        }
+        return true;
+      };
+
+      // Editing mode: check for drag targets on the selected mask
+      const ctx2 = canvas.getContext("2d");
+      const currentSelectedId = useDevelopStore.getState().selectedMaskId;
+      if (ctx2 && currentSelectedId !== null) {
+        const selForm = drawableFormsRef.current.find((f) => f.formid === currentSelectedId);
+        if (selForm) {
+          const baseType = selForm.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+          // Ctrl+click on ellipse → rotation mode
+          if (e.ctrlKey && baseType === MASKS_TYPE.ELLIPSE && hitTestForm(ctx2, w, h, selForm, px, py, distortionGrid)) {
+            const el = selForm.points as MaskPointsEllipse;
+            const grid = useDevelopStore.getState().distortionGrid;
+            if (grid) {
+              const tc = forwardTransform(grid, el.center[0], el.center[1]);
+              const startAngle = Math.atan2(py / h - tc[1], px / w - tc[0]);
+              dragRef.current = {
+                target: { kind: "rotate", formid: selForm.formid },
+                startX: px, startY: py,
+                origCenter: [el.center[0], el.center[1]],
+                origRadius: [el.radius[0], el.radius[1]], origBorder: el.border,
+                lastAngle: startAngle,
+              };
+              e.preventDefault();
+              return;
+            }
+          }
+          if (tryStartDrag(selForm, ctx2)) {
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
+      // Click on a form to select it — also start drag if inside border
+      if (ctx2) {
+        for (const form of drawableFormsRef.current) {
+          if (hitTestForm(ctx2, w, h, form, px, py, distortionGrid)) {
+            useDevelopStore.getState().selectMask(form.formid);
+            if (tryStartDrag(form, ctx2)) {
+              e.preventDefault();
+              return;
             }
             draw();
             return;
           }
         }
+        // Clicked on empty space — deselect
+        if (currentSelectedId !== null) {
+          useDevelopStore.getState().selectMask(null);
+          draw();
+        }
       }
-      // Clicked elsewhere — clear edited point
-      if (editedPointRef.current) {
-        editedPointRef.current = null;
-        draw();
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) {
+        // Path corner handle toggle on click (only if not drag)
+        const rect = canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const w = canvas.width;
+        const h = canvas.height;
+        for (const form of drawableFormsRef.current) {
+          const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+          if (baseType !== MASKS_TYPE.PATH || !form.points) continue;
+          const pts = form.points as MaskPointPath[];
+          for (let i = 0; i < pts.length; i++) {
+            if (isNearHandle(pts[i].corner[0] * w, pts[i].corner[1] * h, px, py)) {
+              const cur = editedPointRef.current;
+              if (cur && cur.formid === form.formid && cur.index === i) {
+                editedPointRef.current = null;
+              } else {
+                editedPointRef.current = { formid: form.formid, index: i };
+              }
+              draw();
+              return;
+            }
+          }
+        }
+        if (editedPointRef.current) {
+          editedPointRef.current = null;
+          draw();
+        }
+        return;
+      }
+
+      // Commit the drag to the server
+      dragRef.current = null;
+      const form = drawableFormsRef.current.find((f) => f.formid === drag.target.formid);
+      if (!form) return;
+      const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+
+      if (baseType === MASKS_TYPE.CIRCLE) {
+        const pts = form.points as MaskPointsCircle;
+        updateMask(form.formid, {
+          center: [pts.center[0], pts.center[1]],
+          radius: pts.radius,
+          border: pts.border,
+        }).then(() => requestPreview());
+      } else if (baseType === MASKS_TYPE.ELLIPSE) {
+        const pts = form.points as MaskPointsEllipse;
+        updateMask(form.formid, {
+          center: [pts.center[0], pts.center[1]],
+          radius: [pts.radius[0], pts.radius[1]],
+          border: pts.border,
+          rotation: pts.rotation,
+        }).then(() => requestPreview());
+      }
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        const creating = useDevelopStore.getState().creatingMaskId;
+        if (creating) {
+          creationCursorRef.current = null;
+          cancelCreation();
+          return;
+        }
+        const tool = useDevelopStore.getState().creationTool;
+        if (tool) {
+          resetCreation();
+        }
       }
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
     canvas.addEventListener("mouseleave", onMouseLeave);
-    canvas.addEventListener("pointerup", onClick);
+    canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("keydown", onKeyDown);
 
     draw();
     const ro = new ResizeObserver(draw);
     ro.observe(target);
-    const mo = new MutationObserver(draw);
-    mo.observe(target, { attributes: true, attributeFilter: ["style"] });
+    const mo2 = new MutationObserver(draw);
+    mo2.observe(target, { attributes: true, attributeFilter: ["style"] });
     return () => {
+      drawRef.current = null;
       ro.disconnect();
-      mo.disconnect();
+      mo2.disconnect();
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseleave", onMouseLeave);
-      canvas.removeEventListener("pointerup", onClick);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("keydown", onKeyDown);
     };
-  }, [showMasks, maskForms, maskUsage, selectedMaskId, targetRef, distortionGrid]);
+  }, [targetRef, distortionGrid]);
 
   return <canvas ref={canvasRef} className="mask-overlay" />;
 }

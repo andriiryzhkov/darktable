@@ -8,6 +8,7 @@ import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCollapsible from "../../controls/BauhausCollapsible";
 import { useDevelopStore } from "../../../stores/developStore";
 import { MASKS_TYPE } from "../../../types/protocol";
+import type { MaskPointsCircle, MaskPointsEllipse } from "../../../types/protocol";
 import type { MaskForm, MaskUsage } from "../../../types/protocol";
 
 const ICON_SIZE = 12;
@@ -166,6 +167,11 @@ export default function MaskManagerModule() {
   const renameMask = useDevelopStore((s) => s.renameMask);
   const deleteMask = useDevelopStore((s) => s.deleteMask);
   const selectMask = useDevelopStore((s) => s.selectMask);
+  const updateMask = useDevelopStore((s) => s.updateMask);
+  const createMask = useDevelopStore((s) => s.createMask);
+  const requestPreview = useDevelopStore((s) => s.requestPreview);
+  const creatingMaskId = useDevelopStore((s) => s.creatingMaskId);
+  const previewMaskParam = useDevelopStore((s) => s.previewMaskParam);
 
   // Context menu state
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
@@ -265,10 +271,24 @@ export default function MaskManagerModule() {
               <BauhausButton icon={<Brush size={ICON_SIZE} />} transparent disabled />
             </BauhausTooltip>
             <BauhausTooltip content="add circle" placement="bottom">
-              <BauhausButton icon={<Circle size={ICON_SIZE} />} transparent disabled />
+              <BauhausButton
+                icon={<Circle size={ICON_SIZE} />}
+                transparent
+                active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "circle"}
+                onClick={() => {
+                  createMask("circle", { center: [0.5, 0.5], radius: 0.05, border: 0.05, _creation: true });
+                }}
+              />
             </BauhausTooltip>
             <BauhausTooltip content="add ellipse" placement="bottom">
-              <BauhausButton icon={<Circle size={ICON_SIZE} style={{ transform: "scaleX(0.7)" }} />} transparent disabled />
+              <BauhausButton
+                icon={<Circle size={ICON_SIZE} style={{ transform: "scaleX(0.7)" }} />}
+                transparent
+                active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "ellipse"}
+                onClick={() => {
+                  createMask("ellipse", { center: [0.5, 0.5], radius: [0.05, 0.03535], border: 0.05, rotation: 90, _creation: true });
+                }}
+              />
             </BauhausTooltip>
             <BauhausTooltip content="add path" placement="bottom">
               <BauhausButton icon={<SplinePointer size={ICON_SIZE} />} transparent disabled />
@@ -312,35 +332,88 @@ export default function MaskManagerModule() {
         </div>
 
         {/* Properties section */}
-        <BauhausCollapsible title="properties">
-          <BauhausSlider
-            label="opacity"
-            value={1}
-            min={0}
-            max={1}
-            step={0.01}
-            defaultValue={1}
-            format={(v) => `${(v * 100).toFixed(2)}%`}
-          />
-          <BauhausSlider
-            label="size"
-            value={0.05}
-            min={0.0001}
-            max={1}
-            step={0.001}
-            defaultValue={0.05}
-            format={(v) => `${(v * 100).toFixed(2)}%`}
-          />
-          <BauhausSlider
-            label="feather"
-            value={0.33}
-            min={0.0001}
-            max={1}
-            step={0.001}
-            defaultValue={0.33}
-            format={(v) => `${(v * 100).toFixed(2)}%`}
-          />
-        </BauhausCollapsible>
+        {selectedMaskId !== null && (() => {
+          const selForm = maskForms.find((f) => f.formid === selectedMaskId);
+          if (!selForm || !selForm.points) return null;
+          const baseType = selForm.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
+          const pts = selForm.points;
+
+          const isCreating = creatingMaskId === selectedMaskId;
+
+          if (baseType === MASKS_TYPE.CIRCLE) {
+            const c = pts as MaskPointsCircle;
+            return (
+              <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                <BauhausSlider
+                  label="size"
+                  value={c.radius}
+                  min={0.0005}
+                  max={0.5}
+                  step={0.001}
+                  defaultValue={0.05}
+                  format={(v) => `${(v * 100).toFixed(2)}%`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { radius: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { radius: v }).then(() => requestPreview()); }}
+                />
+                <BauhausSlider
+                  label="feather"
+                  value={c.border}
+                  min={0.0005}
+                  max={0.5}
+                  step={0.001}
+                  defaultValue={0.025}
+                  format={(v) => `${(v * 100).toFixed(2)}%`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { border: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { border: v }).then(() => requestPreview()); }}
+                />
+              </BauhausCollapsible>
+            );
+          }
+
+          if (baseType === MASKS_TYPE.ELLIPSE) {
+            const el = pts as MaskPointsEllipse;
+            const aspect = el.radius[1] / (el.radius[0] || 0.001);
+            return (
+              <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                <BauhausSlider
+                  label="size"
+                  value={el.radius[0]}
+                  min={0.001}
+                  max={0.5}
+                  step={0.001}
+                  defaultValue={0.05}
+                  format={(v) => `${(v * 100).toFixed(2)}%`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { radius: [v, v * aspect] }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { radius: [v, v * aspect] }).then(() => requestPreview()); }}
+                />
+                <BauhausSlider
+                  label="rotation"
+                  value={el.rotation ?? 0}
+                  min={0}
+                  max={360}
+                  step={1}
+                  defaultValue={0}
+                  format={(v) => `${v.toFixed(0)}°`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { rotation: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { rotation: v }).then(() => requestPreview()); }}
+                />
+                <BauhausSlider
+                  label="feather"
+                  value={el.border}
+                  min={0.001}
+                  max={0.5}
+                  step={0.001}
+                  defaultValue={0.025}
+                  format={(v) => `${(v * 100).toFixed(2)}%`}
+                  onChange={(v: number) => { previewMaskParam(selForm.formid, { border: v }); }}
+                  onRelease={(v: number) => { updateMask(selForm.formid, { border: v }).then(() => requestPreview()); }}
+                />
+              </BauhausCollapsible>
+            );
+          }
+
+          return null;
+        })()}
       </LibModuleCard>
       {menuPos && createPortal(
         <div
