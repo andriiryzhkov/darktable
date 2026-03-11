@@ -4296,3 +4296,135 @@ char *dt_server_develop_delete_mask(dt_server_t *server, const dt_server_request
 
   return dt_server_make_response(req->id, json_node_new(JSON_NODE_NULL));
 }
+
+// ─── Distortion grid ──────────────────────────────────────────────────────────
+
+#define DISTORTION_GRID_SIZE 64
+
+char *dt_server_develop_get_distortion_grid(dt_server_t *server, const dt_server_request_t *req)
+{
+  if(!req->params || !json_object_has_member(req->params, "session_id"))
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Missing session_id parameter");
+
+  const char *session_id = json_object_get_string_member(req->params, "session_id");
+  if(!session_id)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "session_id must be a string");
+  dt_server_session_t *session = dt_server_find_session(server, session_id);
+  if(!session)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_NOT_FOUND, "Session not found");
+
+  dt_dev_pixelpipe_t *pipe = session->dev.full.pipe;
+  if(!pipe || pipe->processed_width <= 0 || pipe->processed_height <= 0)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL,
+                                "Pipeline not processed yet");
+
+  const int gw = DISTORTION_GRID_SIZE;
+  const int gh = DISTORTION_GRID_SIZE;
+  const int total = gw * gh;
+  const float iw = (float)pipe->iwidth;
+  const float ih = (float)pipe->iheight;
+  const float pw = (float)pipe->processed_width;
+  const float ph = (float)pipe->processed_height;
+
+  // Allocate points for forward transform (raw → output)
+  float *fwd_pts = malloc(total * 2 * sizeof(float));
+  if(!fwd_pts)
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Out of memory");
+
+  // Allocate points for inverse transform (output → raw)
+  float *inv_pts = malloc(total * 2 * sizeof(float));
+  if(!inv_pts)
+  {
+    free(fwd_pts);
+    return dt_server_make_error(req->id, DT_SERVER_ERR_INTERNAL, "Out of memory");
+  }
+
+  // Fill forward grid: regular grid in raw normalized space → pixel coords
+  for(int j = 0; j < gh; j++)
+  {
+    for(int i = 0; i < gw; i++)
+    {
+      const int idx = (j * gw + i) * 2;
+      const float nx = (float)i / (float)(gw - 1);
+      const float ny = (float)j / (float)(gh - 1);
+      fwd_pts[idx]     = nx * iw;
+      fwd_pts[idx + 1] = ny * ih;
+    }
+  }
+
+  // Fill inverse grid: regular grid in output normalized space → pixel coords
+  for(int j = 0; j < gh; j++)
+  {
+    for(int i = 0; i < gw; i++)
+    {
+      const int idx = (j * gw + i) * 2;
+      const float nx = (float)i / (float)(gw - 1);
+      const float ny = (float)j / (float)(gh - 1);
+      inv_pts[idx]     = nx * pw;
+      inv_pts[idx + 1] = ny * ph;
+    }
+  }
+
+  // Transform: forward (raw space → output space)
+  const gboolean fwd_ok = dt_dev_distort_transform_plus(
+      &session->dev, pipe, 0.0, DT_DEV_TRANSFORM_DIR_ALL, fwd_pts, total);
+
+  // Transform: inverse (output space → raw space)
+  const gboolean inv_ok = dt_dev_distort_backtransform_plus(
+      &session->dev, pipe, 0.0, DT_DEV_TRANSFORM_DIR_ALL, inv_pts, total);
+
+  // Build JSON response
+  JsonBuilder *b = json_builder_new();
+  json_builder_begin_object(b);
+
+  json_builder_set_member_name(b, "width");
+  json_builder_add_int_value(b, gw);
+  json_builder_set_member_name(b, "height");
+  json_builder_add_int_value(b, gh);
+  // Pipeline hash — client uses this to detect when the grid is stale
+  json_builder_set_member_name(b, "pipe_hash");
+  json_builder_add_int_value(b, (gint64)pipe->backbuf_hash);
+  json_builder_set_member_name(b, "iwidth");
+  json_builder_add_int_value(b, pipe->iwidth);
+  json_builder_set_member_name(b, "iheight");
+  json_builder_add_int_value(b, pipe->iheight);
+  json_builder_set_member_name(b, "processed_width");
+  json_builder_add_int_value(b, pipe->processed_width);
+  json_builder_set_member_name(b, "processed_height");
+  json_builder_add_int_value(b, pipe->processed_height);
+
+  // Forward grid: output in normalized output space [0,1]
+  json_builder_set_member_name(b, "forward");
+  json_builder_begin_array(b);
+  if(fwd_ok)
+  {
+    for(int k = 0; k < total; k++)
+    {
+      json_builder_add_double_value(b, (double)(fwd_pts[k * 2] / pw));
+      json_builder_add_double_value(b, (double)(fwd_pts[k * 2 + 1] / ph));
+    }
+  }
+  json_builder_end_array(b);
+
+  // Inverse grid: output in normalized raw space [0,1]
+  json_builder_set_member_name(b, "inverse");
+  json_builder_begin_array(b);
+  if(inv_ok)
+  {
+    for(int k = 0; k < total; k++)
+    {
+      json_builder_add_double_value(b, (double)(inv_pts[k * 2] / iw));
+      json_builder_add_double_value(b, (double)(inv_pts[k * 2 + 1] / ih));
+    }
+  }
+  json_builder_end_array(b);
+
+  json_builder_end_object(b);
+
+  free(fwd_pts);
+  free(inv_pts);
+
+  JsonNode *root = json_builder_get_root(b);
+  g_object_unref(b);
+  return dt_server_make_response(req->id, root);
+}

@@ -391,3 +391,21 @@ export interface MaskListResult {
   forms: MaskForm[];
   usage: MaskUsage[];
 }
+
+/** Distortion grid for client-side mask coordinate transforms */
+export interface DistortionGrid {
+  width: number;
+  height: number;
+  /** Pipeline hash — changes when distortion-affecting modules change */
+  pipe_hash: number;
+  /** Raw input dimensions */
+  iwidth: number;
+  iheight: number;
+  /** Processed output dimensions */
+  processed_width: number;
+  processed_height: number;
+  /** Forward: raw normalized [0,1] → output normalized [0,1]. Flat [x,y,...], length = width*height*2 */
+  forward: number[];
+  /** Inverse: output normalized [0,1] → raw normalized [0,1]. Flat [x,y,...], length = width*height*2 */
+  inverse: number[];
+}

@@ -745,6 +745,28 @@ static void on_develop_get_masks(const char *id, const char *req, void *arg)
   g_free(params);
 }
 
+static void on_develop_get_distortion_grid(const char *id, const char *req, void *arg)
+{
+  dt_webview_ctx_t *ctx = arg;
+  JsonParser *parser = NULL;
+  JsonArray *args = _parse_args(req, &parser);
+  if(!args || json_array_get_length(args) < 1)
+  {
+    _return_error(ctx, id, "developGetDistortionGrid requires (sessionId)");
+    if(parser) g_object_unref(parser);
+    return;
+  }
+
+  char *session_id = _get_string_arg(args, 0);
+  g_object_unref(parser);
+
+  char *params = g_strdup_printf("{\"session_id\":\"%s\"}", session_id);
+  g_free(session_id);
+
+  _ipc_passthrough(ctx, id, "develop.get_distortion_grid", params);
+  g_free(params);
+}
+
 static void on_develop_rename_mask(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -3188,6 +3210,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   webview_bind(ctx->webview, "developRenameMask", on_develop_rename_mask, ctx);
   webview_bind(ctx->webview, "developDeleteMask", on_develop_delete_mask, ctx);
   webview_bind(ctx->webview, "developSetBlendParam", on_develop_set_blend_param, ctx);
+  webview_bind(ctx->webview, "developGetDistortionGrid", on_develop_get_distortion_grid, ctx);
   webview_bind(ctx->webview, "getPreviewFrame", on_get_preview_frame, ctx);
   webview_bind(ctx->webview, "getFramePort", on_get_frame_port, ctx);
   webview_bind(ctx->webview, "pickFolder", on_pick_folder, ctx);

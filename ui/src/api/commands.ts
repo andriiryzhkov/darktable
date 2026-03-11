@@ -13,6 +13,7 @@ import type {
   PresetListResult,
   IntrospectionResult,
   MaskListResult,
+  DistortionGrid,
 } from "../types/protocol";
 import type { CollectionRuleParam, PropertyValue } from "../types/collections";
 import type { FolderEntry, FileEntry } from "../types/import";
@@ -53,6 +54,7 @@ declare global {
     developRenameMask: (sessionId: string, formid: number, name: string) => Promise<unknown>;
     developDeleteMask: (sessionId: string, formid: number) => Promise<unknown>;
     developSetBlendParam: (sessionId: string, op: string, instance: number, param: string, value: number) => Promise<unknown>;
+    developGetDistortionGrid: (sessionId: string) => Promise<DistortionGrid>;
     getPreviewFrame: (sessionId: string, frontBuffer: number, format?: string) => Promise<PreviewFrameResult>;
     getFramePort: () => Promise<number>;
     pickFolder: () => Promise<string | null>;
@@ -204,6 +206,9 @@ export const developDeleteMask = (sessionId: string, formid: number) =>
 
 export const developSetBlendParam = (sessionId: string, op: string, instance: number, param: string, value: number) =>
   window.developSetBlendParam(sessionId, op, instance, param, value);
+
+export const developGetDistortionGrid = (sessionId: string) =>
+  window.developGetDistortionGrid(sessionId);
 
 export const getPreviewFrame = (sessionId: string, frontBuffer: number, format?: string) =>
   window.getPreviewFrame(sessionId, frontBuffer, format);

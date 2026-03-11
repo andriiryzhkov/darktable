@@ -178,6 +178,7 @@ char *dt_server_develop_get_masks(dt_server_t *server, const dt_server_request_t
 char *dt_server_develop_rename_mask(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_delete_mask(dt_server_t *server, const dt_server_request_t *req);
 char *dt_server_develop_set_blend_param(dt_server_t *server, const dt_server_request_t *req);
+char *dt_server_develop_get_distortion_grid(dt_server_t *server, const dt_server_request_t *req);
 
 // Export handlers (dt_server_export.c)
 char *dt_server_export_image(dt_server_t *server, const dt_server_request_t *req);
