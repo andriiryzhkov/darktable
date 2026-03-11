@@ -36,7 +36,7 @@ import {
 import { on } from "../events/eventBus";
 import { useCatalogStore } from "./catalogStore";
 import type { ModuleInfo, ModuleDescription, HistoryItem, PixelSampleResult, PresetInfo, IntrospectionResult, MaskForm, MaskUsage, DistortionGrid } from "../types/protocol";
-import { MASKS_TYPE } from "../types/protocol";
+import { getDragOps } from "../lib/maskDrag";
 
 // Cached frame server port (resolved once, never changes)
 let _cachedFramePort: number | undefined;
@@ -940,22 +940,11 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     if (!creatingMaskId || !sessionId) return;
     const form = get().maskForms.find((f) => f.formid === creatingMaskId);
     if (!form) return;
-    const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
-    const params: Record<string, unknown> = {};
-    // Include current geometry so server gets the full update
-    if (baseType === MASKS_TYPE.CIRCLE) {
-      params.center = position;
-      const pts = form.points as { radius: number; border: number };
-      if (pts) { params.radius = pts.radius; params.border = pts.border; }
-    } else if (baseType === MASKS_TYPE.ELLIPSE) {
-      params.center = position;
-      const pts = form.points as { radius: [number, number]; border: number; rotation: number; flags: number };
-      if (pts) { params.radius = [pts.radius[0], pts.radius[1]]; params.border = pts.border; params.rotation = pts.rotation; }
-    } else if (baseType === MASKS_TYPE.GRADIENT) {
-      params.anchor = position;
-      const pts = form.points as { rotation: number; compression: number; steepness: number; curvature: number; state: number };
-      if (pts) { params.rotation = pts.rotation; params.compression = pts.compression; params.steepness = pts.steepness; params.curvature = pts.curvature; params.state = pts.state; }
-    }
+    const ops = getDragOps(form);
+    if (!ops) return;
+    // Set final position and collect all geometry params
+    ops.setPosition(form, position);
+    const params = ops.commitParams(form);
     try {
       // Stop background preview sync and wait for in-flight to complete,
       // preventing race where preview_only overwrites our committed position
