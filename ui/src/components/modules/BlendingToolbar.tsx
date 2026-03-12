@@ -54,6 +54,8 @@ interface Props {
 export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
   const setBlendParam = useDevelopStore((s) => s.setBlendParam);
   const createMask = useDevelopStore((s) => s.createMask);
+  const startCreation = useDevelopStore((s) => s.startCreation);
+  const creationTool = useDevelopStore((s) => s.creationTool);
   const creatingMaskId = useDevelopStore((s) => s.creatingMaskId);
   const maskForms = useDevelopStore((s) => s.maskForms);
 
@@ -244,7 +246,12 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
             />
           </BauhausTooltip>
           <BauhausTooltip content="add path" placement="bottom">
-            <BauhausButton icon={<SplinePointer size={12} />} transparent disabled />
+            <BauhausButton
+              icon={<SplinePointer size={12} />}
+              transparent
+              active={creationTool === "path"}
+              onClick={() => startCreation("path", op, instance)}
+            />
           </BauhausTooltip>
           <BauhausTooltip content="add brush" placement="bottom">
             <BauhausButton icon={<Brush size={12} />} transparent disabled />

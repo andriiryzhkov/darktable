@@ -8,7 +8,7 @@ import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCollapsible from "../../controls/BauhausCollapsible";
 import { useDevelopStore } from "../../../stores/developStore";
 import { MASKS_TYPE } from "../../../types/protocol";
-import type { MaskPointsCircle, MaskPointsEllipse, MaskPointsGradient } from "../../../types/protocol";
+import type { MaskPointsCircle, MaskPointsEllipse, MaskPointsGradient, MaskPointPath } from "../../../types/protocol";
 import type { MaskForm, MaskUsage } from "../../../types/protocol";
 
 const ICON_SIZE = 12;
@@ -169,8 +169,10 @@ export default function MaskManagerModule() {
   const selectMask = useDevelopStore((s) => s.selectMask);
   const updateMask = useDevelopStore((s) => s.updateMask);
   const createMask = useDevelopStore((s) => s.createMask);
+  const startCreation = useDevelopStore((s) => s.startCreation);
   const requestPreview = useDevelopStore((s) => s.requestPreview);
   const creatingMaskId = useDevelopStore((s) => s.creatingMaskId);
+  const creationTool = useDevelopStore((s) => s.creationTool);
   const previewMaskParam = useDevelopStore((s) => s.previewMaskParam);
 
   // Context menu state
@@ -291,7 +293,12 @@ export default function MaskManagerModule() {
               />
             </BauhausTooltip>
             <BauhausTooltip content="add path" placement="bottom">
-              <BauhausButton icon={<SplinePointer size={ICON_SIZE} />} transparent disabled />
+              <BauhausButton
+                icon={<SplinePointer size={ICON_SIZE} />}
+                transparent
+                active={creationTool === "path"}
+                onClick={() => startCreation("path")}
+              />
             </BauhausTooltip>
             <BauhausTooltip content="add gradient" placement="bottom">
               <BauhausButton
@@ -481,6 +488,35 @@ export default function MaskManagerModule() {
                   format={(v) => `${(v * 100).toFixed(1)}%`}
                   onChange={(v: number) => { previewMaskParam(selForm.formid, { compression: v }); }}
                   onRelease={(v: number) => { updateMask(selForm.formid, { compression: v }).then(() => requestPreview()); }}
+                />
+              </BauhausCollapsible>
+            );
+          }
+
+          if (baseType === MASKS_TYPE.PATH) {
+            const pathPts = pts as MaskPointPath[];
+            const avgBorder = pathPts.length > 0
+              ? pathPts.reduce((sum, p) => sum + p.border[0], 0) / pathPts.length
+              : 0.01;
+            return (
+              <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                {opacitySlider}
+                <BauhausSlider
+                  label="feather"
+                  value={avgBorder}
+                  min={0.001}
+                  max={0.5}
+                  step={0.001}
+                  defaultValue={0.01}
+                  format={(v) => `${(v * 100).toFixed(2)}%`}
+                  onChange={(v: number) => {
+                    const updated = pathPts.map(p => ({ ...p, border: [v, v] as [number, number] }));
+                    previewMaskParam(selForm.formid, { points: updated });
+                  }}
+                  onRelease={(v: number) => {
+                    const updated = pathPts.map(p => ({ ...p, border: [v, v] as [number, number] }));
+                    updateMask(selForm.formid, { points: updated }).then(() => requestPreview());
+                  }}
                 />
               </BauhausCollapsible>
             );

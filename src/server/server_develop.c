@@ -4587,6 +4587,52 @@ char *dt_server_develop_create_mask(dt_server_t *server, const dt_server_request
       : DT_MASKS_GRADIENT_STATE_SIGMOIDAL;
     form->points = g_list_append(form->points, gradient);
   }
+  else if(mask_type == DT_MASKS_PATH)
+  {
+    if(json_object_has_member(req->params, "points"))
+    {
+      JsonArray *pts = json_object_get_array_member(req->params, "points");
+      const guint n = json_array_get_length(pts);
+      for(guint i = 0; i < n; i++)
+      {
+        JsonObject *pt = json_array_get_object_element(pts, i);
+        dt_masks_point_path_t *pp = calloc(1, sizeof(dt_masks_point_path_t));
+        if(json_object_has_member(pt, "corner"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "corner");
+          pp->corner[0] = (float)json_array_get_double_element(c, 0);
+          pp->corner[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl1"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl1");
+          pp->ctrl1[0] = (float)json_array_get_double_element(c, 0);
+          pp->ctrl1[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl2"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl2");
+          pp->ctrl2[0] = (float)json_array_get_double_element(c, 0);
+          pp->ctrl2[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "border"))
+        {
+          JsonArray *b = json_object_get_array_member(pt, "border");
+          pp->border[0] = (float)json_array_get_double_element(b, 0);
+          pp->border[1] = (float)json_array_get_double_element(b, 1);
+        }
+        else
+        {
+          pp->border[0] = 0.01f;
+          pp->border[1] = 0.01f;
+        }
+        pp->state = json_object_has_member(pt, "state")
+          ? (dt_masks_points_states_t)json_object_get_int_member(pt, "state")
+          : DT_MASKS_POINT_STATE_NORMAL;
+        form->points = g_list_append(form->points, pp);
+      }
+    }
+  }
 
   // Register form
   session->dev.forms = g_list_append(session->dev.forms, form);
@@ -4728,10 +4774,59 @@ char *dt_server_develop_update_mask(dt_server_t *server, const dt_server_request
     if(json_object_has_member(req->params, "state"))
       gradient->state = (dt_masks_gradient_states_t)json_object_get_int_member(req->params, "state");
   }
+  else if(base_type == DT_MASKS_PATH)
+  {
+    if(json_object_has_member(req->params, "points"))
+    {
+      // Replace all path points
+      g_list_free_full(form->points, free);
+      form->points = NULL;
+      JsonArray *pts = json_object_get_array_member(req->params, "points");
+      const guint n = json_array_get_length(pts);
+      for(guint i = 0; i < n; i++)
+      {
+        JsonObject *pt = json_array_get_object_element(pts, i);
+        dt_masks_point_path_t *pp = calloc(1, sizeof(dt_masks_point_path_t));
+        if(json_object_has_member(pt, "corner"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "corner");
+          pp->corner[0] = (float)json_array_get_double_element(c, 0);
+          pp->corner[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl1"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl1");
+          pp->ctrl1[0] = (float)json_array_get_double_element(c, 0);
+          pp->ctrl1[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl2"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl2");
+          pp->ctrl2[0] = (float)json_array_get_double_element(c, 0);
+          pp->ctrl2[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "border"))
+        {
+          JsonArray *b = json_object_get_array_member(pt, "border");
+          pp->border[0] = (float)json_array_get_double_element(b, 0);
+          pp->border[1] = (float)json_array_get_double_element(b, 1);
+        }
+        else
+        {
+          pp->border[0] = 0.01f;
+          pp->border[1] = 0.01f;
+        }
+        pp->state = json_object_has_member(pt, "state")
+          ? (dt_masks_points_states_t)json_object_get_int_member(pt, "state")
+          : DT_MASKS_POINT_STATE_NORMAL;
+        form->points = g_list_append(form->points, pp);
+      }
+    }
+  }
   else
   {
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS,
-                                 "update_mask currently supports circle, ellipse, and gradient only");
+                                 "update_mask: unsupported mask type");
   }
 
   // Opacity is stored on the group child entry, not on the form itself

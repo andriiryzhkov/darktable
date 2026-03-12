@@ -166,7 +166,7 @@ interface DevelopState {
   selectedMaskId: number | null;
   /** Distortion grid for client-side mask coordinate transforms */
   distortionGrid: DistortionGrid | null;
-  creationTool: "circle" | "ellipse" | "gradient" | null;
+  creationTool: "circle" | "ellipse" | "gradient" | "path" | null;
   creationModule: { op: string; instance: number } | null;
   /** Form ID of mask currently being placed (follows cursor until clicked) */
   creatingMaskId: number | null;
@@ -219,9 +219,9 @@ interface DevelopState {
   fetchDistortionGrid: () => Promise<void>;
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
-  createMask: (type: "circle" | "ellipse" | "gradient", params: Record<string, unknown>) => Promise<number | null>;
+  createMask: (type: "circle" | "ellipse" | "gradient" | "path", params: Record<string, unknown>) => Promise<number | null>;
   updateMask: (formid: number, params: Record<string, unknown>) => Promise<void>;
-  startCreation: (tool: "circle" | "ellipse" | "gradient", op: string, instance: number) => void;
+  startCreation: (tool: "circle" | "ellipse" | "gradient" | "path", op?: string, instance?: number) => void;
   resetCreation: () => void;
   /** Send lightweight mask update to server (no history write) and refresh polylines */
   previewMaskParam: (formid: number, updates: Record<string, unknown>) => void;
@@ -827,6 +827,10 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   createMask: async (type, params) => {
     const { sessionId } = get();
     if (!sessionId) return null;
+    // Clear any active creation tool (e.g. path drawing mode) when creating a mask
+    if (get().creationTool) {
+      set({ creationTool: null, creationModule: null });
+    }
     try {
       const creation = !!(params as Record<string, unknown>)._creation;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -861,7 +865,18 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   },
 
   startCreation: (tool, op, instance) => {
-    set({ creationTool: tool, creationModule: { op, instance }, showMasks: true });
+    // Toggle off if already in this creation mode
+    if (get().creationTool === tool) {
+      set({ creationTool: null, creationModule: null });
+      return;
+    }
+    // Cancel any in-progress mask creation (e.g. circle/ellipse following cursor)
+    const { creatingMaskId } = get();
+    if (creatingMaskId) {
+      set({ creatingMaskId: null, selectedMaskId: null });
+      get().deleteMask(creatingMaskId);
+    }
+    set({ creationTool: tool, creationModule: op ? { op, instance: instance ?? 0 } : null, showMasks: true });
   },
 
   resetCreation: () => {
@@ -886,7 +901,11 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
       if (Object.keys(geomUpdates).length > 0) {
         const idx = updated.findIndex((f) => f.formid === formid);
         if (idx >= 0) {
-          updated[idx] = { ...updated[idx], points: { ...(updated[idx].points as unknown as Record<string, unknown>), ...geomUpdates } as unknown as MaskForm["points"], transformed: undefined };
+          // Path masks: points is an array, replace entirely instead of spreading
+          const newPoints = Array.isArray(geomUpdates.points)
+            ? geomUpdates.points as unknown as MaskForm["points"]
+            : { ...(updated[idx].points as unknown as Record<string, unknown>), ...geomUpdates } as unknown as MaskForm["points"];
+          updated[idx] = { ...updated[idx], points: newPoints, transformed: undefined };
           changed = true;
         }
       }

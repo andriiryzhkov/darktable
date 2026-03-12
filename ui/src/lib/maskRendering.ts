@@ -281,7 +281,7 @@ export function buildBrushBorderOutline(pts: MaskPointBrush[], w: number, h: num
 
     for (let s = 0; s <= nSamples; s++) {
       const t = s / nSamples;
-      const rad = radStart + (radEnd - radStart) * t;
+      const rad = smoothstep(radStart, radEnd, t);
       side1.push(borderPointAt(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, t, rad));
       side2.push(borderPointAt(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, t, -rad));
     }
@@ -506,6 +506,67 @@ export function hitTestGradientPolyline(ctx: CanvasRenderingContext2D, w: number
   return false;
 }
 
+/**
+ * Find the nearest segment and parameter t on a path bezier for a given screen point.
+ * Returns { segIdx, t } or null if the point is too far away.
+ */
+export function findNearestPathSegment(
+  pts: MaskPointPath[], w: number, h: number, px: number, py: number, threshold = 10,
+): { segIdx: number; t: number } | null {
+  let bestDist = threshold * threshold;
+  let bestSeg = -1;
+  let bestT = 0;
+  const samples = 20;
+
+  for (let i = 0; i < pts.length; i++) {
+    const curr = pts[i];
+    const next = pts[(i + 1) % pts.length];
+    for (let s = 0; s <= samples; s++) {
+      const t = s / samples;
+      const [bx, by] = bezierPos(
+        curr.corner[0] * w, curr.corner[1] * h,
+        curr.ctrl2[0] * w, curr.ctrl2[1] * h,
+        next.ctrl1[0] * w, next.ctrl1[1] * h,
+        next.corner[0] * w, next.corner[1] * h,
+        t,
+      );
+      const dx = bx - px, dy = by - py;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        bestSeg = i;
+        bestT = t;
+      }
+    }
+  }
+
+  return bestSeg >= 0 ? { segIdx: bestSeg, t: bestT } : null;
+}
+
+/**
+ * Split a bezier segment at parameter t using de Casteljau's algorithm.
+ * Returns two sets of control points: [left4, right4] each with 4 points.
+ */
+export function splitBezierAt(
+  p0: [number, number], p1: [number, number], p2: [number, number], p3: [number, number], t: number,
+): { left: [[number, number], [number, number], [number, number], [number, number]];
+     right: [[number, number], [number, number], [number, number], [number, number]] } {
+  const lerp = (a: [number, number], b: [number, number], u: number): [number, number] =>
+    [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+
+  const m01 = lerp(p0, p1, t);
+  const m12 = lerp(p1, p2, t);
+  const m23 = lerp(p2, p3, t);
+  const m012 = lerp(m01, m12, t);
+  const m123 = lerp(m12, m23, t);
+  const mid = lerp(m012, m123, t);
+
+  return {
+    left: [p0, m01, m012, mid],
+    right: [mid, m123, m23, p3],
+  };
+}
+
 export function buildPathBezier(pts: MaskPointPath[], w: number, h: number): Path2D {
   const p = new Path2D();
   p.moveTo(pts[0].corner[0] * w, pts[0].corner[1] * h);
@@ -558,9 +619,14 @@ export function bezierDeriv(p0x: number, p0y: number, p1x: number, p1y: number,
   ];
 }
 
+/** Smoothstep interpolation matching DT's _smoothstep: p1 + (p2-p1)*t*t*(3-2t) */
+function smoothstep(p1: number, p2: number, t: number): number {
+  return p1 + (p2 - p1) * t * t * (3.0 - 2.0 * t);
+}
+
 /**
  * Compute border point at parameter t of a bezier segment, matching DT's _path_border_get_XY.
- * Offsets perpendicular to the derivative by rad (linearly interpolated).
+ * Offsets perpendicular to the derivative by rad.
  */
 export function borderPointAt(p0x: number, p0y: number, p1x: number, p1y: number,
                        p2x: number, p2y: number, p3x: number, p3y: number,
@@ -595,7 +661,7 @@ export function computeBorderAnchors(pts: MaskPointPath[], w: number, h: number,
 }
 
 /** Number of line segments to sample per bezier segment for the border polyline */
-export const BORDER_SAMPLES = 20;
+export const BORDER_SAMPLES = 64;
 
 /**
  * Build the border as a densely-sampled polyline Path2D, matching DT's approach.
@@ -621,7 +687,7 @@ export function buildBorderPolyline(pts: MaskPointPath[], w: number, h: number, 
 
     for (let s = 0; s <= BORDER_SAMPLES; s++) {
       const t = s / BORDER_SAMPLES;
-      const rad = radStart + (radEnd - radStart) * t;
+      const rad = smoothstep(radStart, radEnd, t);
       const [bx, by] = borderPointAt(p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y, t, rad);
       if (first) { p.moveTo(bx, by); first = false; }
       else p.lineTo(bx, by);
@@ -754,6 +820,26 @@ export function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, fo
   }
 }
 
+/**
+ * Check if mouse is near a path control point handle (ctrl1 or ctrl2) of the edited point.
+ * Returns the DragTarget if hit, null otherwise.
+ */
+export function hitTestPathCtrlHandle(
+  w: number, h: number,
+  form: MaskForm, editedIdx: number,
+  px: number, py: number, grid: DistortionGrid,
+): DragTarget | null {
+  const pts = form.points as MaskPointPath[];
+  if (!pts || editedIdx < 0 || editedIdx >= pts.length) return null;
+  const tPts = transformPathPoints(grid, pts);
+  const p = tPts[editedIdx];
+  if (isNearHandle(p.ctrl1[0] * w, p.ctrl1[1] * h, px, py))
+    return { kind: "pathCtrl1", formid: form.formid, pointIndex: editedIdx };
+  if (isNearHandle(p.ctrl2[0] * w, p.ctrl2[1] * h, px, py))
+    return { kind: "pathCtrl2", formid: form.formid, pointIndex: editedIdx };
+  return null;
+}
+
 export function hitTestDragTarget(
   ctx: CanvasRenderingContext2D, w: number, h: number,
   form: MaskForm, px: number, py: number, grid: DistortionGrid | null = null,
@@ -799,6 +885,33 @@ export function hitTestDragTarget(
       // Grab anywhere inside the border to move (form_dragging)
       const borderPath = buildPolylinePath2D(poly.border_polyline, w, h, true);
       if (ctx.isPointInPath(borderPath, px, py)) return { kind: "center", formid: form.formid };
+    } else if (baseType === MASKS_TYPE.PATH) {
+      const pts = form.points as MaskPointPath[];
+      if (!pts || pts.length < 2) return null;
+      const tPts = transformPathPoints(grid, pts);
+
+      // Check corner handles
+      for (let i = 0; i < tPts.length; i++) {
+        if (isNearHandle(tPts[i].corner[0] * w, tPts[i].corner[1] * h, px, py))
+          return { kind: "pathCorner", formid: form.formid, pointIndex: i };
+      }
+
+      // Check control point handles (only for edited point — need editedPoint context)
+      // This is handled in MaskOverlay via editedPointRef
+
+      // Check border handles
+      const cw = pathWindingCW(tPts);
+      const borderAnchors = computeBorderAnchors(tPts, w, h, cw);
+      for (let i = 0; i < borderAnchors.length; i++) {
+        if (isNearHandle(borderAnchors[i].x, borderAnchors[i].y, px, py))
+          return { kind: "pathBorder", formid: form.formid, pointIndex: i };
+      }
+
+      // Grab anywhere inside the path to move
+      const mainPath = buildPathBezier(tPts, w, h);
+      if (ctx.isPointInPath(mainPath, px, py))
+        return { kind: "center", formid: form.formid };
+
     } else if (baseType === MASKS_TYPE.GRADIENT) {
       const pts = form.points as MaskPointsGradient;
       const poly = form.transformed
