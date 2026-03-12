@@ -272,9 +272,6 @@ export default function MaskManagerModule() {
         <div className="mask-toolbar">
           <span className="mask-toolbar-label">created shapes</span>
           <span className="mask-toolbar-buttons">
-            <BauhausTooltip content="add brush" placement="bottom">
-              <BauhausButton icon={<Brush size={ICON_SIZE} />} transparent disabled />
-            </BauhausTooltip>
             <BauhausTooltip content="add circle" placement="bottom">
               <BauhausButton
                 icon={<Circle size={ICON_SIZE} />}
