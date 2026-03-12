@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import {
   X, Circle, PenTool, SlidersHorizontal,
   Brush, SplinePointer, ArrowDownRight,
-  SquareSquare, Menu, CircleOff,
+  SquareSquare, Menu, CircleOff, Eye, CirclePlus, CircleMinus,
 } from "lucide-react";
 import BauhausButton from "../controls/BauhausButton";
 import BauhausTooltip from "../controls/BauhausTooltip";
@@ -45,6 +45,24 @@ const BLEND_MODE_OPTIONS = [
   { value: BLEND_MODE.CHROMATICITY, label: "chromaticity", group: "chromaticity & lightness" },
 ];
 
+/** Feathering guide enum values (from blend.h) */
+const FEATHERING_GUIDE = {
+  IN_BEFORE_BLUR: 0x01,
+  OUT_BEFORE_BLUR: 0x02,
+  IN_AFTER_BLUR: 0x05,
+  OUT_AFTER_BLUR: 0x06,
+} as const;
+
+const FEATHERING_GUIDE_OPTIONS = [
+  { value: FEATHERING_GUIDE.OUT_BEFORE_BLUR, label: "output before blur" },
+  { value: FEATHERING_GUIDE.IN_BEFORE_BLUR, label: "input before blur" },
+  { value: FEATHERING_GUIDE.OUT_AFTER_BLUR, label: "output after blur" },
+  { value: FEATHERING_GUIDE.IN_AFTER_BLUR, label: "input after blur" },
+];
+
+/** DEVELOP_COMBINE_MASKS_POS flag for polarity toggle */
+const COMBINE_MASKS_POS = 0x04;
+
 interface Props {
   op: string;
   instance: number;
@@ -58,14 +76,107 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
   const creationTool = useDevelopStore((s) => s.creationTool);
   const creatingMaskId = useDevelopStore((s) => s.creatingMaskId);
   const maskForms = useDevelopStore((s) => s.maskForms);
+  const maskUsage = useDevelopStore((s) => s.maskUsage);
+  const modules = useDevelopStore((s) => s.modules);
+  const showMasks = useDevelopStore((s) => s.showMasks);
+  const toggleMasks = useDevelopStore((s) => s.toggleMasks);
+  const assignMask = useDevelopStore((s) => s.assignMask);
+  const clearModuleMasks = useDevelopStore((s) => s.clearModuleMasks);
 
   const blend = moduleInfo.blend;
   if (!blend) return null;
 
   const maskMode = blend.mask_mode ?? MASK_MODE.DISABLED;
   const isActive = maskMode !== MASK_MODE.DISABLED;
+  const hasDrawn = (maskMode & MASK_MODE.DRAWN) !== 0;
   const hasMasks = !(moduleInfo.flags & IOP_FLAGS.NO_MASKS);
   const blendReversed = !!(blend.blend_mode & 0x80000000);
+
+  // Count shapes used by this module's mask group
+  const shapeCount = useMemo(() => {
+    if (!blend.mask_id) return 0;
+    const group = maskForms.find((f) => f.formid === blend.mask_id);
+    return group?.children?.length ?? 0;
+  }, [blend.mask_id, maskForms]);
+
+  const maskLabel = shapeCount > 0
+    ? `${shapeCount} shape${shapeCount !== 1 ? "s" : ""} used`
+    : "no mask used";
+
+  const polarityActive = !!(blend.mask_combine & COMBINE_MASKS_POS);
+
+  // Build drawn mask combo: current shapes belonging to this module's group
+  const myGroupChildIds = useMemo(() => {
+    if (!blend.mask_id) return new Set<number>();
+    const group = maskForms.find((f) => f.formid === blend.mask_id);
+    return new Set((group?.children ?? []).map((c) => c.formid));
+  }, [blend.mask_id, maskForms]);
+
+  // Available shapes not already in this module's group (non-group forms)
+  const availableShapes = useMemo(() => {
+    return maskForms.filter(
+      (f) => f.type_name !== "group" && !myGroupChildIds.has(f.formid),
+    );
+  }, [maskForms, myGroupChildIds]);
+
+  // Other modules that have mask groups (for "use same shapes as")
+  const otherModuleGroups = useMemo(() => {
+    return maskUsage.filter(
+      (u) => !(u.op === op && u.instance === instance) && u.mask_id,
+    );
+  }, [maskUsage, op, instance]);
+
+  // Build combo groups and options
+  const drawnMaskComboGroups = useMemo(() => {
+    const groups: { label: string; options: string[] }[] = [];
+    if (shapeCount > 0) {
+      groups.push({ label: "", options: ["no mask used"] });
+    }
+    if (availableShapes.length > 0) {
+      groups.push({
+        label: "add existing shape",
+        options: availableShapes.map((f) => `shape:${f.formid}:${f.name}`),
+      });
+    }
+    if (otherModuleGroups.length > 0) {
+      groups.push({
+        label: "use same shapes as",
+        options: otherModuleGroups.map((u) => {
+          const mod = modules.find((m) => m.op === u.op && m.instance === u.instance);
+          const label = mod?.name ?? u.module_name ?? u.op;
+          return `module:${u.op}:${u.instance}:${label}`;
+        }),
+      });
+    }
+    return groups;
+  }, [shapeCount, availableShapes, otherModuleGroups, modules]);
+
+  const handleDrawnMaskComboChange = useCallback(
+    (selected: string) => {
+      if (selected === "no mask used") {
+        clearModuleMasks(op, instance);
+      } else if (selected.startsWith("shape:")) {
+        const formid = parseInt(selected.split(":")[1], 10);
+        if (!isNaN(formid)) assignMask(formid, op, instance);
+      } else if (selected.startsWith("module:")) {
+        // Copy shapes from another module's group
+        const parts = selected.split(":");
+        const srcOp = parts[1];
+        const srcInstance = parseInt(parts[2], 10);
+        const srcUsage = maskUsage.find((u) => u.op === srcOp && u.instance === srcInstance);
+        if (srcUsage) {
+          const srcGroup = maskForms.find((f) => f.formid === srcUsage.mask_id);
+          if (srcGroup?.children) {
+            // Assign each shape from the source group
+            for (const child of srcGroup.children) {
+              assignMask(child.formid, op, instance);
+            }
+          }
+        }
+      }
+    },
+    [op, instance, assignMask, clearModuleMasks, maskUsage, maskForms],
+  );
 
   const setMaskMode = useCallback(
     (mode: number) => { setBlendParam(op, instance, "mask_mode", mode); },
@@ -86,6 +197,12 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
     setBlendParam(op, instance, "blend_mode", newMode);
   }, [op, instance, blend.blend_mode, setBlendParam]);
 
+  const handleTogglePolarity = useCallback(() => {
+    const newCombine = blend.mask_combine ^ COMBINE_MASKS_POS;
+    setBlendParam(op, instance, "mask_combine", newCombine);
+  }, [op, instance, blend.mask_combine, setBlendParam]);
+
+  // --- Throttled slider helpers ---
   const busyRef = useRef(false);
   const pendingRef = useRef<number | null>(null);
 
@@ -112,6 +229,51 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
     [op, instance, setBlendParam],
   );
 
+  // Generic throttled blend param handler for refinement sliders
+  const makeSliderHandlers = useCallback(
+    (param: string, scale = 1) => {
+      let busy = false;
+      let pending: number | null = null;
+      const onChange = async (value: number) => {
+        pending = value;
+        if (busy) return;
+        busy = true;
+        try {
+          while (pending !== null) {
+            const v = pending;
+            pending = null;
+            await setBlendParam(op, instance, param, v * scale, true);
+          }
+        } finally {
+          busy = false;
+        }
+      };
+      const onRelease = (value: number) => {
+        setBlendParam(op, instance, param, value * scale);
+      };
+      return { onChange, onRelease };
+    },
+    [op, instance, setBlendParam],
+  );
+
+  // Memoize slider handlers for each refinement param
+  const detailsHandlers = useMemo(() => makeSliderHandlers("details"), [makeSliderHandlers]);
+  const featheringRadiusHandlers = useMemo(() => makeSliderHandlers("feathering_radius"), [makeSliderHandlers]);
+  const blurRadiusHandlers = useMemo(() => makeSliderHandlers("blur_radius"), [makeSliderHandlers]);
+  const brightnessHandlers = useMemo(() => makeSliderHandlers("brightness"), [makeSliderHandlers]);
+  const contrastHandlers = useMemo(() => makeSliderHandlers("contrast"), [makeSliderHandlers]);
+
+  const handleFeatheringGuideChange = useCallback(
+    (label: string) => {
+      const opt = FEATHERING_GUIDE_OPTIONS.find((o) => o.label === label);
+      if (opt) setBlendParam(op, instance, "feathering_guide", opt.value);
+    },
+    [op, instance, setBlendParam],
+  );
+
+  const currentFeatheringLabel = FEATHERING_GUIDE_OPTIONS.find(
+    (o) => o.value === blend.feathering_guide,
+  )?.label ?? "output before blur";
 
   const currentBlendLabel = BLEND_MODE_OPTIONS.find(
     (o) => o.value === (blend.blend_mode & 0xFF),
@@ -226,50 +388,143 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
         </BauhausSection>
       )}
 
-      {/* Drawn mask shape tools (when drawn mask mode active) */}
-      {isActive && hasMasks && (maskMode & MASK_MODE.DRAWN) !== 0 && (
-        <div className="blending-shapes">
-          <BauhausTooltip content="add circle" placement="bottom">
-            <BauhausButton
-              icon={<Circle size={12} />}
-              transparent
-              active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "circle"}
-              onClick={() => createMask("circle", { center: [0.5, 0.5], radius: 0.05, border: 0.05, op, instance, _creation: true })}
+      {/* Drawn mask section */}
+      {isActive && hasMasks && hasDrawn && (
+        <BauhausSection
+          header={
+            <BauhausCombo
+              label="drawn mask"
+              value={maskLabel}
+              groups={drawnMaskComboGroups}
+              onChange={handleDrawnMaskComboChange}
+              formatOption={(opt) => {
+                if (opt.startsWith("shape:")) return opt.split(":").slice(2).join(":");
+                if (opt.startsWith("module:")) return opt.split(":").slice(3).join(":");
+                return opt;
+              }}
+              actionIcon={polarityActive ? <CircleMinus size={14} /> : <CirclePlus size={14} />}
+              onAction={handleTogglePolarity}
             />
-          </BauhausTooltip>
-          <BauhausTooltip content="add ellipse" placement="bottom">
-            <BauhausButton
-              icon={<Circle size={12} style={{ transform: "scaleX(0.7)" }} />}
-              transparent
-              active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "ellipse"}
-              onClick={() => createMask("ellipse", { center: [0.5, 0.5], radius: [0.05, 0.03535], border: 0.05, rotation: 90, op, instance, _creation: true })}
-            />
-          </BauhausTooltip>
-          <BauhausTooltip content="add path" placement="bottom">
-            <BauhausButton
-              icon={<SplinePointer size={12} />}
-              transparent
-              active={creationTool === "path"}
-              onClick={() => startCreation("path", op, instance)}
-            />
-          </BauhausTooltip>
-          <BauhausTooltip content="add brush" placement="bottom">
-            <BauhausButton
-              icon={<Brush size={12} />}
-              transparent
-              active={creationTool === "brush"}
-              onClick={() => startCreation("brush", op, instance)}
-            />
-          </BauhausTooltip>
-          <BauhausTooltip content="add gradient" placement="bottom">
-            <BauhausButton
-              icon={<ArrowDownRight size={12} />}
-              transparent
-              active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "gradient"}
-              onClick={() => createMask("gradient", { anchor: [0.5, 0.5], rotation: 0, compression: 0.05, steepness: 4, curvature: 0, state: 2, op, instance, _creation: true })}
-            />
-          </BauhausTooltip>
-        </div>
+          }
+        >
+          <div className="blending-shapes blending-shapes-right">
+            <BauhausTooltip content="add circle" placement="bottom">
+              <BauhausButton
+                icon={<Circle size={12} />}
+                transparent
+                active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "circle"}
+                onClick={() => createMask("circle", { center: [0.5, 0.5], radius: 0.05, border: 0.05, op, instance, _creation: true })}
+              />
+            </BauhausTooltip>
+            <BauhausTooltip content="add ellipse" placement="bottom">
+              <BauhausButton
+                icon={<Circle size={12} style={{ transform: "scaleX(0.7)" }} />}
+                transparent
+                active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "ellipse"}
+                onClick={() => createMask("ellipse", { center: [0.5, 0.5], radius: [0.05, 0.03535], border: 0.05, rotation: 90, op, instance, _creation: true })}
+              />
+            </BauhausTooltip>
+            <BauhausTooltip content="add path" placement="bottom">
+              <BauhausButton
+                icon={<SplinePointer size={12} />}
+                transparent
+                active={creationTool === "path"}
+                onClick={() => startCreation("path", op, instance)}
+              />
+            </BauhausTooltip>
+            <BauhausTooltip content="add brush" placement="bottom">
+              <BauhausButton
+                icon={<Brush size={12} />}
+                transparent
+                active={creationTool === "brush"}
+                onClick={() => startCreation("brush", op, instance)}
+              />
+            </BauhausTooltip>
+            <BauhausTooltip content="add gradient" placement="bottom">
+              <BauhausButton
+                icon={<ArrowDownRight size={12} />}
+                transparent
+                active={creatingMaskId !== null && maskForms.find((f) => f.formid === creatingMaskId)?.type_name === "gradient"}
+                onClick={() => createMask("gradient", { anchor: [0.5, 0.5], rotation: 0, compression: 0.05, steepness: 4, curvature: 0, state: 2, op, instance, _creation: true })}
+              />
+            </BauhausTooltip>
+            <BauhausTooltip content="show and edit mask elements" placement="bottom">
+              <BauhausButton
+                icon={<Eye size={12} />}
+                transparent
+                active={showMasks}
+                onClick={toggleMasks}
+              />
+            </BauhausTooltip>
+          </div>
+        </BauhausSection>
+      )}
+
+      {/* Mask refinement section */}
+      {isActive && (hasDrawn || maskMode === MASK_MODE.PARAMETRIC || maskMode === MASK_MODE.RASTER) && (
+        <BauhausSection title="mask refinement">
+          <BauhausSlider
+            label="details threshold"
+            value={blend.details}
+            min={-1}
+            max={1}
+            step={0.01}
+            defaultValue={0}
+            format={(v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`}
+            onChange={detailsHandlers.onChange}
+            onRelease={detailsHandlers.onRelease}
+          />
+          <BauhausCombo
+            label="feathering guide"
+            value={currentFeatheringLabel}
+            options={FEATHERING_GUIDE_OPTIONS.map((o) => o.label)}
+            onChange={handleFeatheringGuideChange}
+          />
+          <BauhausSlider
+            label="feathering radius"
+            value={blend.feathering_radius}
+            min={0}
+            max={250}
+            step={0.1}
+            defaultValue={0}
+            format={(v) => `${v.toFixed(1)} px`}
+            onChange={featheringRadiusHandlers.onChange}
+            onRelease={featheringRadiusHandlers.onRelease}
+          />
+          <BauhausSlider
+            label="blurring radius"
+            value={blend.blur_radius}
+            min={0}
+            max={100}
+            step={0.1}
+            defaultValue={0}
+            format={(v) => `${v.toFixed(1)} px`}
+            onChange={blurRadiusHandlers.onChange}
+            onRelease={blurRadiusHandlers.onRelease}
+          />
+          <BauhausSlider
+            label="mask opacity"
+            value={blend.brightness}
+            min={-1}
+            max={1}
+            step={0.01}
+            defaultValue={0}
+            format={(v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`}
+            onChange={brightnessHandlers.onChange}
+            onRelease={brightnessHandlers.onRelease}
+          />
+          <BauhausSlider
+            label="mask contrast"
+            value={blend.contrast}
+            min={-1}
+            max={1}
+            step={0.01}
+            defaultValue={0}
+            format={(v) => `${v >= 0 ? "+" : ""}${(v * 100).toFixed(0)}%`}
+            onChange={contrastHandlers.onChange}
+            onRelease={contrastHandlers.onRelease}
+          />
+        </BauhausSection>
       )}
     </div>
   );

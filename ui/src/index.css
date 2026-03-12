@@ -393,6 +393,8 @@ body {
 }
 
 .bauhaus-section-header {
+  display: flex;
+  align-items: center;
   border-bottom: 1px solid color-mix(in srgb, var(--plugin-label-color) 50%, transparent);
   padding: 2px 0 1px;
   margin-bottom: 4px;
@@ -401,6 +403,18 @@ body {
 .bauhaus-section-title {
   font-size: 0.75rem;
   color: var(--plugin-label-color);
+}
+
+.bauhaus-section-controls {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 2px;
+}
+
+.bauhaus-section-header > .bauhaus-combo {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 /* Collapsible section */
@@ -3376,6 +3390,16 @@ body {
   align-items: center;
   gap: 2px;
   padding: 4px 0 2px;
+}
+
+.blending-shapes-right {
+  justify-content: flex-end;
+}
+
+.bauhaus-section-controls .bauhaus-combo {
+  margin-bottom: 0;
+  min-width: 0;
+  flex: 1;
 }
 
 /* Picker overlay */

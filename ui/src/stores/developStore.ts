@@ -28,6 +28,7 @@ import {
   developDeleteMask,
   developCreateMask,
   developUpdateMask,
+  developAssignMask,
   developSetBlendParam,
   developGetDistortionGrid,
   getPreviewFrame,
@@ -232,6 +233,8 @@ interface DevelopState {
   saveCreation: (position: [number, number]) => Promise<void>;
   /** Cancel mask creation and delete the form being created */
   cancelCreation: () => Promise<void>;
+  assignMask: (formid: number, op: string, instance: number) => Promise<void>;
+  clearModuleMasks: (op: string, instance: number) => Promise<void>;
   toggleMasks: () => void;
   selectMask: (formid: number | null) => void;
   setBlendParam: (op: string, instance: number, param: string, value: number, skipRefresh?: boolean) => Promise<void>;
@@ -993,6 +996,32 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
     if (!creatingMaskId) return;
     set({ creatingMaskId: null, selectedMaskId: null });
     get().deleteMask(creatingMaskId);
+  },
+
+  assignMask: async (formid, op, instance) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developAssignMask(sessionId, { formid, op, instance });
+      await get().fetchMasks();
+      const result = await developGetModules(sessionId);
+      set({ modules: result.modules });
+    } catch (e) {
+      console.error("assign mask failed:", e);
+    }
+  },
+
+  clearModuleMasks: async (op, instance) => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    try {
+      await developSetBlendParam(sessionId, op, instance, "mask_id", 0);
+      await get().fetchMasks();
+      const result = await developGetModules(sessionId);
+      set({ modules: result.modules });
+    } catch (e) {
+      console.error("clear module masks failed:", e);
+    }
   },
 
   toggleMasks: () => set((s) => ({ showMasks: !s.showMasks })),

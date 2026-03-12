@@ -107,7 +107,7 @@ export default function BauhausSlider({
   }, [onRelease, value]);
 
   const range = max - min;
-  const orig = origin ?? min;
+  const orig = origin ?? defaultValue ?? min;
   const originPct = ((orig - min) / range) * 100;
   const valuePct = ((displayValue - min) / range) * 100;
   const fillLeft = Math.min(originPct, valuePct);

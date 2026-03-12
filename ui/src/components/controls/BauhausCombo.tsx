@@ -14,6 +14,8 @@ interface BauhausComboProps {
   groups?: ComboGroup[];
   value?: string;
   onChange?: (value: string) => void;
+  /** Display function for option values in the dropdown list */
+  formatOption?: (opt: string) => string;
   actionIcon?: ReactNode;
   onAction?: () => void;
 }
@@ -25,6 +27,7 @@ export default function BauhausCombo({
   groups,
   value,
   onChange,
+  formatOption,
   actionIcon,
   onAction,
 }: BauhausComboProps) {
@@ -81,6 +84,8 @@ export default function BauhausCombo({
     [onChange],
   );
 
+  const fmt = formatOption ?? ((s: string) => s);
+
   const renderOption = (opt: string, isFirst: boolean) =>
     isFirst && label ? (
       <div key={opt} className="bauhaus-combo-popup-row">
@@ -90,7 +95,7 @@ export default function BauhausCombo({
           data-selected={opt === selected}
           onClick={() => handleSelect(opt)}
         >
-          {opt}
+          {fmt(opt)}
         </span>
       </div>
     ) : (
@@ -100,7 +105,7 @@ export default function BauhausCombo({
         data-selected={opt === selected}
         onClick={() => handleSelect(opt)}
       >
-        {opt}
+        {fmt(opt)}
       </div>
     );
 
@@ -134,7 +139,7 @@ export default function BauhausCombo({
                       data-selected={opt === selected}
                       onClick={() => handleSelect(opt)}
                     >
-                      {opt}
+                      {fmt(opt)}
                     </div>
                   ))}
                 </div>
