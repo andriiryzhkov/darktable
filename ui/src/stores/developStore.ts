@@ -166,10 +166,13 @@ interface DevelopState {
   selectedMaskId: number | null;
   /** Distortion grid for client-side mask coordinate transforms */
   distortionGrid: DistortionGrid | null;
-  creationTool: "circle" | "ellipse" | "gradient" | "path" | null;
+  creationTool: "circle" | "ellipse" | "gradient" | "path" | "brush" | null;
   creationModule: { op: string; instance: number } | null;
   /** Form ID of mask currently being placed (follows cursor until clicked) */
   creatingMaskId: number | null;
+  /** Brush creation settings shared between overlay and UI */
+  brushSettings: { border: number; hardness: number; opacity: number; smoothing: "low" | "medium" | "high" };
+  setBrushSettings: (settings: Partial<{ border: number; hardness: number; opacity: number; smoothing: "low" | "medium" | "high" }>) => void;
   loading: boolean;
   previewError: string | null;
 
@@ -219,9 +222,9 @@ interface DevelopState {
   fetchDistortionGrid: () => Promise<void>;
   renameMask: (formid: number, name: string) => Promise<void>;
   deleteMask: (formid: number) => Promise<void>;
-  createMask: (type: "circle" | "ellipse" | "gradient" | "path", params: Record<string, unknown>) => Promise<number | null>;
+  createMask: (type: "circle" | "ellipse" | "gradient" | "path" | "brush", params: Record<string, unknown>) => Promise<number | null>;
   updateMask: (formid: number, params: Record<string, unknown>) => Promise<void>;
-  startCreation: (tool: "circle" | "ellipse" | "gradient" | "path", op?: string, instance?: number) => void;
+  startCreation: (tool: "circle" | "ellipse" | "gradient" | "path" | "brush", op?: string, instance?: number) => void;
   resetCreation: () => void;
   /** Send lightweight mask update to server (no history write) and refresh polylines */
   previewMaskParam: (formid: number, updates: Record<string, unknown>) => void;
@@ -282,6 +285,8 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   creationTool: null,
   creationModule: null,
   creatingMaskId: null,
+  brushSettings: { border: 0.05, hardness: 0.5, opacity: 1.0, smoothing: "medium" as const },
+  setBrushSettings: (s) => set((prev) => ({ brushSettings: { ...prev.brushSettings, ...s } })),
   loading: false,
   previewError: null,
   focusModuleOp: null,
@@ -867,7 +872,11 @@ export const useDevelopStore = create<DevelopState>((set, get) => ({
   startCreation: (tool, op, instance) => {
     // Toggle off if already in this creation mode
     if (get().creationTool === tool) {
-      set({ creationTool: null, creationModule: null });
+      const { creatingMaskId } = get();
+      if (creatingMaskId) {
+        get().deleteMask(creatingMaskId);
+      }
+      set({ creationTool: null, creationModule: null, creatingMaskId: null });
       return;
     }
     // Cancel any in-progress mask creation (e.g. circle/ellipse following cursor)
@@ -1042,3 +1051,8 @@ on("develop.preview_ready", (data) => {
   // Refresh distortion grid (used for client-side mask polyline computation)
   state.fetchDistortionGrid();
 });
+
+// Debug: expose store on window for runtime inspection
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__developStore = useDevelopStore;
+}

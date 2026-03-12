@@ -254,7 +254,12 @@ export default function BlendingToolbar({ op, instance, moduleInfo }: Props) {
             />
           </BauhausTooltip>
           <BauhausTooltip content="add brush" placement="bottom">
-            <BauhausButton icon={<Brush size={12} />} transparent disabled />
+            <BauhausButton
+              icon={<Brush size={12} />}
+              transparent
+              active={creationTool === "brush"}
+              onClick={() => startCreation("brush", op, instance)}
+            />
           </BauhausTooltip>
           <BauhausTooltip content="add gradient" placement="bottom">
             <BauhausButton

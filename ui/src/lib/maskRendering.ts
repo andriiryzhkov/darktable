@@ -13,6 +13,7 @@ import type {
 } from "../types/protocol";
 import { generateCirclePolyline, generateEllipsePolyline, transformPathPoints, transformBrushPoints, generateGradientPolylines } from "./distortionGrid";
 import type { DragTarget } from "./maskDrag";
+import { brushCtrl2ToFeather } from "./maskDrag";
 
 // DT dual-stroke: dark background stroke + bright foreground stroke
 const DARK = "rgba(40, 40, 40, 0.5)";
@@ -318,7 +319,57 @@ export function buildBrushBorderOutline(pts: MaskPointBrush[], w: number, h: num
   return p;
 }
 
-export function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], hovered = false, mx: number | null = null, my: number | null = null, serverPolyline1?: number[], serverPolyline2?: number[], hoveredSeg = -1) {
+/**
+ * Compute brush border anchor positions for each point.
+ * Border anchors are perpendicular to the tangent at t=0 of the outgoing segment.
+ */
+export function computeBrushBorderAnchors(pts: MaskPointBrush[], w: number, h: number): BorderAnchor[] {
+  const dim = Math.min(w, h);
+  return pts.map((p, i) => {
+    const rad = p.border[1] * dim;
+    if (Math.abs(rad) < 0.5 || i >= pts.length - 1) {
+      // Last point has no outgoing segment — use incoming tangent
+      if (i > 0 && i === pts.length - 1) {
+        const prev = pts[i - 1];
+        const [bx, by] = borderPointAt(
+          prev.corner[0] * w, prev.corner[1] * h,
+          prev.ctrl2[0] * w, prev.ctrl2[1] * h,
+          p.ctrl1[0] * w, p.ctrl1[1] * h,
+          p.corner[0] * w, p.corner[1] * h,
+          1, rad,
+        );
+        return { x: bx, y: by };
+      }
+      return { x: p.corner[0] * w, y: p.corner[1] * h };
+    }
+    const next = pts[i + 1];
+    const [bx, by] = borderPointAt(
+      p.corner[0] * w, p.corner[1] * h,
+      p.ctrl2[0] * w, p.ctrl2[1] * h,
+      next.ctrl1[0] * w, next.ctrl1[1] * h,
+      next.corner[0] * w, next.corner[1] * h,
+      0, rad,
+    );
+    return { x: bx, y: by };
+  });
+}
+
+/**
+ * Compute feather handle positions for each brush point.
+ * Feather handles are derived from ctrl2 via perpendicular rotation.
+ */
+export function computeBrushFeatherAnchors(pts: MaskPointBrush[], w: number, h: number): BorderAnchor[] {
+  return pts.map((p) => {
+    const [fx, fy] = brushCtrl2ToFeather(
+      p.corner[0] * w, p.corner[1] * h,
+      p.ctrl2[0] * w, p.ctrl2[1] * h,
+      true,
+    );
+    return { x: fx, y: fy };
+  });
+}
+
+export function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, pts: MaskPointBrush[], hovered = false, mx: number | null = null, my: number | null = null, serverPolyline1?: number[], serverPolyline2?: number[], hoveredSeg = -1, editedIdx: number | null = null) {
   if (pts.length < 2) return;
 
   // Main brush spline — draw each segment individually for per-segment highlighting
@@ -375,6 +426,22 @@ export function drawBrush(ctx: CanvasRenderingContext2D, w: number, h: number, p
   } else {
     const borderPath = buildBrushBorderOutline(pts, w, h);
     dualStrokePath2D(ctx, borderPath, true, hovered);
+  }
+
+  // Feather handle for edited point only (matching DT: one feather handle shown when point_edited >= 0)
+  if (editedIdx !== null && editedIdx >= 0 && editedIdx < pts.length) {
+    const featherAnchors = computeBrushFeatherAnchors(pts, w, h);
+    const cornerX = pts[editedIdx].corner[0] * w;
+    const cornerY = pts[editedIdx].corner[1] * h;
+    const fa = featherAnchors[editedIdx];
+
+    // Connecting line from corner to feather
+    ctx.beginPath();
+    ctx.moveTo(cornerX, cornerY);
+    ctx.lineTo(fa.x, fa.y);
+    dualStroke(ctx, true, false);
+
+    drawCtrlHandle(ctx, fa.x, fa.y, mx, my);
   }
 
   // Corner handles
@@ -803,9 +870,10 @@ export function drawForm(ctx: CanvasRenderingContext2D, w: number, h: number, fo
     }
     case MASKS_TYPE.BRUSH: {
       if (!grid) break;
+      const editBrushIdx = editedPoint?.formid === form.formid ? editedPoint.index : null;
       const pts = form.points as MaskPointBrush[];
       const tPts = transformBrushPoints(grid, pts);
-      drawBrush(ctx, w, h, tPts, hovered, mx, my, undefined, undefined, hoveredSeg);
+      drawBrush(ctx, w, h, tPts, hovered, mx, my, undefined, undefined, hoveredSeg, editBrushIdx);
       break;
     }
     case MASKS_TYPE.GRADIENT: {
@@ -837,6 +905,32 @@ export function hitTestPathCtrlHandle(
     return { kind: "pathCtrl1", formid: form.formid, pointIndex: editedIdx };
   if (isNearHandle(p.ctrl2[0] * w, p.ctrl2[1] * h, px, py))
     return { kind: "pathCtrl2", formid: form.formid, pointIndex: editedIdx };
+  return null;
+}
+
+/**
+ * Check if mouse is near the feather or border handle of an edited brush point.
+ * Returns the DragTarget if hit, null otherwise.
+ */
+export function hitTestBrushFeatherHandle(
+  w: number, h: number,
+  form: MaskForm, editedIdx: number,
+  px: number, py: number, grid: DistortionGrid,
+): DragTarget | null {
+  const pts = form.points as MaskPointBrush[];
+  if (!pts || editedIdx < 0 || editedIdx >= pts.length) return null;
+  const tPts = transformBrushPoints(grid, pts);
+
+  // Feather handle
+  const featherAnchors = computeBrushFeatherAnchors(tPts, w, h);
+  if (isNearHandle(featherAnchors[editedIdx].x, featherAnchors[editedIdx].y, px, py))
+    return { kind: "brushFeather", formid: form.formid, pointIndex: editedIdx };
+
+  // Border handle
+  const borderAnchors = computeBrushBorderAnchors(tPts, w, h);
+  if (isNearHandle(borderAnchors[editedIdx].x, borderAnchors[editedIdx].y, px, py))
+    return { kind: "brushBorder", formid: form.formid, pointIndex: editedIdx };
+
   return null;
 }
 
@@ -937,6 +1031,21 @@ export function hitTestDragTarget(
       // Main line — drag to move
       const mainPath = buildPolylinePath2D(poly.main_polyline, w, h, false);
       if (ctx.isPointInStroke(mainPath, px, py))
+        return { kind: "center", formid: form.formid };
+    } else if (baseType === MASKS_TYPE.BRUSH) {
+      const pts = form.points as MaskPointBrush[];
+      if (!pts || pts.length < 2) return null;
+      const tPts = transformBrushPoints(grid, pts);
+
+      // Check corner handles (point drag)
+      for (let i = 0; i < tPts.length; i++) {
+        if (isNearHandle(tPts[i].corner[0] * w, tPts[i].corner[1] * h, px, py))
+          return { kind: "brushCorner", formid: form.formid, pointIndex: i };
+      }
+
+      // Check segment/form proximity — form drag
+      const seg = hitTestBrushSegment(ctx, w, h, tPts, px, py);
+      if (seg >= 0)
         return { kind: "center", formid: form.formid };
     }
     return null;

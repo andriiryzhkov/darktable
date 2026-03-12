@@ -6,9 +6,10 @@ import BauhausButton from "../../controls/BauhausButton";
 import BauhausTooltip from "../../controls/BauhausTooltip";
 import BauhausSlider from "../../controls/BauhausSlider";
 import BauhausCollapsible from "../../controls/BauhausCollapsible";
+import BauhausCombo from "../../controls/BauhausCombo";
 import { useDevelopStore } from "../../../stores/developStore";
 import { MASKS_TYPE } from "../../../types/protocol";
-import type { MaskPointsCircle, MaskPointsEllipse, MaskPointsGradient, MaskPointPath } from "../../../types/protocol";
+import type { MaskPointsCircle, MaskPointsEllipse, MaskPointsGradient, MaskPointPath, MaskPointBrush } from "../../../types/protocol";
 import type { MaskForm, MaskUsage } from "../../../types/protocol";
 
 const ICON_SIZE = 12;
@@ -173,6 +174,8 @@ export default function MaskManagerModule() {
   const requestPreview = useDevelopStore((s) => s.requestPreview);
   const creatingMaskId = useDevelopStore((s) => s.creatingMaskId);
   const creationTool = useDevelopStore((s) => s.creationTool);
+  const brushSettings = useDevelopStore((s) => s.brushSettings);
+  const setBrushSettings = useDevelopStore((s) => s.setBrushSettings);
   const previewMaskParam = useDevelopStore((s) => s.previewMaskParam);
 
   // Context menu state
@@ -298,6 +301,14 @@ export default function MaskManagerModule() {
                 transparent
                 active={creationTool === "path"}
                 onClick={() => startCreation("path")}
+              />
+            </BauhausTooltip>
+            <BauhausTooltip content="add brush" placement="bottom">
+              <BauhausButton
+                icon={<Brush size={ICON_SIZE} />}
+                transparent
+                active={creationTool === "brush"}
+                onClick={() => startCreation("brush")}
               />
             </BauhausTooltip>
             <BauhausTooltip content="add gradient" placement="bottom">
@@ -522,8 +533,101 @@ export default function MaskManagerModule() {
             );
           }
 
+          if (baseType === MASKS_TYPE.BRUSH) {
+            const brushPts = pts as MaskPointBrush[];
+            const avgBorder = brushPts.length > 0
+              ? brushPts.reduce((sum, p) => sum + p.border[0], 0) / brushPts.length
+              : 0.05;
+            const avgHardness = brushPts.length > 0
+              ? brushPts.reduce((sum, p) => sum + p.hardness, 0) / brushPts.length
+              : 0.5;
+            const avgDensity = brushPts.length > 0
+              ? brushPts.reduce((sum, p) => sum + p.density, 0) / brushPts.length
+              : 1.0;
+            return (
+              <BauhausCollapsible title="properties" key={`props-${selectedMaskId}-${isCreating}`} defaultOpen={isCreating}>
+                {opacitySlider}
+                <BauhausSlider
+                  label="brush size"
+                  value={avgBorder}
+                  min={0.0005} max={0.5} step={0.001} defaultValue={0.05}
+                  format={(v) => `${(v * 100).toFixed(2)}%`}
+                  onChange={(v: number) => {
+                    const updated = brushPts.map(p => ({ ...p, border: [v, v] as [number, number] }));
+                    previewMaskParam(selForm.formid, { points: updated });
+                  }}
+                  onRelease={(v: number) => {
+                    const updated = brushPts.map(p => ({ ...p, border: [v, v] as [number, number] }));
+                    updateMask(selForm.formid, { points: updated }).then(() => requestPreview());
+                  }}
+                />
+                <BauhausSlider
+                  label="hardness"
+                  value={avgHardness}
+                  min={0.0005} max={1.0} step={0.01} defaultValue={0.5}
+                  format={(v) => `${(v * 100).toFixed(0)}%`}
+                  onChange={(v: number) => {
+                    const updated = brushPts.map(p => ({ ...p, hardness: v }));
+                    previewMaskParam(selForm.formid, { points: updated });
+                  }}
+                  onRelease={(v: number) => {
+                    const updated = brushPts.map(p => ({ ...p, hardness: v }));
+                    updateMask(selForm.formid, { points: updated }).then(() => requestPreview());
+                  }}
+                />
+                <BauhausSlider
+                  label="opacity"
+                  value={avgDensity}
+                  min={0.0} max={1.0} step={0.01} defaultValue={1.0}
+                  format={(v) => `${(v * 100).toFixed(0)}%`}
+                  onChange={(v: number) => {
+                    const updated = brushPts.map(p => ({ ...p, density: v }));
+                    previewMaskParam(selForm.formid, { points: updated });
+                  }}
+                  onRelease={(v: number) => {
+                    const updated = brushPts.map(p => ({ ...p, density: v }));
+                    updateMask(selForm.formid, { points: updated }).then(() => requestPreview());
+                  }}
+                />
+              </BauhausCollapsible>
+            );
+          }
+
           return null;
         })()}
+
+        {/* Brush creation settings — shown when brush tool is active but no mask selected yet */}
+        {creationTool === "brush" && selectedMaskId === null && (
+          <BauhausCollapsible title="brush settings" defaultOpen>
+            <BauhausSlider
+              label="opacity"
+              value={brushSettings.opacity}
+              min={0.0} max={1.0} step={0.01} defaultValue={1.0}
+              format={(v) => `${(v * 100).toFixed(0)}%`}
+              onChange={(v: number) => setBrushSettings({ opacity: v })}
+            />
+            <BauhausSlider
+              label="size"
+              value={brushSettings.border}
+              min={0.0005} max={0.5} step={0.001} defaultValue={0.05}
+              format={(v) => `${(v * 100).toFixed(2)}%`}
+              onChange={(v: number) => setBrushSettings({ border: v })}
+            />
+            <BauhausSlider
+              label="hardness"
+              value={brushSettings.hardness}
+              min={0.0005} max={1.0} step={0.01} defaultValue={0.5}
+              format={(v) => `${(v * 100).toFixed(0)}%`}
+              onChange={(v: number) => setBrushSettings({ hardness: v })}
+            />
+            <BauhausCombo
+              label="smoothing"
+              options={["low", "medium", "high"]}
+              value={brushSettings.smoothing}
+              onChange={(v) => setBrushSettings({ smoothing: v as "low" | "medium" | "high" })}
+            />
+          </BauhausCollapsible>
+        )}
       </LibModuleCard>
       {menuPos && createPortal(
         <div

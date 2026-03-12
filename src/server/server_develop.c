@@ -4633,6 +4633,56 @@ char *dt_server_develop_create_mask(dt_server_t *server, const dt_server_request
       }
     }
   }
+  else if(mask_type == DT_MASKS_BRUSH)
+  {
+    if(json_object_has_member(req->params, "points"))
+    {
+      JsonArray *pts = json_object_get_array_member(req->params, "points");
+      const guint n = json_array_get_length(pts);
+      for(guint i = 0; i < n; i++)
+      {
+        JsonObject *pt = json_array_get_object_element(pts, i);
+        dt_masks_point_brush_t *bp = calloc(1, sizeof(dt_masks_point_brush_t));
+        if(json_object_has_member(pt, "corner"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "corner");
+          bp->corner[0] = (float)json_array_get_double_element(c, 0);
+          bp->corner[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl1"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl1");
+          bp->ctrl1[0] = (float)json_array_get_double_element(c, 0);
+          bp->ctrl1[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl2"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl2");
+          bp->ctrl2[0] = (float)json_array_get_double_element(c, 0);
+          bp->ctrl2[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "border"))
+        {
+          JsonArray *b = json_object_get_array_member(pt, "border");
+          bp->border[0] = (float)json_array_get_double_element(b, 0);
+          bp->border[1] = (float)json_array_get_double_element(b, 1);
+        }
+        else
+        {
+          bp->border[0] = 0.05f;
+          bp->border[1] = 0.05f;
+        }
+        bp->density = json_object_has_member(pt, "density")
+          ? (float)json_object_get_double_member(pt, "density") : 1.0f;
+        bp->hardness = json_object_has_member(pt, "hardness")
+          ? (float)json_object_get_double_member(pt, "hardness") : 0.5f;
+        bp->state = json_object_has_member(pt, "state")
+          ? (dt_masks_points_states_t)json_object_get_int_member(pt, "state")
+          : DT_MASKS_POINT_STATE_NORMAL;
+        form->points = g_list_append(form->points, bp);
+      }
+    }
+  }
 
   // Register form
   session->dev.forms = g_list_append(session->dev.forms, form);
@@ -4820,6 +4870,59 @@ char *dt_server_develop_update_mask(dt_server_t *server, const dt_server_request
           ? (dt_masks_points_states_t)json_object_get_int_member(pt, "state")
           : DT_MASKS_POINT_STATE_NORMAL;
         form->points = g_list_append(form->points, pp);
+      }
+    }
+  }
+  else if(base_type == DT_MASKS_BRUSH)
+  {
+    if(json_object_has_member(req->params, "points"))
+    {
+      // Replace all brush points
+      g_list_free_full(form->points, free);
+      form->points = NULL;
+      JsonArray *pts = json_object_get_array_member(req->params, "points");
+      const guint n = json_array_get_length(pts);
+      for(guint i = 0; i < n; i++)
+      {
+        JsonObject *pt = json_array_get_object_element(pts, i);
+        dt_masks_point_brush_t *bp = calloc(1, sizeof(dt_masks_point_brush_t));
+        if(json_object_has_member(pt, "corner"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "corner");
+          bp->corner[0] = (float)json_array_get_double_element(c, 0);
+          bp->corner[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl1"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl1");
+          bp->ctrl1[0] = (float)json_array_get_double_element(c, 0);
+          bp->ctrl1[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "ctrl2"))
+        {
+          JsonArray *c = json_object_get_array_member(pt, "ctrl2");
+          bp->ctrl2[0] = (float)json_array_get_double_element(c, 0);
+          bp->ctrl2[1] = (float)json_array_get_double_element(c, 1);
+        }
+        if(json_object_has_member(pt, "border"))
+        {
+          JsonArray *b = json_object_get_array_member(pt, "border");
+          bp->border[0] = (float)json_array_get_double_element(b, 0);
+          bp->border[1] = (float)json_array_get_double_element(b, 1);
+        }
+        else
+        {
+          bp->border[0] = 0.05f;
+          bp->border[1] = 0.05f;
+        }
+        bp->density = json_object_has_member(pt, "density")
+          ? (float)json_object_get_double_member(pt, "density") : 1.0f;
+        bp->hardness = json_object_has_member(pt, "hardness")
+          ? (float)json_object_get_double_member(pt, "hardness") : 0.5f;
+        bp->state = json_object_has_member(pt, "state")
+          ? (dt_masks_points_states_t)json_object_get_int_member(pt, "state")
+          : DT_MASKS_POINT_STATE_NORMAL;
+        form->points = g_list_append(form->points, bp);
       }
     }
   }

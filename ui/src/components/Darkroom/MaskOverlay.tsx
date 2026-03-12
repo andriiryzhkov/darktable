@@ -15,6 +15,7 @@ import {
   hitTestForm,
   hitTestDragTarget,
   hitTestPathCtrlHandle,
+  hitTestBrushFeatherHandle,
   hitTestBrushSegment,
   isNearHandle,
   findNearestPathSegment,
@@ -24,7 +25,8 @@ import {
   computeBorderAnchors,
 } from "../../lib/maskRendering";
 import type { DragTarget, DragState } from "../../lib/maskDrag";
-import { getDragOps, getCreationParams, initPathCtrlPoints } from "../../lib/maskDrag";
+import type { BrushRawPoint } from "../../lib/maskDrag";
+import { getDragOps, getCreationParams, initPathCtrlPoints, initBrushCtrlPoints, simplifyBrushStroke, buildBrushPoints } from "../../lib/maskDrag";
 
 interface Props {
   targetRef: React.RefObject<HTMLElement | null>;
@@ -44,6 +46,8 @@ export default function MaskOverlay({ targetRef }: Props) {
   const creationCursorRef = useRef<[number, number] | null>(null);
   // Accumulated points during multi-click path creation
   const pathCreationRef = useRef<MaskPointPath[] | null>(null);
+  // Brush stroke state: raw sampled points during active drawing
+  const brushStrokeRef = useRef<BrushRawPoint[] | null>(null);
 
   // Recompute drawable forms when structure changes
   useEffect(() => {
@@ -68,9 +72,16 @@ export default function MaskOverlay({ targetRef }: Props) {
     computeDrawable();
     // Subscribe to store changes for lightweight redraw (no event listener teardown)
     const unsub = useDevelopStore.subscribe((state, prev) => {
-      // Clear path creation state when creation tool is deactivated
-      if (state.creationTool !== prev.creationTool && state.creationTool === null) {
-        pathCreationRef.current = null;
+      // Redraw and clean up when creation tool changes
+      if (state.creationTool !== prev.creationTool) {
+        if (state.creationTool === null) {
+          pathCreationRef.current = null;
+          brushStrokeRef.current = null;
+        }
+        drawRef.current?.();
+      }
+      // Redraw when brush settings change (slider adjusts cursor preview)
+      if (state.brushSettings !== prev.brushSettings) {
         drawRef.current?.();
       }
       if (state.maskForms !== prev.maskForms || state.selectedMaskId !== prev.selectedMaskId
@@ -265,21 +276,130 @@ export default function MaskOverlay({ targetRef }: Props) {
         }
       }
 
+      // Draw brush stroke preview during active drawing (matches DT's live trace)
+      const bsPts = brushStrokeRef.current;
+      if (bsPts && bsPts.length >= 1 && cTool === "brush") {
+        const grid = useDevelopStore.getState().distortionGrid;
+        const dim = Math.min(w, h);
+
+        // DT draws a thick round-capped line along raw mouse path
+        // with line_width = 2 * border * hardness * dim, color = BRUSH_TRACE with density alpha
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        let oldRadius = bsPts[0].border * bsPts[0].hardness * dim;
+        let oldOpacity = bsPts[0].density;
+        ctx.lineWidth = 2 * oldRadius;
+        ctx.strokeStyle = `rgba(0, 0, 0, ${0.8 * oldOpacity})`;
+
+        // Transform first point to output space
+        const t0 = grid ? forwardTransform(grid, bsPts[0].x, bsPts[0].y) : [bsPts[0].x, bsPts[0].y] as [number, number];
+        ctx.beginPath();
+        ctx.moveTo(t0[0] * w, t0[1] * h);
+
+        for (let i = 1; i < bsPts.length; i++) {
+          const tp = grid ? forwardTransform(grid, bsPts[i].x, bsPts[i].y) : [bsPts[i].x, bsPts[i].y] as [number, number];
+          ctx.lineTo(tp[0] * w, tp[1] * h);
+
+          const radius = bsPts[i].border * bsPts[i].hardness * dim;
+          const opacity = bsPts[i].density;
+          // When radius or opacity changes, stroke current segment and start new one
+          if (radius !== oldRadius || opacity !== oldOpacity) {
+            ctx.stroke();
+            ctx.lineWidth = 2 * radius;
+            ctx.strokeStyle = `rgba(0, 0, 0, ${0.8 * opacity})`;
+            oldRadius = radius;
+            oldOpacity = opacity;
+            ctx.beginPath();
+            ctx.moveTo(tp[0] * w, tp[1] * h);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
+
+        // Draw brush cursor at the last point
+        const last = bsPts[bsPts.length - 1];
+        const tLast = grid ? forwardTransform(grid, last.x, last.y) : [last.x, last.y] as [number, number];
+        const lx = tLast[0] * w, ly = tLast[1] * h;
+        const cursorR = last.border * last.hardness * dim;
+        const outerR = last.border * dim;
+
+        // Filled cursor circle (BRUSH_CURSOR color with density alpha)
+        ctx.beginPath();
+        ctx.arc(lx, ly, cursorR, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.9 * last.density})`;
+        ctx.fill();
+        // Cursor border
+        ctx.strokeStyle = "rgba(200, 200, 200, 0.8)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Outer dashed circle (border extent)
+        ctx.beginPath();
+        ctx.arc(lx, ly, outerR, 0, Math.PI * 2);
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = "rgba(200, 200, 200, 0.6)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Draw brush cursor circle when brush tool is active
+      if (cTool === "brush" && (!brushStrokeRef.current || brushStrokeRef.current.length === 0)) {
+        // Use mouse position, or center of canvas when cursor is outside
+        const bx = m ? m.x : w / 2;
+        const by = m ? m.y : h / 2;
+        const bs = useDevelopStore.getState().brushSettings;
+        const dim = Math.min(w, h);
+        const outerR = bs.border * dim;
+        const innerR = outerR * bs.hardness;
+
+        // Inner filled circle (opacity controls white fill)
+        ctx.beginPath();
+        ctx.arc(bx, by, innerR, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255, 255, 255, ${bs.opacity})`;
+        ctx.fill();
+
+        // Inner circle border — highlighted/selected dual-stroke style (constant, not affected by opacity)
+        ctx.beginPath();
+        ctx.arc(bx, by, innerR, 0, Math.PI * 2);
+        ctx.setLineDash([]);
+        ctx.strokeStyle = "rgba(40, 40, 40, 0.8)";
+        ctx.lineWidth = 2.55;
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(218, 218, 218, 0.9)";
+        ctx.lineWidth = 2.55;
+        ctx.stroke();
+
+        // Outer circle (border extent) — dashed style
+        ctx.beginPath();
+        ctx.arc(bx, by, outerR, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(40, 40, 40, 0.5)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.strokeStyle = "rgba(200, 200, 200, 0.6)";
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
       // Compute cursor from current state — single source of truth
       if (dragRef.current) {
         const dk = dragRef.current.target.kind;
         canvas.style.cursor = dk === "center" ? "grabbing"
-          : dk === "pathCorner" ? "move"
+          : dk === "pathCorner" || dk === "brushCorner" ? "move"
           : dk === "rotate" ? "alias" : "crosshair";
       } else if (cTool || cMaskId) {
-        canvas.style.cursor = "crosshair";
+        canvas.style.cursor = cTool === "brush" ? "none" : "crosshair";
       } else if (m && selId !== null) {
         const selF = drawableFormsRef.current.find((f) => f.formid === selId);
         if (selF) {
           const hit = hitTestDragTarget(ctx, w, h, selF, m.x, m.y, distortionGrid);
           canvas.style.cursor = hit
             ? (hit.kind === "center" ? "grab"
-              : hit.kind === "pathCorner" ? "move"
+              : hit.kind === "pathCorner" || hit.kind === "brushCorner" ? "move"
               : hit.kind === "rotate" ? "alias" : "crosshair")
             : "";
         } else {
@@ -302,6 +422,21 @@ export default function MaskOverlay({ targetRef }: Props) {
       mouseRef.current = { x: px, y: py };
       const w = canvas.width;
       const h = canvas.height;
+
+      // Brush stroke: sample point during active drawing
+      if (brushStrokeRef.current) {
+        const grid = useDevelopStore.getState().distortionGrid;
+        if (grid) {
+          const rawPos = inverseTransform(grid, px / w, py / h);
+          const bs = useDevelopStore.getState().brushSettings;
+          brushStrokeRef.current.push({
+            x: rawPos[0], y: rawPos[1],
+            border: bs.border, hardness: bs.hardness, density: bs.opacity,
+          });
+        }
+        draw();
+        return;
+      }
 
       // Creation mode: update form position to follow cursor
       const currentCreatingId = useDevelopStore.getState().creatingMaskId;
@@ -469,6 +604,21 @@ export default function MaskOverlay({ targetRef }: Props) {
         return;
       }
 
+      // Brush creation: mousedown starts stroke capture
+      if (tool === "brush") {
+        const grid = useDevelopStore.getState().distortionGrid;
+        if (grid) {
+          const rawPos = inverseTransform(grid, px / w, py / h);
+          const bs = useDevelopStore.getState().brushSettings;
+          brushStrokeRef.current = [{
+            x: rawPos[0], y: rawPos[1],
+            border: bs.border, hardness: bs.hardness, density: bs.opacity,
+          }];
+        }
+        draw();
+        return;
+      }
+
       // Creation mode: click to save mask position
       const currentCreatingId = useDevelopStore.getState().creatingMaskId;
       if (currentCreatingId !== null) {
@@ -536,6 +686,22 @@ export default function MaskOverlay({ targetRef }: Props) {
             }
           }
 
+          // Brush: check feather/border handles when a point is being edited
+          if (baseType === MASKS_TYPE.BRUSH && editedPointRef.current && distortionGrid) {
+            const ep = editedPointRef.current;
+            if (ep.formid === selForm.formid) {
+              const featherHit = hitTestBrushFeatherHandle(w, h, selForm, ep.index, px, py, distortionGrid);
+              if (featherHit) {
+                const ops = getDragOps(selForm);
+                if (ops) {
+                  dragRef.current = ops.initDrag(selForm, featherHit, px, py, w, h, distortionGrid);
+                  e.preventDefault();
+                  return;
+                }
+              }
+            }
+          }
+
           // Ctrl+click on path edge → insert new control point
           if (e.ctrlKey && baseType === MASKS_TYPE.PATH && distortionGrid && selForm.points) {
             const pts = selForm.points as MaskPointPath[];
@@ -568,6 +734,42 @@ export default function MaskOverlay({ targetRef }: Props) {
               updateMask(selForm.formid, { points: pts.map((p) => ({ ...p, corner: [...p.corner], ctrl1: [...p.ctrl1], ctrl2: [...p.ctrl2], border: [...p.border] })) })
                 .then(() => requestPreview());
               editedPointRef.current = { formid: selForm.formid, index: segIdx + 1 };
+              e.preventDefault();
+              draw();
+              return;
+            }
+          }
+
+          // Ctrl+click on brush edge → insert new control point
+          if (e.ctrlKey && baseType === MASKS_TYPE.BRUSH && distortionGrid && selForm.points) {
+            const pts = selForm.points as MaskPointBrush[];
+            const tPts = transformBrushPoints(distortionGrid, pts);
+            const seg = hitTestBrushSegment(ctx2, w, h, tPts, px, py);
+            if (seg >= 0 && seg < pts.length - 1) {
+              // Find nearest t on the segment
+              const curr = pts[seg];
+              const next = pts[seg + 1];
+              const { left, right } = splitBezierAt(
+                curr.corner, curr.ctrl2, next.ctrl1, next.corner, 0.5,
+              );
+              // Interpolate border/hardness/density
+              const borderVal = curr.border[1] + (next.border[0] - curr.border[1]) * 0.5;
+              const hardnessVal = curr.hardness + (next.hardness - curr.hardness) * 0.5;
+              const densityVal = curr.density + (next.density - curr.density) * 0.5;
+              const newPoint: MaskPointBrush = {
+                corner: left[3],
+                ctrl1: left[2],
+                ctrl2: right[1],
+                border: [borderVal, borderVal],
+                hardness: hardnessVal,
+                density: densityVal,
+                state: 0, // USER — explicit control
+              };
+              curr.ctrl2 = left[1];
+              next.ctrl1 = right[2];
+              pts.splice(seg + 1, 0, newPoint);
+              updateMask(selForm.formid, { points: pts.map((p) => ({ ...p, corner: [...p.corner], ctrl1: [...p.ctrl1], ctrl2: [...p.ctrl2], border: [...p.border] })) })
+                .then(() => requestPreview());
               e.preventDefault();
               draw();
               return;
@@ -616,9 +818,44 @@ export default function MaskOverlay({ targetRef }: Props) {
     };
 
     const onMouseUp = (e: MouseEvent) => {
+      // Brush stroke: finish and submit
+      if (brushStrokeRef.current) {
+        const rawPts = brushStrokeRef.current;
+        brushStrokeRef.current = null;
+        if (rawPts.length >= 1) {
+          // Simplify with Ramer-Douglas-Peucker (epsilon² uses DT smoothing factors)
+          const { border: brd, smoothing } = useDevelopStore.getState().brushSettings;
+          const smoothFactor = smoothing === "low" ? 0.0025 : smoothing === "high" ? 0.04 : 0.01;
+          const border = Math.max(0.0005, brd);
+          const epsilon2 = smoothFactor * border * border;
+          const simplified = simplifyBrushStroke(rawPts, epsilon2);
+          const brushPts = buildBrushPoints(simplified);
+          if (brushPts.length >= 2) {
+            const mod = useDevelopStore.getState().creationModule;
+            const params: Record<string, unknown> = {
+              points: brushPts.map((bp) => ({
+                corner: [...bp.corner],
+                ctrl1: [...bp.ctrl1],
+                ctrl2: [...bp.ctrl2],
+                border: [...bp.border],
+                density: bp.density,
+                hardness: bp.hardness,
+                state: bp.state,
+              })),
+            };
+            if (mod) { params.op = mod.op; params.instance = mod.instance; }
+            createMask("brush", params).then((formid) => {
+              if (formid) requestPreview();
+            });
+          }
+        }
+        draw();
+        return;
+      }
+
       const drag = dragRef.current;
       if (!drag) {
-        // Path corner handle toggle on click (only if not drag)
+        // Path/brush corner handle toggle on click (only if not drag)
         const rect = canvas.getBoundingClientRect();
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
@@ -627,19 +864,36 @@ export default function MaskOverlay({ targetRef }: Props) {
         const grid = useDevelopStore.getState().distortionGrid;
         for (const form of drawableFormsRef.current) {
           const baseType = form.type & ~(MASKS_TYPE.CLONE | MASKS_TYPE.NON_CLONE);
-          if (baseType !== MASKS_TYPE.PATH || !form.points || !grid) continue;
-          const pts = form.points as MaskPointPath[];
-          const tPts = transformPathPoints(grid, pts);
-          for (let i = 0; i < tPts.length; i++) {
-            if (isNearHandle(tPts[i].corner[0] * w, tPts[i].corner[1] * h, px, py)) {
-              const cur = editedPointRef.current;
-              if (cur && cur.formid === form.formid && cur.index === i) {
-                editedPointRef.current = null;
-              } else {
-                editedPointRef.current = { formid: form.formid, index: i };
+          if (!form.points || !grid) continue;
+          if (baseType === MASKS_TYPE.PATH) {
+            const pts = form.points as MaskPointPath[];
+            const tPts = transformPathPoints(grid, pts);
+            for (let i = 0; i < tPts.length; i++) {
+              if (isNearHandle(tPts[i].corner[0] * w, tPts[i].corner[1] * h, px, py)) {
+                const cur = editedPointRef.current;
+                if (cur && cur.formid === form.formid && cur.index === i) {
+                  editedPointRef.current = null;
+                } else {
+                  editedPointRef.current = { formid: form.formid, index: i };
+                }
+                draw();
+                return;
               }
-              draw();
-              return;
+            }
+          } else if (baseType === MASKS_TYPE.BRUSH) {
+            const pts = form.points as MaskPointBrush[];
+            const tPts = transformBrushPoints(grid, pts);
+            for (let i = 0; i < tPts.length; i++) {
+              if (isNearHandle(tPts[i].corner[0] * w, tPts[i].corner[1] * h, px, py)) {
+                const cur = editedPointRef.current;
+                if (cur && cur.formid === form.formid && cur.index === i) {
+                  editedPointRef.current = null;
+                } else {
+                  editedPointRef.current = { formid: form.formid, index: i };
+                }
+                draw();
+                return;
+              }
             }
           }
         }
@@ -650,9 +904,9 @@ export default function MaskOverlay({ targetRef }: Props) {
         return;
       }
 
-      // Pure click on a path corner (no movement) → toggle ctrl handle editing
+      // Pure click on a path/brush corner (no movement) → toggle point selection
       dragRef.current = null;
-      if (!drag.moved && drag.target.kind === "pathCorner") {
+      if (!drag.moved && (drag.target.kind === "pathCorner" || drag.target.kind === "brushCorner")) {
         const idx = drag.target.pointIndex;
         const cur = editedPointRef.current;
         if (cur && cur.formid === drag.target.formid && cur.index === idx) {
@@ -683,11 +937,12 @@ export default function MaskOverlay({ targetRef }: Props) {
         const tool = useDevelopStore.getState().creationTool;
         if (tool) {
           pathCreationRef.current = null;
+          brushStrokeRef.current = null;
           resetCreation();
         }
       }
 
-      // Delete/Backspace: remove the currently edited path point
+      // Delete/Backspace: remove the currently edited path/brush point
       if ((e.key === "Delete" || e.key === "Backspace") && editedPointRef.current) {
         const ep = editedPointRef.current;
         const form = drawableFormsRef.current.find((f) => f.formid === ep.formid);
@@ -704,16 +959,50 @@ export default function MaskOverlay({ targetRef }: Props) {
               draw();
               e.preventDefault();
             }
+          } else if (baseType === MASKS_TYPE.BRUSH && form.points) {
+            const pts = form.points as MaskPointBrush[];
+            // Need at least 2 points to keep a valid brush after removal
+            if (pts.length > 2) {
+              pts.splice(ep.index, 1);
+              editedPointRef.current = null;
+              initBrushCtrlPoints(pts);
+              updateMask(form.formid, { points: pts.map((p) => ({ ...p, corner: [...p.corner], ctrl1: [...p.ctrl1], ctrl2: [...p.ctrl2], border: [...p.border] })) })
+                .then(() => requestPreview());
+              draw();
+              e.preventDefault();
+            }
           }
         }
       }
     };
 
     const onContextMenu = (e: MouseEvent) => {
-      // Prevent browser context menu during path creation
-      if (pathCreationRef.current || useDevelopStore.getState().creationTool === "path") {
+      // Prevent browser context menu during path/brush creation
+      if (pathCreationRef.current || useDevelopStore.getState().creationTool === "path"
+          || useDevelopStore.getState().creationTool === "brush") {
         e.preventDefault();
       }
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      const tool = useDevelopStore.getState().creationTool;
+      if (tool !== "brush") return;
+      e.preventDefault();
+      const bs = useDevelopStore.getState().brushSettings;
+      const up = e.deltaY < 0;
+      if (e.shiftKey) {
+        // Shift+scroll: adjust hardness
+        useDevelopStore.getState().setBrushSettings({
+          hardness: Math.max(0.0005, Math.min(1.0, bs.hardness + (up ? 0.05 : -0.05))),
+        });
+      } else {
+        // Scroll: adjust brush size
+        const factor = up ? 1.15 : 1 / 1.15;
+        useDevelopStore.getState().setBrushSettings({
+          border: Math.max(0.0005, Math.min(0.5, bs.border * factor)),
+        });
+      }
+      draw();
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
@@ -721,6 +1010,7 @@ export default function MaskOverlay({ targetRef }: Props) {
     canvas.addEventListener("mousedown", onMouseDown);
     canvas.addEventListener("mouseup", onMouseUp);
     canvas.addEventListener("contextmenu", onContextMenu);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
     window.addEventListener("keydown", onKeyDown);
 
     draw();
@@ -737,6 +1027,7 @@ export default function MaskOverlay({ targetRef }: Props) {
       canvas.removeEventListener("mousedown", onMouseDown);
       canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("mouseup", onMouseUp);
+      canvas.removeEventListener("wheel", onWheel);
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [targetRef, distortionGrid]);
