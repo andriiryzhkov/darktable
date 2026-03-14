@@ -4,6 +4,8 @@ add_library(darktable_ai STATIC
   backend.h
   backend_common.c
   backend_onnx.c
+  depth.h
+  depth.c
   segmentation.h
   segmentation.c
 )

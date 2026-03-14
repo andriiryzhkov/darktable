@@ -16,6 +16,14 @@
       "task": "mask",
       "github_asset": "mask-object-segnext-b2hq.dtmodel",
       "default": false
+    },
+    {
+      "id": "mask-depth-da2-small",
+      "name": "mask depth anything v2 small",
+      "description": "Depth Anything V2 (ViT-S) for depth-based masking",
+      "task": "depth",
+      "github_asset": "mask-depth-da2-small.dtmodel",
+      "default": true
     }
   ]
 }
