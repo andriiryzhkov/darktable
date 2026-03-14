@@ -86,6 +86,18 @@ static dt_ai_model_t *_model_new(void)
   return model;
 }
 
+// load persisted enabled state from user config
+static void _load_enabled_state(dt_ai_model_t *model)
+{
+  char *conf_key
+    = g_strdup_printf("%s%s/enabled",
+                      CONF_MODEL_ENABLED_PREFIX,
+                      model->id);
+  if(dt_conf_key_exists(conf_key))
+    model->enabled = dt_conf_get_bool(conf_key);
+  g_free(conf_key);
+}
+
 static gboolean _ensure_directory(const char *path)
 {
   if(g_file_test(path, G_FILE_TEST_IS_DIR))
@@ -530,13 +542,6 @@ gboolean dt_ai_models_load_registry(dt_ai_registry_t *registry)
       dt_ai_model_t *model = _parse_model_json(json_node_get_object(node));
       if(model)
       {
-        // load enabled state from user config
-        char *conf_key
-          = g_strdup_printf("%s%s/enabled", CONF_MODEL_ENABLED_PREFIX, model->id);
-        if(dt_conf_key_exists(conf_key))
-          model->enabled = dt_conf_get_bool(conf_key);
-        g_free(conf_key);
-
         registry->models = g_list_prepend(registry->models, model);
         dt_print(DT_DEBUG_AI,
                  "[ai_models] loaded model: %s (%s)",
@@ -547,6 +552,10 @@ gboolean dt_ai_models_load_registry(dt_ai_registry_t *registry)
 
   // reverse to restore original json order (we used prepend for O(1) insertion)
   registry->models = g_list_reverse(registry->models);
+
+  // load enabled state from user config
+  for(GList *l = registry->models; l; l = g_list_next(l))
+    _load_enabled_state((dt_ai_model_t *)l->data);
 
   const int model_count = g_list_length(registry->models);
 
@@ -616,9 +625,6 @@ static dt_ai_model_t *_parse_local_model_config(const char *config_path,
     model->description = g_strdup(json_object_get_string_member(obj, "description"));
   if(json_object_has_member(obj, "task"))
     model->task = g_strdup(json_object_get_string_member(obj, "task"));
-
-  // no github_asset, no checksum — local-only model
-  model->enabled = TRUE;
 
   g_object_unref(parser);
   return model;
@@ -710,6 +716,7 @@ void dt_ai_models_refresh_status(dt_ai_registry_t *registry)
           if(model)
           {
             model->status = DT_AI_MODEL_DOWNLOADED;
+            _load_enabled_state(model);
             registry->models = g_list_append(registry->models, model);
             dt_print(DT_DEBUG_AI,
                      "[ai_models] discovered local model: %s (%s)",
@@ -1109,6 +1116,7 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry,
 #define SET_STATUS_AND_RETURN(status_val, err_expr)                                      \
   do                                                                                     \
   {                                                                                      \
+    char *_err = (err_expr);                                                             \
     g_mutex_lock(&registry->lock);                                                       \
     dt_ai_model_t *_m = _find_model_unlocked(registry, model_id);                        \
     if(_m)                                                                               \
@@ -1117,7 +1125,7 @@ char *dt_ai_models_download_sync(dt_ai_registry_t *registry,
     g_free(asset);                                                                       \
     g_free(checksum_copy);                                                               \
     g_free(repository);                                                                  \
-    return (err_expr);                                                                   \
+    return _err;                                                                         \
   } while(0)
 
   // validate repository format (must be "owner/repo" with safe characters)
