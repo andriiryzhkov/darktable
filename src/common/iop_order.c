@@ -129,6 +129,7 @@ const dt_iop_order_entry_t legacy_order[] = {
   { {33.2f }, "colorequal", 0},
   { {33.5f }, "colorbalancergb", 0},
   { {34.0f }, "colorize", 0},
+  { {34.5f }, "dgrade", 0},
   { {35.0f }, "colortransfer", 0},
   { {36.0f }, "colormapping", 0},
   { {37.0f }, "bloom", 0},
@@ -276,6 +277,7 @@ const dt_iop_order_entry_t v30_order[] = {
   { {60.0f }, "colorzones", 0},      // same, but locally
   { {61.0f }, "bloom", 0},           // creative module
   { {62.0f }, "colorize", 0},        // creative module
+  { {62.5f }, "dgrade", 0},          // creative module
   { {63.0f }, "lowlight", 0},        // creative module
   { {64.0f }, "monochrome", 0},      // creative module
   { {65.0f }, "grain", 0},           // creative module
@@ -395,6 +397,7 @@ const dt_iop_order_entry_t v50_order[] = {
   { {60.0f }, "colorzones", 0},      // same, but locally
   { {61.0f }, "bloom", 0},           // creative module
   { {62.0f }, "colorize", 0},        // creative module
+  { {62.5f }, "dgrade", 0},          // creative module
   { {63.0f }, "lowlight", 0},        // creative module
   { {64.0f }, "monochrome", 0},      // creative module
   { {65.0f }, "grain", 0},           // creative module
@@ -516,6 +519,7 @@ const dt_iop_order_entry_t v30_jpg_order[] = {
   { { 60.0f }, "colorzones", 0 },       // same, but locally
   { { 61.0f }, "bloom", 0 },            // creative module
   { { 62.0f }, "colorize", 0 },         // creative module
+  { { 62.5f }, "dgrade", 0 },           // creative module
   { { 63.0f }, "lowlight", 0 },         // creative module
   { { 64.0f }, "monochrome", 0 },       // creative module
   { { 65.0f }, "grain", 0 },            // creative module
@@ -638,6 +642,7 @@ const dt_iop_order_entry_t v50_jpg_order[] = {
   { { 60.0f }, "colorzones", 0 },       // same, but locally
   { { 61.0f }, "bloom", 0 },            // creative module
   { { 62.0f }, "colorize", 0 },         // creative module
+  { { 62.5f }, "dgrade", 0 },           // creative module
   { { 63.0f }, "lowlight", 0 },         // creative module
   { { 64.0f }, "monochrome", 0 },       // creative module
   { { 65.0f }, "grain", 0 },            // creative module
