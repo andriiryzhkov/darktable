@@ -26,6 +26,8 @@
 #include "develop/imageop.h"
 #include "develop/imageop_gui.h"
 #include "control/control.h"
+#include "control/jobs.h"
+#include "common/mipmap_cache.h"
 #include "common/gaussian.h"
 #include "common/guided_filter.h"
 #include "common/database.h"
@@ -34,10 +36,8 @@
 #include "gui/gtk.h"
 #include "iop/iop_api.h"
 
-#ifdef HAVE_AI
 #include "ai/depth.h"
 #include "common/ai_models.h"
-#endif
 
 #include <glib/gstdio.h>
 #include <math.h>
@@ -47,7 +47,7 @@
 
 DT_MODULE_INTROSPECTION(1, dt_iop_dgrade_params_t)
 
-#define CONF_DEPTH_MODEL_KEY "plugins/darkroom/masks/depth/model"
+#define AI_TASK_DEPTH "depth"
 
 typedef struct dt_iop_dgrade_params_t
 {
@@ -66,17 +66,15 @@ typedef struct dt_iop_dgrade_gui_data_t
   GtkDrawingArea *area;
   GtkWidget *center, *range, *exposure, *warmth;
 
-  // Advanced mask controls (collapsible section)
+  // advanced mask controls (collapsible section)
   dt_gui_collapsible_section_t cs_mask;
   GtkWidget *falloff, *feather, *refine, *mask_contrast;
 
-  // Depth map thumbnail for GUI visualization (set from preview pipe)
-  float *depth_thumb;       // downscaled depth map [0,1], size thumb_w * thumb_h
+  // depth map thumbnail for GUI visualization (set from preview pipe)
+  float *depth_thumb;
   int thumb_w, thumb_h;
   gboolean depth_valid;
 } dt_iop_dgrade_gui_data_t;
-
-#ifdef HAVE_AI
 
 typedef struct dt_dgrade_cache_t
 {
@@ -87,7 +85,7 @@ typedef struct dt_dgrade_cache_t
   dt_depth_context_t *ctx;    // loaded model (persists across images)
 } dt_dgrade_cache_t;
 
-// Disk cache: persistent depth maps across sessions
+// disk cache: persistent depth maps across sessions
 #define DT_DEPTH_CACHE_MAGIC   0xD714DE9F
 #define DT_DEPTH_CACHE_VERSION 1
 #define DT_DEPTH_CACHE_SUBDIR  "depth.d"
@@ -102,8 +100,6 @@ typedef struct dt_depth_cache_header_t
   uint32_t compressed_size;    // bytes of zlib payload following header
 } dt_depth_cache_header_t;
 
-#endif // HAVE_AI
-
 const char *name()
 {
   return _("depth grading");
@@ -117,7 +113,7 @@ const char *aliases()
 const char **description(dt_iop_module_t *self)
 {
   return dt_iop_set_description(self,
-      _("adjust exposure and color temperature based on estimated scene depth"),
+      _("adjust light based on estimated scene depth"),
       _("creative"),
       _("linear, RGB, scene-referred"),
       _("linear, RGB"),
@@ -143,18 +139,22 @@ dt_iop_colorspace_type_t default_colorspace(dt_iop_module_t *self,
 
 void reload_defaults(dt_iop_module_t *self)
 {
-#ifdef HAVE_AI
-  const gboolean ai_available = darktable.ai_registry
-                                && darktable.ai_registry->ai_enabled;
-  if(!ai_available)
+  gboolean available = darktable.ai_registry
+                       && darktable.ai_registry->ai_enabled;
+  if(available)
+  {
+    char *model_id = dt_ai_models_get_active_for_task(AI_TASK_DEPTH);
+    dt_ai_model_t *model
+      = dt_ai_models_get_by_id(darktable.ai_registry, model_id);
+    g_free(model_id);
+    available = model && model->status == DT_AI_MODEL_DOWNLOADED;
+    dt_ai_model_free(model);
+  }
+  if(!available)
   {
     self->hide_enable_button = TRUE;
     self->default_enabled = FALSE;
   }
-#else
-  self->hide_enable_button = TRUE;
-  self->default_enabled = FALSE;
-#endif
 }
 
 int legacy_params(dt_iop_module_t *self,
@@ -167,8 +167,6 @@ int legacy_params(dt_iop_module_t *self,
   return 1;
 }
 
-#ifdef HAVE_AI
-
 static inline dt_hash_t _get_cache_hash(dt_iop_module_t *self)
 {
   return dt_hash(DT_INITHASH,
@@ -176,21 +174,26 @@ static inline dt_hash_t _get_cache_hash(dt_iop_module_t *self)
                  sizeof(self->dev->image_storage.id));
 }
 
-// Bilinear resize a single-channel float buffer
+// bilinear resize a single-channel float buffer
 static void _resize_bilinear(const float *src, int src_w, int src_h,
                               float *dst, int dst_w, int dst_h)
 {
+  const float scale_y = (dst_h > 1)
+    ? (float)(src_h - 1) / (float)(dst_h - 1) : 0.0f;
+  const float scale_x = (dst_w > 1)
+    ? (float)(src_w - 1) / (float)(dst_w - 1) : 0.0f;
+
   DT_OMP_FOR()
   for(int y = 0; y < dst_h; y++)
   {
-    const float sy = (dst_h > 1) ? (float)y * (float)(src_h - 1) / (float)(dst_h - 1) : 0.0f;
+    const float sy = (float)y * scale_y;
     const int y0 = MIN((int)sy, src_h - 1);
     const int y1 = MIN(y0 + 1, src_h - 1);
     const float fy = sy - (float)y0;
 
     for(int x = 0; x < dst_w; x++)
     {
-      const float sx = (dst_w > 1) ? (float)x * (float)(src_w - 1) / (float)(dst_w - 1) : 0.0f;
+      const float sx = (float)x * scale_x;
       const int x0 = MIN((int)sx, src_w - 1);
       const int x1 = MIN(x0 + 1, src_w - 1);
       const float fx = sx - (float)x0;
@@ -200,8 +203,11 @@ static void _resize_bilinear(const float *src, int src_w, int src_h,
       const float v10 = src[y1 * src_w + x0];
       const float v11 = src[y1 * src_w + x1];
 
-      dst[y * dst_w + x] = v00 * (1.0f - fx) * (1.0f - fy) + v01 * fx * (1.0f - fy)
-        + v10 * (1.0f - fx) * fy + v11 * fx * fy;
+      dst[y * dst_w + x]
+        = v00 * (1.0f - fx) * (1.0f - fy)
+        + v01 * fx * (1.0f - fy)
+        + v10 * (1.0f - fx) * fy
+        + v11 * fx * fy;
     }
   }
 }
@@ -214,10 +220,11 @@ static void _clear_cache(dt_dgrade_cache_t *cache)
   cache->hash = DT_INVALID_HASH;
 }
 
-// Build disk cache file path for a given image ID.
-// Includes SHA1 hash of the database path to separate caches per library,
-// matching the mipmap cache convention (e.g. depth-{sha1}.d/123.depth).
-// Returns newly-allocated string (caller must g_free) or NULL.
+// build disk cache file path for a given image ID
+// includes SHA1 hash of the database path to separate
+// caches per library, matching the mipmap cache convention
+// (e.g. depth-{sha1}.d/123.depth)
+// returns newly-allocated string (caller must g_free) or NULL
 static gchar *_disk_cache_path(dt_imgid_t imgid)
 {
   char cachedir[PATH_MAX] = { 0 };
@@ -225,7 +232,10 @@ static gchar *_disk_cache_path(dt_imgid_t imgid)
 
   const gchar *dbpath = dt_database_get_path(darktable.db);
   if(!dbpath || !strcmp(dbpath, ":memory:"))
-    return g_strdup_printf("%s/%s/%" PRId32 ".depth", cachedir, DT_DEPTH_CACHE_SUBDIR, imgid);
+    return g_strdup_printf("%s/%s/%" PRId32 ".depth",
+                           cachedir,
+                           DT_DEPTH_CACHE_SUBDIR,
+                           imgid);
 
   gchar *abspath = g_realpath(dbpath);
   if(!abspath) abspath = g_strdup(dbpath);
@@ -242,9 +252,9 @@ static gchar *_disk_cache_path(dt_imgid_t imgid)
   return path;
 }
 
-// Try to read a cached depth map from disk.
-// On success: sets *out_w, *out_h and returns a dt_alloc_align_float buffer.
-// On failure: returns NULL. Corrupt files are deleted.
+// try to read a cached depth map from disk
+// on success: sets *out_w, *out_h, returns aligned buffer
+// on failure: returns NULL, corrupt files are deleted
 static float *_disk_cache_read(dt_imgid_t imgid, int *out_w, int *out_h)
 {
   float *result = NULL;
@@ -262,10 +272,13 @@ static float *_disk_cache_read(dt_imgid_t imgid, int *out_w, int *out_h)
   if(fread(&hdr, sizeof(hdr), 1, f) != 1)
     goto read_error;
 
+  const uint32_t expected_size
+    = (uint32_t)hdr.width * (uint32_t)hdr.height
+      * sizeof(float);
   if(hdr.magic != DT_DEPTH_CACHE_MAGIC
      || hdr.version != DT_DEPTH_CACHE_VERSION
      || hdr.width <= 0 || hdr.height <= 0
-     || hdr.uncompressed_size != (uint32_t)hdr.width * (uint32_t)hdr.height * sizeof(float)
+     || hdr.uncompressed_size != expected_size
      || hdr.compressed_size == 0)
     goto read_error;
 
@@ -303,20 +316,23 @@ static float *_disk_cache_read(dt_imgid_t imgid, int *out_w, int *out_h)
   *out_w = hdr.width;
   *out_h = hdr.height;
   fclose(f);
-  dt_print(DT_DEBUG_AI, "[dgrade] disk cache hit for imgid %" PRId32 " (%dx%d)",
-           imgid, hdr.width, hdr.height);
+  dt_print(DT_DEBUG_AI,
+           "[dgrade] disk cache hit for imgid %"
+           PRId32 " (%dx%d)", imgid, hdr.width, hdr.height);
   g_free(path);
   return result;
 
 read_error:
   fclose(f);
-  dt_print(DT_DEBUG_AI, "[dgrade] disk cache invalid for imgid %" PRId32 ", deleting", imgid);
+  dt_print(DT_DEBUG_AI,
+           "[dgrade] disk cache invalid for imgid %"
+           PRId32 ", deleting", imgid);
   g_unlink(path);
   g_free(path);
   return NULL;
 }
 
-// Write a depth map to the disk cache. Non-fatal on failure.
+// write a depth map to the disk cache, non-fatal on failure
 static gboolean _disk_cache_write(dt_imgid_t imgid,
                                    const float *depth_map,
                                    int width, int height)
@@ -330,7 +346,7 @@ static gboolean _disk_cache_write(dt_imgid_t imgid,
     return TRUE;
   }
 
-  // Ensure directory exists
+  // ensure directory exists
   {
     gchar *dir = g_path_get_dirname(path);
     if(g_mkdir_with_parents(dir, 0750) != 0)
@@ -387,42 +403,67 @@ static gboolean _disk_cache_write(dt_imgid_t imgid,
     return FALSE;
   }
 
-  dt_print(DT_DEBUG_AI, "[dgrade] disk cache written for imgid %" PRId32
-           " (%dx%d, %.1f KB compressed)",
-           imgid, width, height, (double)comp_len / 1024.0);
+  dt_print(DT_DEBUG_AI,
+           "[dgrade] disk cache written for imgid %"
+           PRId32 " (%dx%d, %.1f KB compressed)",
+           imgid, width, height,
+           (double)comp_len / 1024.0);
   g_free(path);
   return TRUE;
 }
 
-// Convert linear RGB float4 to sRGB uint8 RGB (3ch)
-static uint8_t *_float4_to_srgb_u8(const float *in, int width, int height)
+// build a 16-bit linear-to-sRGB LUT (avoids powf in hot loop)
+#define SRGB_LUT_SIZE 4096
+static uint8_t _srgb_lut[SRGB_LUT_SIZE + 1];
+static volatile int _srgb_lut_ready = 0;
+
+static void _ensure_srgb_lut(void)
 {
+  if(_srgb_lut_ready) return;
+  for(int i = 0; i <= SRGB_LUT_SIZE; i++)
+  {
+    const float v = (float)i / (float)SRGB_LUT_SIZE;
+    const float s = (v <= 0.0031308f)
+      ? 12.92f * v
+      : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
+    _srgb_lut[i] = (uint8_t)(s * 255.0f + 0.5f);
+  }
+  _srgb_lut_ready = 1;
+}
+
+// convert linear RGB float4 to sRGB uint8 RGB (3ch)
+static uint8_t *_float4_to_srgb_u8(const float *restrict in,
+                                    int width,
+                                    int height)
+{
+  _ensure_srgb_lut();
+
   const size_t npixels = (size_t)width * height;
   uint8_t *out = g_try_malloc(npixels * 3);
   if(!out)
     return NULL;
+
+  const uint8_t *const restrict lut = _srgb_lut;
 
   DT_OMP_FOR()
   for(size_t i = 0; i < npixels; i++)
   {
     for(int c = 0; c < 3; c++)
     {
-      // Clamp to [0,1]
       float v = in[i * 4 + c];
-      v = (v < 0.0f) ? 0.0f : (v > 1.0f) ? 1.0f : v;
-      // Linear to sRGB gamma
-      v = (v <= 0.0031308f) ? 12.92f * v : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
-      out[i * 3 + c] = (uint8_t)(v * 255.0f + 0.5f);
+      v = CLAMPF(v, 0.0f, 1.0f);
+      const int idx = (int)(v * SRGB_LUT_SIZE + 0.5f);
+      out[i * 3 + c] = lut[idx];
     }
   }
   return out;
 }
 
-// Compute or retrieve cached depth map.
-// Returns a depth map at roi_in dimensions. The cache stores the depth map
+// compute or retrieve cached depth map.
+// returns a depth map at roi_in dimensions. The cache stores the depth map
 // at whatever resolution it was first computed; subsequent requests at
 // different resolutions (e.g. preview vs full pipe) get a bilinear resize
-// of the cached data instead of rerunning the model.
+// of the cached data instead of rerunning the model
 static float *_get_depth_map(dt_iop_module_t *self,
                               const float *input,
                               const dt_iop_roi_t *const roi_in)
@@ -439,7 +480,7 @@ static float *_get_depth_map(dt_iop_module_t *self,
   const dt_hash_t hash = _get_cache_hash(self);
   if(hash == cd->hash && cd->depth_map)
   {
-    // Cache hit (same image) — return at requested resolution
+    // cache hit (same image) — return at requested resolution
     const size_t npixels = (size_t)req_w * req_h;
     result = dt_alloc_align_float(npixels);
     if(result)
@@ -454,10 +495,10 @@ static float *_get_depth_map(dt_iop_module_t *self,
     return result;
   }
 
-  // Cache miss (different image or empty) — try disk, then compute
+  // cache miss (different image or empty) — try disk, then compute
   _clear_cache(cd);
 
-  // Try disk cache before running inference
+  // try disk cache before running inference
   {
     const dt_imgid_t imgid = self->dev->image_storage.id;
     int disk_w = 0, disk_h = 0;
@@ -483,14 +524,14 @@ static float *_get_depth_map(dt_iop_module_t *self,
     }
   }
 
-  // Load model if not loaded yet
+  // load model if not loaded yet
   if(!cd->ctx)
   {
-    gchar *model_id = dt_conf_get_string(CONF_DEPTH_MODEL_KEY);
+    gchar *model_id = dt_ai_models_get_active_for_task(AI_TASK_DEPTH);
     if(!model_id || !model_id[0])
     {
       g_free(model_id);
-      dt_print(DT_DEBUG_AI, "[dgrade] no depth model configured in '%s'", CONF_DEPTH_MODEL_KEY);
+      dt_print(DT_DEBUG_AI, "[dgrade] no depth model active for task 'depth'");
       dt_pthread_mutex_unlock(&cd->lock);
       return NULL;
     }
@@ -515,7 +556,7 @@ static float *_get_depth_map(dt_iop_module_t *self,
     return NULL;
   }
 
-  // Convert float4 linear RGB to sRGB uint8
+  // convert float4 linear RGB to sRGB uint8
   uint8_t *rgb_u8 = _float4_to_srgb_u8(input, req_w, req_h);
   if(!rgb_u8)
   {
@@ -523,7 +564,7 @@ static float *_get_depth_map(dt_iop_module_t *self,
     return NULL;
   }
 
-  // Run depth model
+  // run depth model
   int out_w = 0, out_h = 0;
   const double compute_start = dt_get_wtime();
   float *depth = dt_depth_compute(cd->ctx, rgb_u8, req_w, req_h,
@@ -538,7 +579,7 @@ static float *_get_depth_map(dt_iop_module_t *self,
     return NULL;
   }
 
-  // Store in cache at computed resolution
+  // store in cache at computed resolution
   cd->depth_map = depth;
   cd->width = out_w;
   cd->height = out_h;
@@ -547,10 +588,10 @@ static float *_get_depth_map(dt_iop_module_t *self,
   dt_print(DT_DEBUG_AI, "[dgrade] depth map %dx%d computed in %.1f ms",
            out_w, out_h, compute_elapsed * 1000.0);
 
-  // Persist to disk cache (failure is non-fatal)
+  // persist to disk cache (failure is non-fatal)
   _disk_cache_write(self->dev->image_storage.id, depth, out_w, out_h);
 
-  // Return at requested resolution
+  // return at requested resolution
   const size_t npixels = (size_t)req_w * req_h;
   result = dt_alloc_align_float(npixels);
   if(result)
@@ -565,8 +606,6 @@ static float *_get_depth_map(dt_iop_module_t *self,
   return result;
 }
 
-#endif // HAVE_AI
-
 void commit_params(dt_iop_module_t *self,
                    dt_iop_params_t *p1,
                    dt_dev_pixelpipe_t *pipe,
@@ -574,7 +613,7 @@ void commit_params(dt_iop_module_t *self,
 {
   memcpy(piece->data, p1, self->params_size);
 
-  // When AI is unavailable the module becomes a no-op in the pipeline
+  // when AI is unavailable the module becomes a no-op in the pipeline
   if(self->hide_enable_button)
     piece->enabled = FALSE;
 
@@ -597,24 +636,27 @@ void process(dt_iop_module_t *self,
                                          ivoid, ovoid, roi_in, roi_out))
     return;
 
-  // Start by copying input to output
+  // start by copying input to output
   dt_iop_copy_image_roi(ovoid, ivoid, ch, roi_in, roi_out);
 
-#ifdef HAVE_AI
-  // Check if we need to do anything (effect parameters at zero = no-op)
+  // check if we need to do anything (effect parameters at zero = no-op)
   const gboolean has_effect = (d->exposure != 0.0f || d->warmth != 0.0f);
   const gboolean request = dt_iop_is_raster_mask_used(piece->module, BLEND_RASTER_ID);
-  const gboolean need_gui_thumb = (piece->pipe->type & DT_DEV_PIXELPIPE_PREVIEW) && self->gui_data;
+  const gboolean need_gui_thumb
+    = (piece->pipe->type & DT_DEV_PIXELPIPE_PREVIEW)
+      && self->gui_data;
 
   if(!has_effect && !request && !need_gui_thumb)
     return;
 
-  // Get cached depth map
-  float *depth_map = _get_depth_map(self, (const float *)ivoid, roi_in);
+  // get cached depth map
+  const float *const restrict in
+    = (const float *const restrict)ivoid;
+  float *depth_map = _get_depth_map(self, in, roi_in);
   if(!depth_map)
     return;
 
-  // Pass depth map to GUI for visualization (from preview pipe)
+  // pass depth map to GUI for visualization (from preview pipe)
   if(need_gui_thumb)
   {
     dt_iop_dgrade_gui_data_t *g = self->gui_data;
@@ -636,11 +678,11 @@ void process(dt_iop_module_t *self,
     }
     dt_iop_gui_leave_critical_section(self);
 
-    // Queue redraw of the visualization widget
+    // queue redraw of the visualization widget
     dt_control_queue_redraw_widget(GTK_WIDGET(g->area));
   }
 
-  // Build gradient mask from depth map + center/range/falloff parameters.
+  // build gradient mask from depth map + center/range/falloff parameters
   const float center = d->center;
   const float half_range = MAX(d->range * 0.5f, 0.001f);
   const float inv_half_range = 1.0f / half_range;
@@ -655,8 +697,9 @@ void process(dt_iop_module_t *self,
     return;
   }
 
-  // Raised cosine with parameterized falloff:
-  // falloff=1.0: full smooth cosine (default). falloff→0: hard binary cutoff.
+  // raised cosine with parameterized falloff:
+  // falloff=1.0: full smooth cosine (default)
+  // falloff→0: hard binary cutoff
   DT_OMP_FOR()
   for(size_t i = 0; i < npixels; i++)
   {
@@ -668,7 +711,7 @@ void process(dt_iop_module_t *self,
 
   dt_free_align(depth_map);
 
-  // Feather: gaussian blur on mask for spatial light bleed
+  // feather: gaussian blur on mask for spatial light bleed
   if(d->feather > 0.0f)
   {
     const float sigma = d->feather * roi_out->scale / piece->iscale;
@@ -677,16 +720,17 @@ void process(dt_iop_module_t *self,
                             sigma, 0.0f, 1.0f, 1);
   }
 
-  // Edge refine: guided filter snaps mask to image edges
+  // edge refine: guided filter snaps mask to image edges
   if(d->refine > 0.0f)
   {
     const int w = CLAMP((int)(MIN(roi_out->width, roi_out->height) * 0.02f), 1, 20);
     const float sqrt_eps = 1.0f - 0.999f * d->refine;
-    guided_filter((const float *)ivoid, band_mask, band_mask,
-                  roi_out->width, roi_out->height, 4, w, sqrt_eps, 1.0f, 0.0f, 1.0f);
+    guided_filter(in, band_mask, band_mask,
+                  roi_out->width, roi_out->height,
+                  4, w, sqrt_eps, 1.0f, 0.0f, 1.0f);
   }
 
-  // Mask contrast
+  // mask contrast
   if(d->mask_contrast != 1.0f)
   {
     const float mc = d->mask_contrast;
@@ -695,10 +739,11 @@ void process(dt_iop_module_t *self,
       band_mask[i] = powf(band_mask[i], mc);
   }
 
-  // Apply exposure + warmth effect
+  // apply exposure + warmth effect
   if(has_effect)
   {
-    float *const restrict out = (float *const restrict)ovoid;
+    float *const restrict out
+      = (float *const restrict)ovoid;
     const float *const restrict mask = band_mask;
     const float exposure = d->exposure;
     const float warmth = d->warmth;
@@ -707,19 +752,19 @@ void process(dt_iop_module_t *self,
     for(size_t i = 0; i < npixels; i++)
     {
       const float m = mask[i];
-      if(m < 1e-6f) continue;
-
       const size_t px = i * 4;
-      const float ev_factor = exp2f(exposure * m);
-      const float w = warmth * m;
+      const float em = exposure * m;
+      // SIMD-friendly: exp2f(0) = 1.0f when m ≈ 0
+      const float ev = exp2f(em);
+      const float wm = warmth * m;
 
-      out[px + 0] = out[px + 0] * ev_factor * (1.0f + 0.5f * w);  // R
-      out[px + 1] = out[px + 1] * ev_factor;                        // G
-      out[px + 2] = out[px + 2] * ev_factor * (1.0f - 0.5f * w);  // B
+      out[px + 0] *= ev * (1.0f + 0.5f * wm);
+      out[px + 1] *= ev;
+      out[px + 2] *= ev * (1.0f - 0.5f * wm);
     }
   }
 
-  // Publish raster mask if requested by another module
+  // publish raster mask if requested by another module
   if(request)
   {
     // dt_iop_piece_set_raster takes ownership of the mask buffer
@@ -731,17 +776,12 @@ void process(dt_iop_module_t *self,
     dt_free_align(band_mask);
   }
 
-#else // !HAVE_AI
-  // AI not available — module is a no-op
-  (void)d;
-#endif
 }
 
 void init(dt_iop_module_t *self)
 {
   dt_iop_default_init(self);
 
-#ifdef HAVE_AI
   dt_dgrade_cache_t *cd = calloc(1, sizeof(dt_dgrade_cache_t));
   cd->hash = DT_INVALID_HASH;
   dt_pthread_mutex_init(&cd->lock, NULL);
@@ -749,12 +789,10 @@ void init(dt_iop_module_t *self)
   cd->width = cd->height = 0;
   cd->ctx = NULL;
   self->data = cd;
-#endif
 }
 
 void cleanup(dt_iop_module_t *self)
 {
-#ifdef HAVE_AI
   dt_dgrade_cache_t *cd = self->data;
   if(cd)
   {
@@ -764,12 +802,11 @@ void cleanup(dt_iop_module_t *self)
     free(cd);
     self->data = NULL;
   }
-#endif
 
   dt_iop_default_cleanup(self);
 }
 
-// Draw callback for depth map visualization widget
+// draw callback for depth map visualization widget
 static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *self)
 {
   dt_iop_dgrade_gui_data_t *g = self->gui_data;
@@ -782,10 +819,12 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
 
   if(width < 2 || height < 2) return FALSE;
 
-  cairo_surface_t *cst = dt_cairo_image_surface_create(CAIRO_FORMAT_ARGB32, width, height);
+  cairo_surface_t *cst
+    = dt_cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, width, height);
   cairo_t *cr = cairo_create(cst);
 
-  // Dark background
+  // dark background
   cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
   cairo_paint(cr);
 
@@ -803,7 +842,7 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
 
   if(thumb)
   {
-    // Render depth map with gradient mask overlay
+    // render depth map with gradient mask overlay
     const float center = p->center;
     const float half_range = MAX(p->range * 0.5f, 0.001f);
     const float inv_half_range = 1.0f / half_range;
@@ -811,7 +850,7 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
     const float fo_edge = 1.0f - falloff;
     const float mc = p->mask_contrast;
 
-    // Create an image surface from depth data
+    // create an image surface from depth data
     cairo_surface_t *depth_surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, tw, th);
     unsigned char *data = cairo_image_surface_get_data(depth_surf);
     const int stride = cairo_image_surface_get_stride(depth_surf);
@@ -823,24 +862,30 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
       {
         const float depth = thumb[y * tw + x];
 
-        // Band mask with parameterized falloff
+        // band mask with parameterized falloff
         const float dist = fabsf(depth - center);
         const float t = CLAMPF(dist * inv_half_range, 0.0f, 1.0f);
         const float tt = CLAMPF((t - fo_edge) / falloff, 0.0f, 1.0f);
         float mask = 0.5f * (1.0f + cosf(M_PI * tt));
 
-        // Mask contrast (skip feather/refine — spatial ops)
+        // mask contrast (skip feather/refine — spatial ops)
         if(mc != 1.0f) mask = powf(mask, mc);
 
-        // Grayscale depth value
+        // grayscale depth value
         const float gray = depth * 255.0f;
 
-        // Blend: unmasked areas are dim grayscale, masked areas are tinted
+        // blend: unmasked = dim, masked = tinted
         const float dim = 0.3f;
-        const float blend = dim + (1.0f - dim) * mask;
-        const unsigned char r = (unsigned char)CLAMPF(gray * blend + mask * 40.0f, 0.0f, 255.0f);
-        const unsigned char g_val = (unsigned char)CLAMPF(gray * blend + mask * 60.0f, 0.0f, 255.0f);
-        const unsigned char b = (unsigned char)CLAMPF(gray * blend + mask * 80.0f, 0.0f, 255.0f);
+        const float bl = dim + (1.0f - dim) * mask;
+        const float rv = gray * bl + mask * 40.0f;
+        const float gv = gray * bl + mask * 60.0f;
+        const float bv = gray * bl + mask * 80.0f;
+        const unsigned char r
+          = (unsigned char)CLAMPF(rv, 0.0f, 255.0f);
+        const unsigned char g_val
+          = (unsigned char)CLAMPF(gv, 0.0f, 255.0f);
+        const unsigned char b
+          = (unsigned char)CLAMPF(bv, 0.0f, 255.0f);
 
         // ARGB32 in native byte order (pre-multiplied)
         row[x * 4 + 0] = b;  // B
@@ -852,7 +897,7 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
 
     cairo_surface_mark_dirty(depth_surf);
 
-    // Scale depth image to fit the widget while preserving aspect ratio
+    // scale depth image to fit the widget while preserving aspect ratio
     const double scale_x = (double)width / tw;
     const double scale_y = (double)height / th;
     const double scale = MIN(scale_x, scale_y);
@@ -870,26 +915,26 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
     cairo_surface_destroy(depth_surf);
     g_free(thumb);
 
-    // Draw band indicator lines at the bottom
+    // draw band indicator lines at the bottom
     cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.0));
 
-    // Band range bar
+    // band range bar
     const float bar_y = height - DT_PIXEL_APPLY_DPI(4.0f);
     const float bar_h = DT_PIXEL_APPLY_DPI(3.0f);
 
-    // Full range background
+    // full range background
     cairo_set_source_rgba(cr, 0.3, 0.3, 0.3, 0.7);
     cairo_rectangle(cr, 0, bar_y, width, bar_h);
     cairo_fill(cr);
 
-    // Selected band
+    // selected band
     const float band_x0 = CLAMPF(center - half_range, 0.0f, 1.0f) * width;
     const float band_x1 = CLAMPF(center + half_range, 0.0f, 1.0f) * width;
     cairo_set_source_rgba(cr, 0.7, 0.7, 0.7, 0.9);
     cairo_rectangle(cr, band_x0, bar_y, band_x1 - band_x0, bar_h);
     cairo_fill(cr);
 
-    // Center marker
+    // center marker
     const float cx = CLAMPF(center, 0.0f, 1.0f) * width;
     cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9);
     cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.0));
@@ -899,14 +944,18 @@ static gboolean _area_draw(GtkWidget *widget, cairo_t *crf, dt_iop_module_t *sel
   }
   else
   {
-    // No depth data yet — show placeholder text
+    // no depth data yet — show status text
     cairo_set_source_rgba(cr, 0.5, 0.5, 0.5, 0.8);
-    cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_select_font_face(cr, "sans-serif",
+                           CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_NORMAL);
     cairo_set_font_size(cr, DT_PIXEL_APPLY_DPI(11.0));
     cairo_text_extents_t ext;
-    const char *msg = _("enable module to compute depth map");
+    const char *msg = _("computing depth map...");
     cairo_text_extents(cr, msg, &ext);
-    cairo_move_to(cr, (width - ext.width) / 2.0, (height + ext.height) / 2.0);
+    cairo_move_to(cr,
+                  (width - ext.width) / 2.0,
+                  (height + ext.height) / 2.0);
     cairo_show_text(cr, msg);
   }
 
@@ -931,15 +980,13 @@ int button_pressed(dt_iop_module_t *self,
   dt_iop_dgrade_gui_data_t *g = self->gui_data;
   if(!g) return 0;
 
-  // Transform from normalized preview space to module input pixel space
+  // transform from normalized preview space to module input pixel space
   float wd, ht;
   dt_dev_get_preview_size(self->dev, &wd, &ht);
   float pts[2] = { pzx * wd, pzy * ht };
 
-  dt_dev_distort_backtransform_plus(self->dev, self->dev->preview_pipe,
-                                     self->iop_order,
-                                     DT_DEV_TRANSFORM_DIR_FORW_EXCL,
-                                     pts, 1);
+  dt_dev_distort_backtransform_plus(self->dev, self->dev->preview_pipe, self->iop_order,
+                                    DT_DEV_TRANSFORM_DIR_FORW_EXCL, pts, 1);
 
   dt_iop_gui_enter_critical_section(self);
   float depth_value = -1.0f;
@@ -963,7 +1010,9 @@ int button_pressed(dt_iop_module_t *self,
   return 0;
 }
 
-static gboolean _area_button_press(GtkWidget *widget, GdkEventButton *event, dt_iop_module_t *self)
+static gboolean _area_button_press(GtkWidget *widget,
+                                   GdkEventButton *event,
+                                   dt_iop_module_t *self)
 {
   if(event->button != 1) return FALSE;
 
@@ -1013,44 +1062,54 @@ void gui_init(dt_iop_module_t *self)
   g->thumb_w = g->thumb_h = 0;
   g->depth_valid = FALSE;
 
-  // Create the module widget container so the drawing area is packed before sliders
+  // create the module widget container so the drawing area is packed before sliders
   self->widget = dt_gui_vbox();
 
-  // Depth map visualization area — clamp saved height to sane minimum
+  // depth map visualization area — clamp saved height to sane minimum
   const int saved_h = dt_conf_get_int("plugins/darkroom/dgrade/graphheight");
   if(saved_h < 100) dt_conf_set_int("plugins/darkroom/dgrade/graphheight", 0);
-  g->area = GTK_DRAWING_AREA(dt_ui_resize_wrap(NULL,
-                                               0,
+  g->area = GTK_DRAWING_AREA(dt_ui_resize_wrap(NULL, 0,
                                                "plugins/darkroom/dgrade/graphheight"));
   gtk_widget_set_tooltip_text(GTK_WIDGET(g->area),
-                              _("depth map preview — bright areas are far, dark areas are near.\n"
-                                "highlighted region shows the selected depth band.\n"
-                                "click to pick distance at that point."));
-  g_signal_connect(G_OBJECT(g->area), "draw", G_CALLBACK(_area_draw), self);
-  gtk_widget_add_events(GTK_WIDGET(g->area), GDK_BUTTON_PRESS_MASK);
-  g_signal_connect(G_OBJECT(g->area), "button-press-event", G_CALLBACK(_area_button_press), self);
+    _("depth map preview — bright = far, dark = near\n"
+      "highlighted region shows selected depth band\n"
+      "click to pick distance at that point"));
+  g_signal_connect(G_OBJECT(g->area), "draw",
+                   G_CALLBACK(_area_draw), self);
+  gtk_widget_add_events(GTK_WIDGET(g->area),
+                        GDK_BUTTON_PRESS_MASK);
+  g_signal_connect(G_OBJECT(g->area),
+                   "button-press-event",
+                   G_CALLBACK(_area_button_press),
+                   self);
   dt_gui_box_add(self->widget, GTK_WIDGET(g->area));
 
   g->center = dt_bauhaus_slider_from_params(self, "center");
   dt_bauhaus_slider_set_format(g->center, "%");
   dt_bauhaus_slider_set_factor(g->center, 100.0f);
-  gtk_widget_set_tooltip_text(g->center, _("center of the depth band (0%% = near, 100%% = far)"));
+  gtk_widget_set_tooltip_text(g->center,
+    _("center of the depth band\n"
+      "0%% = near, 100%% = far"));
 
   g->range = dt_bauhaus_slider_from_params(self, "range");
   dt_bauhaus_slider_set_format(g->range, "%");
   dt_bauhaus_slider_set_factor(g->range, 100.0f);
-  gtk_widget_set_tooltip_text(g->range, _("width of the depth band around center"));
+  gtk_widget_set_tooltip_text(g->range,
+    _("width of the depth band around center"));
 
   dt_gui_box_add(self->widget, dt_ui_section_label_new(C_("section", "effect")));
 
   g->exposure = dt_bauhaus_slider_from_params(self, "exposure");
   dt_bauhaus_slider_set_format(g->exposure, _(" EV"));
   dt_bauhaus_slider_set_soft_range(g->exposure, -3.0f, 3.0f);
-  gtk_widget_set_tooltip_text(g->exposure, _("exposure adjustment for the selected depth band"));
+  gtk_widget_set_tooltip_text(g->exposure,
+    _("exposure adjustment for the selected band"));
 
   g->warmth = dt_bauhaus_slider_from_params(self, "warmth");
   dt_bauhaus_slider_set_soft_range(g->warmth, -1.0f, 1.0f);
-  gtk_widget_set_tooltip_text(g->warmth, _("color temperature shift (negative = cool, positive = warm)"));
+  gtk_widget_set_tooltip_text(g->warmth,
+    _("color temperature shift\n"
+      "negative = cool, positive = warm"));
 
   // Advanced mask controls — collapsed by default
   dt_gui_new_collapsible_section(&g->cs_mask,
@@ -1064,32 +1123,199 @@ void gui_init(dt_iop_module_t *self)
   g->falloff = dt_bauhaus_slider_from_params(self, "falloff");
   dt_bauhaus_slider_set_format(g->falloff, "%");
   dt_bauhaus_slider_set_factor(g->falloff, 100.0f);
-  gtk_widget_set_tooltip_text(g->falloff, _("transition steepness at band edges\n"
-                                             "100%% = smooth cosine, 0%% = hard cutoff"));
+  gtk_widget_set_tooltip_text(g->falloff,
+    _("transition steepness at band edges\n"
+      "100%% = smooth cosine, 0%% = hard cutoff"));
 
   g->feather = dt_bauhaus_slider_from_params(self, "feather");
   dt_bauhaus_slider_set_format(g->feather, _(" px"));
   dt_bauhaus_slider_set_soft_range(g->feather, 0.0f, 50.0f);
-  gtk_widget_set_tooltip_text(g->feather, _("spatial blur on the mask — creates light bleed across depth edges"));
+  gtk_widget_set_tooltip_text(g->feather,
+    _("spatial blur on the mask\n"
+      "creates light bleed across depth edges"));
 
   g->refine = dt_bauhaus_slider_from_params(self, "refine");
   dt_bauhaus_slider_set_format(g->refine, "%");
   dt_bauhaus_slider_set_factor(g->refine, 100.0f);
-  gtk_widget_set_tooltip_text(g->refine, _("snap mask boundaries to actual object edges in the image"));
+  gtk_widget_set_tooltip_text(g->refine,
+    _("snap mask boundaries to object edges"));
 
   g->mask_contrast = dt_bauhaus_slider_from_params(self, "mask_contrast");
   dt_bauhaus_slider_set_soft_range(g->mask_contrast, 0.1f, 4.0f);
-  gtk_widget_set_tooltip_text(g->mask_contrast, _("reshape mask: < 1.0 broadens, > 1.0 narrows"));
+  gtk_widget_set_tooltip_text(g->mask_contrast,
+    _("reshape mask: < 1.0 broadens, > 1.0 narrows"));
 
   self->widget = saved;
 }
 
-void gui_changed(dt_iop_module_t *self, GtkWidget *w, void *previous)
+// background job: compute depth preview from mipmap thumbnail
+typedef struct _depth_preview_job_t
+{
+  dt_iop_module_t *self;
+  dt_imgid_t imgid;
+} _depth_preview_job_t;
+
+static int32_t _depth_preview_job_run(dt_job_t *job)
+{
+  _depth_preview_job_t *p = dt_control_job_get_params(job);
+  dt_iop_module_t *self = p->self;
+  const dt_imgid_t imgid = p->imgid;
+
+  // try disk cache first
+  int dw = 0, dh = 0;
+  float *depth = _disk_cache_read(imgid, &dw, &dh);
+
+  if(!depth)
+  {
+    // fetch 8-bit mipmap thumbnail (BGRA)
+    dt_mipmap_buffer_t buf;
+    dt_mipmap_cache_get(
+      &buf, imgid, DT_MIPMAP_3,
+      DT_MIPMAP_BLOCKING, 'r');
+    if(!buf.buf || buf.width <= 0 || buf.height <= 0)
+    {
+      dt_mipmap_cache_release(&buf);
+      return 0;
+    }
+
+    // convert BGRA uint8 to RGB uint8
+    const int mw = buf.width;
+    const int mh = buf.height;
+    const size_t npx = (size_t)mw * mh;
+    uint8_t *rgb = g_try_malloc(npx * 3);
+    if(!rgb)
+    {
+      dt_mipmap_cache_release(&buf);
+      return 0;
+    }
+    const uint8_t *src = buf.buf;
+    for(size_t i = 0; i < npx; i++)
+    {
+      rgb[i * 3 + 0] = src[i * 4 + 2]; // R
+      rgb[i * 3 + 1] = src[i * 4 + 1]; // G
+      rgb[i * 3 + 2] = src[i * 4 + 0]; // B
+    }
+    dt_mipmap_cache_release(&buf);
+
+    // load model and run inference
+    gchar *model_id
+      = dt_ai_models_get_active_for_task(AI_TASK_DEPTH);
+    if(!model_id || !model_id[0])
+    {
+      g_free(model_id);
+      g_free(rgb);
+      return 0;
+    }
+
+    dt_ai_environment_t *env = dt_ai_env_init(NULL);
+    if(!env)
+    {
+      g_free(model_id);
+      g_free(rgb);
+      return 0;
+    }
+
+    dt_depth_context_t *ctx
+      = dt_depth_load(env, model_id);
+    g_free(model_id);
+    if(!ctx)
+    {
+      g_free(rgb);
+      return 0;
+    }
+
+    int ow = 0, oh = 0;
+    depth = dt_depth_compute(ctx, rgb, mw, mh,
+                              &ow, &oh);
+    dt_depth_free(ctx);
+    g_free(rgb);
+    if(!depth) return 0;
+
+    dw = ow;
+    dh = oh;
+
+    // persist to disk cache for next time
+    _disk_cache_write(imgid, depth, dw, dh);
+  }
+
+  // also store in the in-memory module cache
+  dt_dgrade_cache_t *cd = self->data;
+  if(cd)
+  {
+    dt_pthread_mutex_lock(&cd->lock);
+    dt_free_align(cd->depth_map);
+    cd->depth_map = depth;
+    cd->width = dw;
+    cd->height = dh;
+    cd->hash = _get_cache_hash(self);
+    dt_pthread_mutex_unlock(&cd->lock);
+    // depth is now owned by cache, don't free
+    depth = NULL;
+  }
+
+  // update GUI thumbnail
+  dt_iop_dgrade_gui_data_t *g = self->gui_data;
+  if(g)
+  {
+    dt_iop_gui_enter_critical_section(self);
+    g_free(g->depth_thumb);
+    g->depth_thumb = dt_alloc_align_float(
+      (size_t)dw * dh);
+    if(g->depth_thumb && cd)
+    {
+      dt_pthread_mutex_lock(&cd->lock);
+      if(cd->depth_map)
+        memcpy(g->depth_thumb, cd->depth_map,
+               sizeof(float) * dw * dh);
+      dt_pthread_mutex_unlock(&cd->lock);
+      g->thumb_w = dw;
+      g->thumb_h = dh;
+      g->depth_valid = TRUE;
+    }
+    dt_iop_gui_leave_critical_section(self);
+
+    dt_control_queue_redraw_widget(
+      GTK_WIDGET(g->area));
+  }
+
+  dt_free_align(depth);
+  return 0;
+}
+
+void gui_update(dt_iop_module_t *self)
+{
+  // invalidate stale depth from previous image
+  dt_iop_dgrade_gui_data_t *g = self->gui_data;
+  dt_iop_gui_enter_critical_section(self);
+  g->depth_valid = FALSE;
+  dt_iop_gui_leave_critical_section(self);
+
+  // start background depth computation
+  if(!self->hide_enable_button)
+  {
+    _depth_preview_job_t *p
+      = g_new0(_depth_preview_job_t, 1);
+    p->self = self;
+    p->imgid = self->dev->image_storage.id;
+    dt_job_t *job = dt_control_job_create(
+      _depth_preview_job_run,
+      "depth preview for imgid %" PRId32,
+      p->imgid);
+    dt_control_job_set_params(job, p, g_free);
+    dt_control_add_job(DT_JOB_QUEUE_USER_BG, job);
+  }
+
+  gui_changed(self, NULL, NULL);
+}
+
+void gui_changed(dt_iop_module_t *self,
+                  GtkWidget *w,
+                  void *previous)
 {
   dt_iop_dgrade_gui_data_t *g = self->gui_data;
-  // Redraw the depth visualization when mask shape sliders change
-  if(w == g->center || w == g->range || w == g->falloff
-     || w == g->mask_contrast)
+  // redraw depth visualization when mask shape changes
+  if(!w || w == g->center || w == g->range
+     || w == g->falloff || w == g->mask_contrast)
     gtk_widget_queue_draw(GTK_WIDGET(g->area));
 }
 
