@@ -57,6 +57,26 @@ typedef struct dt_lib_metadata_view_t
   GList *metadata;
   uint32_t metadata_count;
   GObject *filmroll_event;
+
+  // summary card widgets
+  GtkWidget *card;
+  GtkWidget *card_filename;
+  GtkWidget *card_datetime;
+  GtkWidget *card_camera;
+  GtkWidget *card_wb_icon;
+  GtkWidget *card_ep_icon;
+  GtkWidget *card_lens;
+  GtkWidget *card_dimensions;
+  GtkWidget *card_filesize;
+  GtkWidget *card_format;
+  GtkWidget *card_iso;
+  GtkWidget *card_focal;
+  GtkWidget *card_ev_bias;
+  GtkWidget *card_aperture;
+  GtkWidget *card_exposure;
+
+  // collapsible section for full metadata
+  dt_gui_collapsible_section_t cs_metadata;
 } dt_lib_metadata_view_t;
 
 typedef struct dt_lib_metadata_info_t
@@ -492,6 +512,9 @@ static void _metadata_get_flags(const dt_image_t *const img,
 static int lua_update_metadata(lua_State*L);
 #endif
 
+static void _update_summary_card(dt_lib_metadata_view_t *d,
+                                  const dt_image_t *img);
+
 /* update all values to reflect mouse over image id or no data at all */
 void gui_update(dt_lib_module_t *self)
 {
@@ -677,7 +700,14 @@ void gui_update(dt_lib_module_t *self)
   dt_imgid_t img_id = mouse_over_id;
   const dt_image_t *img = dt_image_cache_get(img_id, 'r');
 
-  if(!img) goto fill_minuses;
+  if(!img)
+  {
+    _update_summary_card(d, NULL);
+    goto fill_minuses;
+  }
+
+  // update the summary card
+  _update_summary_card(d, img);
 
   if(img->film_id == -1)
   {
@@ -1116,6 +1146,7 @@ void gui_update(dt_lib_module_t *self)
 
 /* reset */
 fill_minuses:
+  _update_summary_card(d, NULL);
   for(int k = 0; k < md_xmp_metadata + d->metadata_count; k++) _metadata_update_value(k, NODATA_STRING, self);
 #ifdef USE_LUA
   dt_lua_async_call_alien(lua_update_metadata,
@@ -1612,6 +1643,280 @@ static void _display_default(dt_lib_module_t *self)
   _lib_metadata_refill_grid(self);
 }
 
+// format bytes to human-readable string
+static gchar *_format_file_size(off_t bytes)
+{
+  if(bytes < 1024)
+    return g_strdup_printf("%" G_GOFFSET_FORMAT " B", (goffset)bytes);
+  if(bytes < 1024 * 1024)
+    return g_strdup_printf("%.1f KB", bytes / 1024.0);
+  if(bytes < 1024 * 1024 * 1024)
+    return g_strdup_printf("%.1f MB", bytes / (1024.0 * 1024));
+  return g_strdup_printf("%.2f GB", bytes / (1024.0 * 1024 * 1024));
+}
+
+// format badge for image type
+static const char *_format_badge(const dt_image_t *img)
+{
+  if(img->flags & DT_IMAGE_RAW) return "RAW";
+  if(img->flags & DT_IMAGE_HDR) return "HDR";
+  switch(img->loader)
+  {
+    case LOADER_JPEG: return "JPEG";
+    case LOADER_TIFF: return "TIFF";
+    case LOADER_PNG:  return "PNG";
+    case LOADER_HEIF: return "HEIF";
+    case LOADER_WEBP: return "WebP";
+    case LOADER_JPEGXL: return "JXL";
+    case LOADER_AVIF: return "AVIF";
+    case LOADER_EXR:  return "EXR";
+    default: return "LDR";
+  }
+}
+
+// create a label with specific CSS class
+static GtkWidget *_card_label(const char *css_class,
+                               PangoEllipsizeMode ellipsize)
+{
+  GtkWidget *label = gtk_label_new("");
+  gtk_label_set_ellipsize(GTK_LABEL(label), ellipsize);
+  gtk_widget_set_halign(label, GTK_ALIGN_START);
+  if(css_class)
+    dt_gui_add_class(label, css_class);
+  return label;
+}
+
+// build the compact summary card widget
+static GtkWidget *_build_summary_card(dt_lib_metadata_view_t *d)
+{
+  GtkWidget *card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  gtk_widget_set_margin_bottom(card, DT_PIXEL_APPLY_DPI(4));
+
+  // row 1: filename + datetime
+  GtkWidget *row1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  d->card_filename = _card_label(NULL, PANGO_ELLIPSIZE_MIDDLE);
+  gtk_widget_set_name(d->card_filename, "metadata-card-filename");
+  d->card_datetime = _card_label(NULL, PANGO_ELLIPSIZE_NONE);
+  gtk_widget_set_name(d->card_datetime, "metadata-card-datetime");
+  dt_gui_box_add(row1, d->card_filename);
+  dt_gui_box_add(row1, d->card_datetime);
+  dt_gui_box_add(card, row1);
+
+  // row 2: camera info block (inset card)
+  GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_VERTICAL,
+                                     DT_PIXEL_APPLY_DPI(2));
+  gtk_widget_set_name(info_box, "brightbg");
+
+  // camera + wb/ep icons row
+  GtkWidget *cam_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  d->card_camera = _card_label(NULL, PANGO_ELLIPSIZE_END);
+  gtk_label_set_use_markup(GTK_LABEL(d->card_camera), TRUE);
+  gtk_widget_set_hexpand(d->card_camera, TRUE);
+  d->card_wb_icon = gtk_label_new("");
+  d->card_ep_icon = gtk_label_new("");
+  dt_gui_box_add(cam_row, d->card_camera);
+  dt_gui_box_add(cam_row, d->card_wb_icon);
+  dt_gui_box_add(cam_row, d->card_ep_icon);
+  dt_gui_box_add(info_box, cam_row);
+
+  // lens row
+  d->card_lens = _card_label(NULL, PANGO_ELLIPSIZE_END);
+  gtk_label_set_use_markup(GTK_LABEL(d->card_lens), TRUE);
+  dt_gui_box_add(info_box, d->card_lens);
+
+  // separator
+  GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+  dt_gui_box_add(info_box, sep);
+
+  // dimensions + filesize + format row
+  GtkWidget *dim_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL,
+                                    DT_PIXEL_APPLY_DPI(8));
+  d->card_dimensions = gtk_label_new("");
+  gtk_widget_set_halign(d->card_dimensions, GTK_ALIGN_START);
+  d->card_filesize = gtk_label_new("");
+  gtk_widget_set_halign(d->card_filesize, GTK_ALIGN_CENTER);
+  gtk_widget_set_hexpand(d->card_filesize, TRUE);
+  d->card_format = gtk_label_new("");
+  gtk_widget_set_halign(d->card_format, GTK_ALIGN_END);
+  dt_gui_box_add(dim_row, d->card_dimensions);
+  dt_gui_box_add(dim_row, d->card_filesize);
+  dt_gui_box_add(dim_row, d->card_format);
+  dt_gui_box_add(info_box, dim_row);
+
+  // shooting parameters — justified across full width
+  GtkWidget *params_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  d->card_iso = gtk_label_new("");
+  d->card_focal = gtk_label_new("");
+  d->card_ev_bias = gtk_label_new("");
+  d->card_aperture = gtk_label_new("");
+  d->card_exposure = gtk_label_new("");
+  // each label expands equally to fill the row
+  gtk_widget_set_hexpand(d->card_iso, TRUE);
+  gtk_widget_set_hexpand(d->card_focal, TRUE);
+  gtk_widget_set_hexpand(d->card_ev_bias, TRUE);
+  gtk_widget_set_hexpand(d->card_aperture, TRUE);
+  gtk_widget_set_hexpand(d->card_exposure, TRUE);
+  gtk_widget_set_halign(d->card_iso, GTK_ALIGN_START);
+  gtk_widget_set_halign(d->card_focal, GTK_ALIGN_CENTER);
+  gtk_widget_set_halign(d->card_ev_bias, GTK_ALIGN_CENTER);
+  gtk_widget_set_halign(d->card_aperture, GTK_ALIGN_CENTER);
+  gtk_widget_set_halign(d->card_exposure, GTK_ALIGN_END);
+  dt_gui_box_add(params_row, d->card_iso);
+  dt_gui_box_add(params_row, d->card_focal);
+  dt_gui_box_add(params_row, d->card_ev_bias);
+  dt_gui_box_add(params_row, d->card_aperture);
+  dt_gui_box_add(params_row, d->card_exposure);
+  dt_gui_box_add(info_box, params_row);
+
+  dt_gui_box_add(card, info_box);
+
+  d->card = card;
+  return card;
+}
+
+// update the summary card from an image
+static void _update_summary_card(dt_lib_metadata_view_t *d,
+                                  const dt_image_t *img)
+{
+  if(!d->card) return;
+
+  if(!img)
+  {
+    gtk_label_set_text(GTK_LABEL(d->card_filename), "");
+    gtk_label_set_text(GTK_LABEL(d->card_datetime), "");
+    gtk_label_set_text(GTK_LABEL(d->card_camera), "");
+    gtk_label_set_text(GTK_LABEL(d->card_wb_icon), "");
+    gtk_label_set_text(GTK_LABEL(d->card_ep_icon), "");
+    gtk_label_set_text(GTK_LABEL(d->card_lens), "");
+    gtk_label_set_text(GTK_LABEL(d->card_dimensions), "");
+    gtk_label_set_text(GTK_LABEL(d->card_filesize), "");
+    gtk_label_set_text(GTK_LABEL(d->card_format), "");
+    gtk_label_set_text(GTK_LABEL(d->card_iso), "");
+    gtk_label_set_text(GTK_LABEL(d->card_focal), "");
+    gtk_label_set_text(GTK_LABEL(d->card_ev_bias), "");
+    gtk_label_set_text(GTK_LABEL(d->card_aperture), "");
+    gtk_label_set_text(GTK_LABEL(d->card_exposure), "");
+    return;
+  }
+
+  // filename
+  gtk_label_set_text(GTK_LABEL(d->card_filename),
+                     img->filename);
+
+  // datetime
+  char datetime[200];
+  if(dt_datetime_img_to_local(datetime, sizeof(datetime),
+                               img, FALSE))
+    gtk_label_set_text(GTK_LABEL(d->card_datetime), datetime);
+  else
+    gtk_label_set_text(GTK_LABEL(d->card_datetime), "");
+
+  // camera — large bold
+  {
+    gchar *markup = g_markup_printf_escaped(
+      "<big><b>%s</b></big>", img->camera_alias);
+    gtk_label_set_markup(GTK_LABEL(d->card_camera), markup);
+    g_free(markup);
+  }
+
+  // white balance abbreviation
+  const char *wb = img->exif_whitebalance;
+  if(wb && wb[0])
+    gtk_label_set_text(GTK_LABEL(d->card_wb_icon), "AWB");
+  else
+    gtk_label_set_text(GTK_LABEL(d->card_wb_icon), "");
+  gtk_widget_set_tooltip_text(d->card_wb_icon, wb);
+
+  // exposure program icon
+  const char *ep = img->exif_exposure_program;
+  if(ep && ep[0])
+  {
+    // show a compact icon based on mode
+    const char *icon = "\xf0\x9f\x93\xb7"; // camera emoji fallback
+    if(g_str_has_prefix(ep, "Manual"))
+      icon = "M";
+    else if(g_str_has_prefix(ep, "Aperture"))
+      icon = "Av";
+    else if(g_str_has_prefix(ep, "Shutter"))
+      icon = "Tv";
+    else if(g_str_has_prefix(ep, "Program")
+            || g_str_has_prefix(ep, "Auto"))
+      icon = "P";
+    gtk_label_set_text(GTK_LABEL(d->card_ep_icon), icon);
+    gtk_widget_set_tooltip_text(d->card_ep_icon, ep);
+  }
+  else
+    gtk_label_set_text(GTK_LABEL(d->card_ep_icon), "");
+
+  // lens — bold
+  {
+    gchar *markup = g_markup_printf_escaped(
+      "<b>%s</b>", img->exif_lens);
+    gtk_label_set_markup(GTK_LABEL(d->card_lens), markup);
+    g_free(markup);
+  }
+
+  // dimensions
+  char dims[64];
+  snprintf(dims, sizeof(dims), "%d x %d",
+           img->width, img->height);
+  gtk_label_set_text(GTK_LABEL(d->card_dimensions), dims);
+
+  // file size
+  char full_path[PATH_MAX];
+  dt_image_full_path(img->id, full_path,
+                     sizeof(full_path), NULL);
+  struct stat st;
+  if(g_stat(full_path, &st) == 0)
+  {
+    gchar *size_str = _format_file_size(st.st_size);
+    gtk_label_set_text(GTK_LABEL(d->card_filesize),
+                       size_str);
+    g_free(size_str);
+  }
+  else
+    gtk_label_set_text(GTK_LABEL(d->card_filesize), "");
+
+  // format badge
+  gtk_label_set_text(GTK_LABEL(d->card_format),
+                     _format_badge(img));
+
+  // ISO
+  char iso[32];
+  snprintf(iso, sizeof(iso), "ISO %.0f",
+           (double)img->exif_iso);
+  gtk_label_set_text(GTK_LABEL(d->card_iso), iso);
+
+  // focal length
+  char fl[32];
+  snprintf(fl, sizeof(fl), "%.0f mm",
+           (double)img->exif_focal_length);
+  gtk_label_set_text(GTK_LABEL(d->card_focal), fl);
+
+  // exposure bias
+  if(img->exif_exposure_bias != DT_EXIF_TAG_UNINITIALIZED)
+  {
+    char ev[32];
+    snprintf(ev, sizeof(ev), "%+.1f EV",
+             (double)img->exif_exposure_bias);
+    gtk_label_set_text(GTK_LABEL(d->card_ev_bias), ev);
+  }
+  else
+    gtk_label_set_text(GTK_LABEL(d->card_ev_bias), "");
+
+  // aperture
+  char ap[32];
+  snprintf(ap, sizeof(ap), "f/%.1f",
+           (double)img->exif_aperture);
+  gtk_label_set_text(GTK_LABEL(d->card_aperture), ap);
+
+  // exposure time
+  gchar *exp_str = dt_util_format_exposure(
+    img->exif_exposure);
+  gtk_label_set_text(GTK_LABEL(d->card_exposure), exp_str);
+  g_free(exp_str);
+}
+
 void gui_init(dt_lib_module_t *self)
 {
   /* initialize ui */
@@ -1620,12 +1925,30 @@ void gui_init(dt_lib_module_t *self)
 
   _lib_metadata_init_queue(self);
 
+  // summary card at the top
+  GtkWidget *card = _build_summary_card(d);
+
+  // full metadata grid (existing)
   d->grid = gtk_grid_new();
   gtk_grid_set_column_spacing(GTK_GRID(d->grid), DT_PIXEL_APPLY_DPI(5));
 
-  self->widget = dt_gui_vbox
-    (dt_ui_resize_wrap(d->grid, 200,
-                       "plugins/lighttable/metadata_view/windowheight"));
+  // main layout: card on top, collapsible grid below
+  self->widget = dt_gui_vbox(card);
+
+  // collapsible section for full metadata list
+  dt_gui_new_collapsible_section(
+    &d->cs_metadata,
+    "plugins/lighttable/metadata_view/expand_all",
+    _("all metadata"),
+    GTK_BOX(self->widget),
+    DT_ACTION(self));
+
+  // put the scrollable grid inside the collapsible
+  GtkWidget *grid_scroll = dt_ui_resize_wrap(
+    d->grid, 200,
+    "plugins/lighttable/metadata_view/windowheight");
+  dt_gui_box_add(GTK_WIDGET(d->cs_metadata.container),
+                 grid_scroll);
 
   gtk_widget_show_all(d->grid);
   gtk_widget_set_no_show_all(d->grid, TRUE);
