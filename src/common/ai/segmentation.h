@@ -94,6 +94,44 @@ float *dt_seg_compute_mask(dt_seg_context_t *ctx,
                            int *out_height);
 
 /**
+ * @brief Refine a coarse mask by re-encoding the ROI at higher resolution.
+ *        Computes the bounding box of the coarse mask, crops the original
+ *        RGB image to that region (with padding), re-runs the encoder on
+ *        the crop (giving the decoder 2-4x more detail), and pastes the
+ *        refined mask back into full image coordinates.
+ *        SAM only - returns NULL for SegNext (already full resolution).
+ *        Returns NULL if the mask covers >70% of the image (no benefit).
+ * @param ctx Segmentation context with model loaded.
+ * @param coarse_mask The mask to refine (from dt_seg_compute_mask).
+ * @param mask_w Mask width.
+ * @param mask_h Mask height.
+ * @param rgb_data Original RGB image (uint8, HWC, 3ch).
+ * @param rgb_w RGB image width.
+ * @param rgb_h RGB image height.
+ * @param points Point prompts (original image space coordinates).
+ * @param n_points Number of points.
+ * @param threshold Binarization threshold for computing mask bounding box.
+ * @param padding_factor Padding around the ROI as fraction of ROI size (e.g. 0.2).
+ * @param out_width Set to output mask width (same as mask_w).
+ * @param out_height Set to output mask height (same as mask_h).
+ * @return Refined float mask (mask_w * mask_h), caller frees with g_free().
+ *         NULL if refinement is not applicable or fails.
+ */
+float *dt_seg_refine_mask_roi(dt_seg_context_t *ctx,
+                               const float *coarse_mask,
+                               const int mask_w,
+                               const int mask_h,
+                               const uint8_t *rgb_data,
+                               const int rgb_w,
+                               const int rgb_h,
+                               const dt_seg_point_t *points,
+                               const int n_points,
+                               const float threshold,
+                               const float padding_factor,
+                               int *out_width,
+                               int *out_height);
+
+/**
  * @brief Check if the image has been encoded.
  * @param ctx Segmentation context.
  * @return TRUE if image embeddings are cached, FALSE otherwise.

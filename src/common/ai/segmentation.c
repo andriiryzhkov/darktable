@@ -943,6 +943,235 @@ float *dt_seg_compute_mask(dt_seg_context_t *ctx,
   return result;
 }
 
+float *dt_seg_refine_mask_roi(dt_seg_context_t *ctx,
+                               const float *coarse_mask,
+                               const int mask_w,
+                               const int mask_h,
+                               const uint8_t *rgb_data,
+                               const int rgb_w,
+                               const int rgb_h,
+                               const dt_seg_point_t *points,
+                               const int n_points,
+                               const float threshold,
+                               const float padding_factor,
+                               int *out_width,
+                               int *out_height)
+{
+  if(!ctx || !coarse_mask || !rgb_data || !points || n_points <= 0)
+    return NULL;
+
+  // only SAM benefits from ROI refinement (SegNext already runs at 1024x1024)
+  if(ctx->model_type != DT_SEG_MODEL_SAM)
+    return NULL;
+
+  const double t0 = dt_get_wtime();
+
+  // compute bounding box of the coarse mask (thresholded)
+  int roi_x0 = mask_w, roi_y0 = mask_h, roi_x1 = 0, roi_y1 = 0;
+  for(int y = 0; y < mask_h; y++)
+    for(int x = 0; x < mask_w; x++)
+    {
+      if(coarse_mask[y * mask_w + x] >= threshold)
+      {
+        if(x < roi_x0) roi_x0 = x;
+        if(x > roi_x1) roi_x1 = x;
+        if(y < roi_y0) roi_y0 = y;
+        if(y > roi_y1) roi_y1 = y;
+      }
+    }
+
+  if(roi_x1 <= roi_x0 || roi_y1 <= roi_y0)
+  {
+    dt_print(DT_DEBUG_AI, "[segmentation] ROI refine: empty mask, skipping");
+    return NULL;
+  }
+
+  // expand ROI by padding factor
+  const int roi_w = roi_x1 - roi_x0 + 1;
+  const int roi_h = roi_y1 - roi_y0 + 1;
+  const int pad_x = (int)(roi_w * padding_factor);
+  const int pad_y = (int)(roi_h * padding_factor);
+
+  roi_x0 = MAX(roi_x0 - pad_x, 0);
+  roi_y0 = MAX(roi_y0 - pad_y, 0);
+  roi_x1 = MIN(roi_x1 + pad_x, mask_w - 1);
+  roi_y1 = MIN(roi_y1 + pad_y, mask_h - 1);
+
+  const int crop_w = roi_x1 - roi_x0 + 1;
+  const int crop_h = roi_y1 - roi_y0 + 1;
+
+  // skip if the ROI covers most of the image (refinement gain is minimal)
+  const float coverage = (float)(crop_w * crop_h) / (float)(mask_w * mask_h);
+  if(coverage > 0.7f)
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] ROI refine: mask covers %.0f%% of image, skipping",
+             coverage * 100.0f);
+    return NULL;
+  }
+
+  // map ROI from mask space to RGB space
+  const float scale_x = (float)rgb_w / (float)mask_w;
+  const float scale_y = (float)rgb_h / (float)mask_h;
+  const int rgb_roi_x0 = CLAMP((int)(roi_x0 * scale_x), 0, rgb_w - 1);
+  const int rgb_roi_y0 = CLAMP((int)(roi_y0 * scale_y), 0, rgb_h - 1);
+  const int rgb_crop_w = CLAMP((int)(crop_w * scale_x), 1, rgb_w - rgb_roi_x0);
+  const int rgb_crop_h = CLAMP((int)(crop_h * scale_y), 1, rgb_h - rgb_roi_y0);
+
+  dt_print(DT_DEBUG_AI,
+           "[segmentation] ROI refine: crop %dx%d at (%d,%d) from %dx%d (coverage %.0f%%)",
+           rgb_crop_w, rgb_crop_h, rgb_roi_x0, rgb_roi_y0,
+           rgb_w, rgb_h, coverage * 100.0f);
+
+  // extract RGB crop
+  uint8_t *crop_rgb = g_try_malloc((size_t)rgb_crop_w * rgb_crop_h * 3);
+  if(!crop_rgb) return NULL;
+
+  for(int y = 0; y < rgb_crop_h; y++)
+    memcpy(crop_rgb + (size_t)y * rgb_crop_w * 3,
+           rgb_data + ((size_t)(rgb_roi_y0 + y) * rgb_w + rgb_roi_x0) * 3,
+           (size_t)rgb_crop_w * 3);
+
+  // save and reset encoder state so we can encode the crop
+  float *saved_enc_data[MAX_ENCODER_OUTPUTS];
+  size_t saved_enc_sizes[MAX_ENCODER_OUTPUTS];
+  int64_t saved_enc_shapes[MAX_ENCODER_OUTPUTS][MAX_TENSOR_DIMS];
+  int saved_enc_ndims[MAX_ENCODER_OUTPUTS];
+  const int saved_width = ctx->encoded_width;
+  const int saved_height = ctx->encoded_height;
+  const float saved_scale = ctx->scale;
+  const gboolean saved_encoded = ctx->image_encoded;
+  const gboolean saved_has_prev = ctx->has_prev_mask;
+
+  for(int i = 0; i < MAX_ENCODER_OUTPUTS; i++)
+  {
+    saved_enc_data[i] = ctx->enc_data[i];
+    saved_enc_sizes[i] = ctx->enc_sizes[i];
+    saved_enc_ndims[i] = ctx->enc_ndims[i];
+    memcpy(saved_enc_shapes[i], ctx->enc_shapes[i], sizeof(saved_enc_shapes[i]));
+    ctx->enc_data[i] = NULL;
+    ctx->enc_sizes[i] = 0;
+  }
+  ctx->image_encoded = FALSE;
+  ctx->has_prev_mask = FALSE;
+  memset(ctx->prev_mask, 0,
+         (size_t)ctx->prev_mask_dim * ctx->prev_mask_dim * sizeof(float));
+
+  // encode the cropped region
+  const gboolean enc_ok = dt_seg_encode_image(ctx, crop_rgb, rgb_crop_w, rgb_crop_h);
+  g_free(crop_rgb);
+
+  float *refined = NULL;
+
+  if(enc_ok)
+  {
+    // transform point prompts to crop space, dropping background points
+    // that fall outside the ROI (they don't affect the cropped region)
+    dt_seg_point_t *crop_points = g_new(dt_seg_point_t, n_points);
+    int n_crop_points = 0;
+    for(int i = 0; i < n_points; i++)
+    {
+      const float cx = points[i].x - (float)rgb_roi_x0;
+      const float cy = points[i].y - (float)rgb_roi_y0;
+
+      // keep foreground points always; drop background points outside crop
+      if(points[i].label == 0
+         && (cx < 0 || cy < 0 || cx >= rgb_crop_w || cy >= rgb_crop_h))
+        continue;
+
+      crop_points[n_crop_points].x = cx;
+      crop_points[n_crop_points].y = cy;
+      crop_points[n_crop_points].label = points[i].label;
+      n_crop_points++;
+    }
+
+    // seed prev_mask with the cropped coarse mask so the decoder
+    // refines boundaries rather than re-segmenting from scratch
+    if(ctx->prev_mask)
+    {
+      const int pm = ctx->prev_mask_dim;
+      for(int y = 0; y < pm; y++)
+      {
+        const float src_fy = (float)y / (float)pm * (float)crop_h + roi_y0;
+        const int sy = CLAMP((int)src_fy, 0, mask_h - 1);
+        for(int x = 0; x < pm; x++)
+        {
+          const float src_fx = (float)x / (float)pm * (float)crop_w + roi_x0;
+          const int sx = CLAMP((int)src_fx, 0, mask_w - 1);
+          // convert [0,1] probability back to logit for SAM prev_mask input
+          const float p = CLAMP(coarse_mask[sy * mask_w + sx], 1e-6f, 1.0f - 1e-6f);
+          ctx->prev_mask[y * pm + x] = logf(p / (1.0f - p));
+        }
+      }
+      ctx->has_prev_mask = TRUE;
+    }
+
+    // decode on the crop with coarse mask as context
+    int ref_w = 0, ref_h = 0;
+    float *ref_mask = (n_crop_points > 0)
+      ? dt_seg_compute_mask(ctx, crop_points, n_crop_points, &ref_w, &ref_h)
+      : NULL;
+    g_free(crop_points);
+
+    if(ref_mask)
+    {
+      // paste refined mask back into full-size output
+      refined = g_try_malloc0((size_t)mask_w * mask_h * sizeof(float));
+      if(refined)
+      {
+        for(int y = 0; y < crop_h; y++)
+        {
+          const int dst_y = roi_y0 + y;
+          if(dst_y >= mask_h) break;
+          const float src_fy = (float)y / (float)crop_h * (float)ref_h;
+          const int src_y = CLAMP((int)src_fy, 0, ref_h - 1);
+
+          for(int x = 0; x < crop_w; x++)
+          {
+            const int dst_x = roi_x0 + x;
+            if(dst_x >= mask_w) break;
+            const float src_fx = (float)x / (float)crop_w * (float)ref_w;
+            const int src_x = CLAMP((int)src_fx, 0, ref_w - 1);
+
+            refined[dst_y * mask_w + dst_x] = ref_mask[src_y * ref_w + src_x];
+          }
+        }
+      }
+      g_free(ref_mask);
+    }
+  }
+
+  // restore original encoder state
+  for(int i = 0; i < MAX_ENCODER_OUTPUTS; i++)
+  {
+    g_free(ctx->enc_data[i]);
+    ctx->enc_data[i] = saved_enc_data[i];
+    ctx->enc_sizes[i] = saved_enc_sizes[i];
+    ctx->enc_ndims[i] = saved_enc_ndims[i];
+    memcpy(ctx->enc_shapes[i], saved_enc_shapes[i], sizeof(ctx->enc_shapes[i]));
+  }
+  ctx->encoded_width = saved_width;
+  ctx->encoded_height = saved_height;
+  ctx->scale = saved_scale;
+  ctx->image_encoded = saved_encoded;
+  ctx->has_prev_mask = saved_has_prev;
+
+  if(refined)
+  {
+    dt_print(DT_DEBUG_AI,
+             "[segmentation] ROI refine done (%.3fs), crop %dx%d -> full %dx%d",
+             dt_get_wtime() - t0, rgb_crop_w, rgb_crop_h, mask_w, mask_h);
+    if(out_width) *out_width = mask_w;
+    if(out_height) *out_height = mask_h;
+  }
+  else
+  {
+    dt_print(DT_DEBUG_AI, "[segmentation] ROI refine failed");
+  }
+
+  return refined;
+}
+
 gboolean dt_seg_is_encoded(dt_seg_context_t *ctx)
 {
   return ctx ? ctx->image_encoded : FALSE;

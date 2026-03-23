@@ -1146,6 +1146,70 @@ static int _object_events_button_pressed(
     if(d && g_atomic_int_get(&d->encode_state) == ENCODE_RUNNING)
       return 1;
 
+    // ROI refinement: re-encode the mask bounding box at higher resolution
+    // for sharper edges before finalizing
+    if(d && d->mask && d->seg && d->encode_rgb && gui->guipoints_count > 0)
+    {
+      const float *gp = dt_masks_dynbuf_buffer(gui->guipoints);
+      const float *gpp = dt_masks_dynbuf_buffer(gui->guipoints_payload);
+      float wd, ht, iwidth, iheight;
+      dt_masks_get_image_size(&wd, &ht, &iwidth, &iheight);
+      const float sx = (wd > 0) ? (float)d->encode_w / wd : 1.0f;
+      const float sy = (ht > 0) ? (float)d->encode_h / ht : 1.0f;
+
+      const int np = gui->guipoints_count;
+      dt_seg_point_t *pts = g_new(dt_seg_point_t, np);
+      for(int i = 0; i < np; i++)
+      {
+        pts[i].x = gp[i * 2 + 0] * sx;
+        pts[i].y = gp[i * 2 + 1] * sy;
+        pts[i].label = (int)gpp[i];
+      }
+
+      const float threshold = CLAMP(dt_conf_get_float(CONF_OBJECT_THRESHOLD_KEY), 0.3f, 0.9f);
+      int rw = 0, rh = 0;
+      float *refined = dt_seg_refine_mask_roi(
+        d->seg, d->mask, d->mask_w, d->mask_h,
+        d->encode_rgb, d->encode_rgb_w, d->encode_rgb_h,
+        pts, np, threshold, 0.2f, &rw, &rh);
+      g_free(pts);
+
+      if(refined)
+      {
+        // apply same post-processing as the coarse mask
+        int seed_x = -1, seed_y = -1;
+        for(int i = np - 1; i >= 0; i--)
+        {
+          if((int)gpp[i] == 1)
+          {
+            seed_x = (int)(gp[i * 2 + 0] * sx);
+            seed_y = (int)(gp[i * 2 + 1] * sy);
+            break;
+          }
+        }
+        seed_x = CLAMP(seed_x, 0, rw - 1);
+        seed_y = CLAMP(seed_y, 0, rh - 1);
+
+        const float edge_boost = CLAMP(dt_conf_get_float(CONF_OBJECT_EDGE_REFINE_KEY), 0.0f, 0.5f);
+        if(edge_boost > 0.0f)
+          _edge_refine_threshold(refined, rw, rh,
+                                 d->encode_rgb, d->encode_rgb_w, d->encode_rgb_h,
+                                 threshold, edge_boost);
+        _keep_seed_component(refined, rw, rh, threshold, seed_x, seed_y);
+
+        const int morph_radius = CLAMP(dt_conf_get_int(CONF_OBJECT_MORPH_KEY), 0, 5);
+        _morph_open_close(refined, rw, rh, threshold, morph_radius);
+
+        g_free(d->mask);
+        d->mask = refined;
+        d->mask_w = rw;
+        d->mask_h = rh;
+
+        // re-generate preview forms from refined mask
+        _update_preview(d);
+      }
+    }
+
     // right-click: finalize mask (prefer cached preview forms)
     dt_masks_form_t *new_grp = NULL;
     if(d && d->preview_forms)
