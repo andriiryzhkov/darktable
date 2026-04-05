@@ -16,8 +16,8 @@
     along with darktable.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "depth.h"
-#include "backend.h"
+#include "common/ai/depth.h"
+#include "ai/backend.h"
 #include "common/darktable.h"
 #include <math.h>
 #include <string.h>
@@ -83,37 +83,6 @@ _preprocess_image(const uint8_t *rgb_data, int width, int height)
   }
 
   return output;
-}
-
-// --- Bilinear resize helper ---
-
-// Resize a single-channel float buffer from (src_w, src_h) to (dst_w, dst_h).
-static void _resize_bilinear(const float *src, int src_w, int src_h,
-                              float *dst, int dst_w, int dst_h)
-{
-  for(int y = 0; y < dst_h; y++)
-  {
-    const float sy = (dst_h > 1) ? (float)y * (float)(src_h - 1) / (float)(dst_h - 1) : 0.0f;
-    const int y0 = MIN((int)sy, src_h - 1);
-    const int y1 = MIN(y0 + 1, src_h - 1);
-    const float fy = sy - (float)y0;
-
-    for(int x = 0; x < dst_w; x++)
-    {
-      const float sx = (dst_w > 1) ? (float)x * (float)(src_w - 1) / (float)(dst_w - 1) : 0.0f;
-      const int x0 = MIN((int)sx, src_w - 1);
-      const int x1 = MIN(x0 + 1, src_w - 1);
-      const float fx = sx - (float)x0;
-
-      const float v00 = src[y0 * src_w + x0];
-      const float v01 = src[y0 * src_w + x1];
-      const float v10 = src[y1 * src_w + x0];
-      const float v11 = src[y1 * src_w + x1];
-
-      dst[y * dst_w + x] = v00 * (1.0f - fx) * (1.0f - fy) + v01 * fx * (1.0f - fy)
-        + v10 * (1.0f - fx) * fy + v11 * fx * fy;
-    }
-  }
 }
 
 // --- Public API ---
@@ -220,27 +189,11 @@ float *dt_depth_compute(dt_depth_context_t *ctx,
   dt_print(DT_DEBUG_AI, "[depth] raw output %dx%d, range [%.3f, %.3f]",
            depth_w, depth_h, dmin, dmax);
 
-  // Resize to original image dimensions
-  if(depth_w == width && depth_h == height)
-  {
-    *out_width = width;
-    *out_height = height;
-    return raw_depth;
-  }
-
-  float *resized = g_try_malloc((size_t)width * height * sizeof(float));
-  if(!resized)
-  {
-    g_free(raw_depth);
-    return NULL;
-  }
-
-  _resize_bilinear(raw_depth, depth_w, depth_h, resized, width, height);
-  g_free(raw_depth);
-
-  *out_width = width;
-  *out_height = height;
-  return resized;
+  // return at native model resolution — the caller resizes as needed.
+  // this keeps the disk cache small (518×518 instead of full image)
+  *out_width = depth_w;
+  *out_height = depth_h;
+  return raw_depth;
 }
 
 void dt_depth_free(dt_depth_context_t *ctx)

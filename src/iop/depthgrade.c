@@ -36,7 +36,7 @@
 #include "gui/gtk.h"
 #include "iop/iop_api.h"
 
-#include "ai/depth.h"
+#include "common/ai/depth.h"
 #include "common/ai_models.h"
 
 #include <glib/gstdio.h>
@@ -274,7 +274,7 @@ static float *_disk_cache_read(dt_imgid_t imgid, int *out_w, int *out_h)
 
   const uint32_t expected_size
     = (uint32_t)hdr.width * (uint32_t)hdr.height
-      * sizeof(float);
+      * sizeof(uint16_t);
   if(hdr.magic != DT_DEPTH_CACHE_MAGIC
      || hdr.version != DT_DEPTH_CACHE_VERSION
      || hdr.width <= 0 || hdr.height <= 0
@@ -292,25 +292,36 @@ static float *_disk_cache_read(dt_imgid_t imgid, int *out_w, int *out_h)
       goto read_error;
     }
 
-    result = dt_alloc_align_float((size_t)hdr.width * hdr.height);
-    if(!result)
+    // decompress into uint16 buffer
+    const size_t npix = (size_t)hdr.width * hdr.height;
+    uint16_t *u16_buf = g_try_malloc(npix * sizeof(uint16_t));
+    if(!u16_buf)
     {
       g_free(comp_buf);
       goto read_error;
     }
 
     uLongf dest_len = hdr.uncompressed_size;
-    if(uncompress((Bytef *)result, &dest_len,
+    if(uncompress((Bytef *)u16_buf, &dest_len,
                   (const Bytef *)comp_buf, hdr.compressed_size) != Z_OK
        || dest_len != hdr.uncompressed_size)
     {
-      dt_free_align(result);
-      result = NULL;
+      g_free(u16_buf);
       g_free(comp_buf);
       goto read_error;
     }
-
     g_free(comp_buf);
+
+    // convert uint16 back to float [0,1]
+    result = dt_alloc_align_float(npix);
+    if(!result)
+    {
+      g_free(u16_buf);
+      goto read_error;
+    }
+    for(size_t i = 0; i < npix; i++)
+      result[i] = (float)u16_buf[i] / 65535.0f;
+    g_free(u16_buf);
   }
 
   *out_w = hdr.width;
@@ -358,21 +369,36 @@ static gboolean _disk_cache_write(dt_imgid_t imgid,
     g_free(dir);
   }
 
-  const uLong src_len = (uLong)width * height * sizeof(float);
+  // convert float [0,1] to uint16 for compact storage
+  const size_t npix = (size_t)width * height;
+  uint16_t *u16_buf = g_try_malloc(npix * sizeof(uint16_t));
+  if(!u16_buf)
+  {
+    g_free(path);
+    return FALSE;
+  }
+  for(size_t i = 0; i < npix; i++)
+    u16_buf[i] = (uint16_t)(CLAMP(depth_map[i], 0.0f, 1.0f)
+                            * 65535.0f + 0.5f);
+
+  const uLong src_len = (uLong)(npix * sizeof(uint16_t));
   uLongf comp_len = compressBound(src_len);
   unsigned char *comp_buf = g_try_malloc(comp_len);
   if(!comp_buf)
   {
+    g_free(u16_buf);
     g_free(path);
     return FALSE;
   }
 
-  if(compress(comp_buf, &comp_len, (const Bytef *)depth_map, src_len) != Z_OK)
+  if(compress(comp_buf, &comp_len, (const Bytef *)u16_buf, src_len) != Z_OK)
   {
     g_free(comp_buf);
+    g_free(u16_buf);
     g_free(path);
     return FALSE;
   }
+  g_free(u16_buf);
 
   FILE *f = g_fopen(path, "wb");
   if(!f)
