@@ -462,6 +462,7 @@ if(USE_AI)
     "common/ai_models.c"
     "common/ai/segmentation.c"
     "common/ai/restore.c"
+    "common/ai/task_contracts.c"
     "develop/masks/object.c"
     "gui/preferences_ai.c"
   )

@@ -20,6 +20,7 @@
 #include "ai/backend.h"
 #include "common/darktable.h"
 #include "common/ai_models.h"
+#include "common/ai/task_contracts.h"
 #include "common/imagebuf.h"
 #include "control/jobs.h"
 
@@ -165,8 +166,10 @@ static void _set_cached_tile_size(const char *model_id, int scale, int tile_size
 }
 
 // internal: create an ORT session for model_id/model_file with spatial dims
-// fixed to tile_size. returns a new ai_ctx, or NULL on failure.
+// fixed to tile_size; returns a new ai_ctx, or NULL on failure or contract
+// violation (the task contract is enforced inside dt_ai_load_for_task)
 static dt_ai_context_t *_create_session(dt_ai_environment_t *ai_env,
+                                        const char *task,
                                         const char *model_id,
                                         const char *model_file,
                                         const char *dim_h,
@@ -179,8 +182,8 @@ static dt_ai_context_t *_create_session(dt_ai_environment_t *ai_env,
     { dim_h,        tile_size },
     { dim_w,        tile_size },
   };
-  return dt_ai_load_model_ext(
-    ai_env, model_id, model_file,
+  return dt_ai_load_for_task(
+    ai_env, task, model_id, model_file,
     DT_AI_PROVIDER_CONFIGURED, DT_AI_OPT_ALL,
     overrides, (int)G_N_ELEMENTS(overrides));
 }
@@ -211,7 +214,7 @@ static dt_restore_context_t *_load(dt_restore_env_t *env,
     tile_size = _select_tile_size(scale);
 
   dt_ai_context_t *ai_ctx = _create_session(
-    env->ai_env, model_id, model_file, dim_h, dim_w, tile_size);
+    env->ai_env, task, model_id, model_file, dim_h, dim_w, tile_size);
   if(!ai_ctx)
   {
     g_free(model_id);
@@ -237,7 +240,7 @@ static dt_restore_context_t *_load(dt_restore_env_t *env,
 static gboolean _reload_session(dt_restore_context_t *ctx, int new_tile_size)
 {
   dt_ai_context_t *new_ctx = _create_session(
-    ctx->env->ai_env, ctx->model_id, ctx->model_file,
+    ctx->env->ai_env, ctx->task, ctx->model_id, ctx->model_file,
     ctx->dim_h, ctx->dim_w, new_tile_size);
   if(!new_ctx) return FALSE;
   dt_ai_unload_model(ctx->ai_ctx);

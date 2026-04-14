@@ -17,6 +17,7 @@
 */
 
 #include "common/ai/segmentation.h"
+#include "common/ai/task_contracts.h"
 #include "common/ai_models.h"
 #include "ai/backend.h"
 #include "common/database.h"
@@ -211,9 +212,13 @@ dt_seg_context_t *dt_seg_load(dt_ai_environment_t *env, const char *model_id)
   if(!env || !model_id)
     return NULL;
 
-  // use the user's configured provider for the encoder (the heavy part)
+  // use the user's configured provider for the encoder (the heavy part);
+  // dt_ai_load_for_task validates the encoder against the "mask" task
+  // contract (input/output count, dtype, rank, channel count)
   dt_ai_context_t *encoder
-    = dt_ai_load_model(env, model_id, "encoder.onnx", DT_AI_PROVIDER_CONFIGURED);
+    = dt_ai_load_for_task(env, "mask", model_id, "encoder.onnx",
+                          DT_AI_PROVIDER_CONFIGURED, DT_AI_OPT_ALL,
+                          NULL, 0);
   if(!encoder)
   {
     dt_print(DT_DEBUG_AI, "[segmentation] failed to load encoder for %s", model_id);
