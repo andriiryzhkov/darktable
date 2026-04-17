@@ -84,6 +84,18 @@ void dt_restore_env_destroy(dt_restore_env_t *env);
 dt_restore_context_t *dt_restore_load_denoise(dt_restore_env_t *env);
 
 /**
+ * @brief load deblur model (scale 1x)
+ *
+ * deblur reuses the full scale==1 denoise pipeline (tile size, color
+ * conversion, shadow boost, wide-gamut pass-through); only the model's
+ * task string ("deblur") differs
+ *
+ * @param env environment handle
+ * @return context handle, or NULL if no model available
+ */
+dt_restore_context_t *dt_restore_load_deblur(dt_restore_env_t *env);
+
+/**
  * @brief load upscale model at 2x
  * @param env environment handle
  * @return context handle, or NULL if no model available
@@ -160,6 +172,13 @@ void dt_restore_set_preserve_wide_gamut(dt_restore_context_t *ctx,
  * @return TRUE if a denoise model is configured and present
  */
 gboolean dt_restore_denoise_available(dt_restore_env_t *env);
+
+/**
+ * @brief check if a deblur model is available
+ * @param env environment handle
+ * @return TRUE if a deblur model is configured and present
+ */
+gboolean dt_restore_deblur_available(dt_restore_env_t *env);
 
 /**
  * @brief check if an upscale model is available

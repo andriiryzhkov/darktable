@@ -159,6 +159,7 @@ void dt_restore_env_destroy(dt_restore_env_t *env)
 /* --- model lifecycle --- */
 
 #define TASK_DENOISE "denoise"
+#define TASK_DEBLUR  "deblur"
 #define TASK_UPSCALE "upscale"
 
 static int _select_tile_size(int scale);
@@ -287,6 +288,13 @@ dt_restore_context_t *dt_restore_load_denoise(dt_restore_env_t *env)
   return _load(env, TASK_DENOISE, NULL, 1);
 }
 
+dt_restore_context_t *dt_restore_load_deblur(dt_restore_env_t *env)
+{
+  // deblur runs at scale 1, same pipeline as denoise; only the task
+  // string differs so the model registry picks the deblur model
+  return _load(env, TASK_DEBLUR, NULL, 1);
+}
+
 dt_restore_context_t *dt_restore_load_upscale_x2(dt_restore_env_t *env)
 {
   return _load(env, TASK_UPSCALE, "model_x2.onnx", 2);
@@ -401,6 +409,11 @@ static gboolean _model_available(dt_restore_env_t *env,
 gboolean dt_restore_denoise_available(dt_restore_env_t *env)
 {
   return _model_available(env, TASK_DENOISE);
+}
+
+gboolean dt_restore_deblur_available(dt_restore_env_t *env)
+{
+  return _model_available(env, TASK_DEBLUR);
 }
 
 gboolean dt_restore_upscale_available(dt_restore_env_t *env)

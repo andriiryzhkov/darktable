@@ -139,6 +139,7 @@ DT_MODULE(1)
 typedef enum dt_neural_task_t
 {
   NEURAL_TASK_DENOISE = 0,
+  NEURAL_TASK_DEBLUR,
   NEURAL_TASK_UPSCALE_2X,
   NEURAL_TASK_UPSCALE_4X,
 } dt_neural_task_t;
@@ -154,6 +155,7 @@ typedef struct dt_lib_neural_restore_t
 {
   GtkNotebook *notebook;
   GtkWidget *denoise_page;
+  GtkWidget *deblur_page;
   GtkWidget *upscale_page;
   GtkWidget *scale_combo;
   GtkWidget *preview_area;
@@ -413,6 +415,8 @@ static dt_restore_context_t *_load_for_task(
   {
     case NEURAL_TASK_DENOISE:
       return dt_restore_load_denoise(env);
+    case NEURAL_TASK_DEBLUR:
+      return dt_restore_load_deblur(env);
     case NEURAL_TASK_UPSCALE_2X:
       return dt_restore_load_upscale_x2(env);
     case NEURAL_TASK_UPSCALE_4X:
@@ -431,6 +435,8 @@ static gboolean _task_model_available(
   {
     case NEURAL_TASK_DENOISE:
       return dt_restore_denoise_available(env);
+    case NEURAL_TASK_DEBLUR:
+      return dt_restore_deblur_available(env);
     default:
       return dt_restore_upscale_available(env);
   }
@@ -673,6 +679,7 @@ static const char *_task_suffix(dt_neural_task_t task)
   switch(task)
   {
     case NEURAL_TASK_DENOISE:    return "_denoise";
+    case NEURAL_TASK_DEBLUR:     return "_deblur";
     case NEURAL_TASK_UPSCALE_2X: return "_upscale-2x";
     case NEURAL_TASK_UPSCALE_4X: return "_upscale-4x";
     default:                     return "_restore";
@@ -737,8 +744,9 @@ static int32_t _process_job_run(dt_job_t *job)
 {
   dt_neural_job_t *j = dt_control_job_get_params(job);
 
-  const char *task_name = (j->task == NEURAL_TASK_DENOISE)
-    ? _("denoise") : _("upscale");
+  const char *task_name = (j->task == NEURAL_TASK_DENOISE) ? _("denoise")
+                        : (j->task == NEURAL_TASK_DEBLUR)  ? _("deblur")
+                        :                                    _("upscale");
   char msg[256];
   snprintf(msg, sizeof(msg), _("loading %s model..."), task_name);
   dt_control_job_set_progress_message(job, msg);
@@ -877,9 +885,10 @@ static int32_t _process_job_run(dt_job_t *job)
     dt_print(DT_DEBUG_AI,
              "[neural_restore] processing imgid %d -> %s", imgid, filename);
     snprintf(msg, sizeof(msg),
-             (j->task == NEURAL_TASK_DENOISE) ? _("denoising image %d/%d...")
+             (j->task == NEURAL_TASK_DENOISE)    ? _("denoising image %d/%d...")
+             : (j->task == NEURAL_TASK_DEBLUR)    ? _("deblurring image %d/%d...")
              : (j->task == NEURAL_TASK_UPSCALE_2X) ? _("upscaling 2x image %d/%d...")
-             : _("upscaling 4x image %d/%d..."),
+             :                                      _("upscaling 4x image %d/%d..."),
              count + 1, total);
     dt_control_job_set_progress_message(job, msg);
 
@@ -1048,12 +1057,13 @@ static void _task_changed(dt_lib_neural_restore_t *d)
     gtk_widget_queue_draw(d->preview_area);
   }
 
-  // restore detail recovery slider from conf when switching to denoise,
+  // restore detail recovery slider from conf when switching to denoise
+  // or deblur (both run at scale 1 and benefit from texture preservation),
   // reset to 0 when switching away (upscale has no detail recovery).
   // use _recovery_changing flag to avoid redundant conf writes from
   // the slider's value-changed callback
   d->recovery_changing = TRUE;
-  if(d->task == NEURAL_TASK_DENOISE)
+  if(d->task == NEURAL_TASK_DENOISE || d->task == NEURAL_TASK_DEBLUR)
   {
     const float saved = dt_conf_get_float(CONF_DETAIL_RECOVERY);
     dt_bauhaus_slider_set(d->recovery_slider, saved);
@@ -1510,16 +1520,25 @@ static void _trigger_preview(dt_lib_module_t *self)
                                    _preview_thread, pd);
 }
 
+// map notebook page index to task. pages are ordered:
+//   0 = denoise, 1 = deblur, 2 = upscale (with scale_combo picking 2x/4x)
+static dt_neural_task_t _task_from_page(dt_lib_neural_restore_t *d, int page)
+{
+  switch(page)
+  {
+    case 0: return NEURAL_TASK_DENOISE;
+    case 1: return NEURAL_TASK_DEBLUR;
+    default:
+    {
+      const int scale_pos = dt_bauhaus_combobox_get(d->scale_combo);
+      return (scale_pos == 1) ? NEURAL_TASK_UPSCALE_4X : NEURAL_TASK_UPSCALE_2X;
+    }
+  }
+}
+
 static void _update_task_from_ui(dt_lib_neural_restore_t *d)
 {
-  const int page = gtk_notebook_get_current_page(d->notebook);
-  if(page == 0)
-    d->task = NEURAL_TASK_DENOISE;
-  else
-  {
-    const int scale_pos = dt_bauhaus_combobox_get(d->scale_combo);
-    d->task = (scale_pos == 1) ? NEURAL_TASK_UPSCALE_4X : NEURAL_TASK_UPSCALE_2X;
-  }
+  d->task = _task_from_page(d, gtk_notebook_get_current_page(d->notebook));
 }
 
 static void _notebook_page_changed(GtkNotebook *notebook,
@@ -1530,13 +1549,7 @@ static void _notebook_page_changed(GtkNotebook *notebook,
   dt_lib_neural_restore_t *d = (dt_lib_neural_restore_t *)self->data;
 
   // switch-page fires before the page changes, so use page_num
-  if(page_num == 0)
-    d->task = NEURAL_TASK_DENOISE;
-  else
-  {
-    const int scale_pos = dt_bauhaus_combobox_get(d->scale_combo);
-    d->task = (scale_pos == 1) ? NEURAL_TASK_UPSCALE_4X : NEURAL_TASK_UPSCALE_2X;
-  }
+  d->task = _task_from_page(d, page_num);
 
   dt_conf_set_int(CONF_ACTIVE_PAGE, page_num);
   _task_changed(d);
@@ -2228,7 +2241,10 @@ void gui_init(dt_lib_module_t *self)
   dt_pthread_mutex_init(&d->ctx_lock, NULL);
   d->split_pos = 0.5f;
 
-  // notebook tabs (denoise / upscale)
+  // notebook tabs (denoise / deblur / upscale). deblur shares the
+  // scale == 1 pipeline with denoise and has no task-specific controls;
+  // detail recovery is configured on the denoise page and applies to
+  // deblur output at job time because scale == 1 gates it
   static dt_action_def_t notebook_def = {};
   d->notebook = dt_ui_notebook_new(&notebook_def);
   dt_action_define(DT_ACTION(self), NULL, N_("page"),
@@ -2236,6 +2252,8 @@ void gui_init(dt_lib_module_t *self)
 
   d->denoise_page = dt_ui_notebook_page(d->notebook, N_("denoise"),
                                         _("AI denoising"));
+  d->deblur_page  = dt_ui_notebook_page(d->notebook, N_("deblur"),
+                                        _("AI deblurring"));
   d->upscale_page = dt_ui_notebook_page(d->notebook, N_("upscale"),
                                         _("AI upscaling"));
 
