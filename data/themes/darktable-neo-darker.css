@@ -1,0 +1,79 @@
+/*
+    This file is part of darktable,
+    Copyright (C) 2019-2026 darktable developers.
+
+    darktable is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    darktable is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with darktable.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+@import url("darktable-neo.css");
+
+/* This has been tested with GTK 3.24 on Gnome */
+
+/* Neo theme — darker variant.
+ *
+ * Near-black OLED-friendly palette. Same elevation system as neo-dark,
+ * just shifted one tier deeper so the variants feel meaningfully distinct.
+ *
+ *   canvas (bg_color)      = @grey_10 (#1b1b1b)
+ *   panels (plugin_bg)     = @grey_15 (#262626)
+ *   modules (collapsible)  = @grey_20 (#303030)
+ *   controls (button_bg)   = @grey_25 (#3b3b3b)
+ *
+ * Accessibility target: WCAG AAA (≥ 7:1 for body text).
+ * Palette ratio (fg @grey_80 on bg @grey_10) ≈ 9.5:1 — passes AAA.
+ */
+
+/* General */
+@define-color border_color @grey_05;
+@define-color bg_color @grey_10;
+@define-color fg_color @grey_80;
+@define-color placeholder_text_color @grey_50;
+@define-color disabled_fg_color @grey_45;
+
+/* Scroll bars */
+@define-color scroll_bar_inactive @grey_35;
+@define-color scroll_bar_active @grey_55;
+@define-color scroll_bar_bg @grey_05;
+
+/* Modules */
+@define-color plugin_bg_color @grey_15;
+@define-color collapsible_bg_color @grey_20;
+@define-color plugin_label_color @grey_70;
+
+/* Bauhaus controls */
+@define-color bauhaus_indicator_border @grey_15;
+
+/* GTK Buttons */
+@define-color button_bg @grey_25;
+@define-color button_hover_bg @grey_45;
+@define-color button_hover_fg @grey_10;
+
+/* Text fields */
+@define-color field_bg @grey_10;
+@define-color field_active_bg @grey_20;
+@define-color field_selected_bg @grey_35;
+
+/* Tooltips */
+@define-color tooltip_bg_color @grey_10;
+@define-color tooltip_fg_color @grey_75;
+
+/* Graphs */
+@define-color graph_bg @grey_05;
+@define-color graph_border @grey_05;
+@define-color graph_grid @grey_05;
+
+/* hide selection frame in culling */
+@define-color culling_selected_border_color transparent;
+
+@import url("chunk-fonts-neo.css");
