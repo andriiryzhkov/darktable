@@ -55,6 +55,7 @@
 #include "common/pfm.h"
 #ifdef HAVE_AI
 #include "common/ai_models.h"
+#include "common/ai/embeddings.h"
 #endif
 #include "control/conf.h"
 #include "control/control.h"
@@ -1740,6 +1741,12 @@ int dt_init(int argc,
   dt_splash_screen_set_progress(_("initializing signals and control"));
   darktable.signals = dt_control_signal_init();
 
+#ifdef HAVE_AI
+  // initialize embeddings DB (attached to main DB) and
+  // connect import signal for auto-indexing
+  dt_ai_embeddings_init();
+#endif
+
   dt_control_init(init_gui);
   if(init_gui)
   {
@@ -2227,6 +2234,7 @@ void dt_cleanup()
 
   dt_colorspaces_cleanup(darktable.color_profiles);
 #ifdef HAVE_AI
+  dt_ai_embeddings_cleanup();
   dt_ai_models_cleanup();
   dt_ai_backend_cleanup_globals();
 #endif

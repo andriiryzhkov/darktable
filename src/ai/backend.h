@@ -251,6 +251,13 @@ int *dt_ai_model_attribute_int_array(const dt_ai_model_info_t *info,
                                      const char *key,
                                      int *out_count);
 
+/** Float-valued sibling of dt_ai_model_attribute_int_array. JSON numbers
+ *  are read as doubles and stored. Caller frees the returned array with
+ *  g_free(). */
+double *dt_ai_model_attribute_double_array(const dt_ai_model_info_t *info,
+                                           const char *key,
+                                           int *out_count);
+
 /* --- Discovery --- */
 
 /**

@@ -7,6 +7,7 @@
   <dttab name="lighttable" title="lighttable">
     <section title="general"/>
     <section name="thumbs" title="thumbnails"/>
+    <section name="indexing" title="indexing"/>
   </dttab>
   <dttab name="darkroom" title="darkroom">
     <section title="general"/>
@@ -2577,6 +2578,20 @@
      <shortdescription>show image time with milliseconds</shortdescription>
      <longdescription>defines whether time should be displayed with milliseconds</longdescription>
    </dtconfig>
+  <dtconfig prefs="lighttable" section="indexing">
+    <name>plugins/ai/index_on_import</name>
+    <type>bool</type>
+    <default>false</default>
+    <shortdescription>enable image indexing on import</shortdescription>
+    <longdescription>automatically compute AI embeddings for images when they are imported into the library. embeddings are used for auto-tagging, similarity search, and image grouping</longdescription>
+  </dtconfig>
+  <dtconfig prefs="lighttable" section="indexing">
+    <name>plugins/ai/auto_tag</name>
+    <type>bool</type>
+    <default>false</default>
+    <shortdescription>auto-tag indexed images</shortdescription>
+    <longdescription>automatically apply tags to images after indexing based on AI similarity to predefined tag categories</longdescription>
+  </dtconfig>
   <dtconfig>
     <name>darkroom/ui/rawoverexposed/mode</name>
     <type>int</type>

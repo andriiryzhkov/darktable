@@ -38,6 +38,9 @@
 #include "gui/drag_and_drop.h"
 #include "gui/accelerators.h"
 #include "views/view.h"
+#ifdef HAVE_AI
+#include "common/ai/embeddings.h"
+#endif
 
 static void _thumb_resize_overlays(dt_thumbnail_t *thumb);
 
@@ -94,6 +97,17 @@ static void _thumb_update_tags_tooltip(dt_thumbnail_t *thumb)
     thumb->has_tags = FALSE;
   }
 }
+
+#ifdef HAVE_AI
+static void _thumb_update_indexed_tooltip(dt_thumbnail_t *thumb)
+{
+  if(!thumb->w_indexed) return;
+  thumb->is_indexed = dt_ai_embed_has(thumb->imgid);
+  gtk_widget_set_visible(thumb->w_indexed, thumb->is_indexed);
+  if(thumb->is_indexed)
+    gtk_widget_set_tooltip_text(thumb->w_indexed, _("in AI index"));
+}
+#endif
 
 static void _thumb_update_altered_tooltip(dt_thumbnail_t *thumb)
 {
@@ -977,6 +991,9 @@ static void _thumb_update_icons(dt_thumbnail_t *thumb)
   gtk_widget_set_visible(thumb->w_altered, thumb->is_altered);
   _thumb_update_tags_tooltip(thumb);
   gtk_widget_set_visible(thumb->w_tags, thumb->has_tags);
+#ifdef HAVE_AI
+  _thumb_update_indexed_tooltip(thumb);
+#endif
 }
 
 static gboolean _thumbs_hide_overlays(gpointer user_data)
@@ -997,6 +1014,9 @@ static gboolean _thumbs_hide_overlays(gpointer user_data)
   gtk_widget_hide(thumb->w_local_copy);
   gtk_widget_hide(thumb->w_altered);
   gtk_widget_hide(thumb->w_tags);
+#ifdef HAVE_AI
+  gtk_widget_hide(thumb->w_indexed);
+#endif
   gtk_widget_hide(thumb->w_group);
   gtk_widget_hide(thumb->w_audio);
   gtk_widget_hide(thumb->w_zoom_eb);
@@ -1354,6 +1374,9 @@ static gboolean _event_btn_enter_leave(GtkWidget *widget,
       dt_control_set_mouse_over_id(thumb->imgid);
     _set_flag(thumb->w_image_box, GTK_STATE_FLAG_PRELIGHT, TRUE);
     _thumb_update_tags_tooltip(thumb);
+#ifdef HAVE_AI
+    _thumb_update_indexed_tooltip(thumb);
+#endif
   }
   else if(event->type == GDK_LEAVE_NOTIFY)
   {
@@ -1685,6 +1708,20 @@ GtkWidget *dt_thumbnail_create_widget(dt_thumbnail_t *thumb,
                      G_CALLBACK(_event_btn_enter_leave), thumb);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlays_parent), thumb->w_tags);
 
+#ifdef HAVE_AI
+    // the AI-index icon
+    thumb->w_indexed = dtgtk_thumbnail_btn_new(dtgtk_cairo_paint_index, 0, NULL);
+    gtk_widget_set_name(thumb->w_indexed, "thumb-indexed");
+    gtk_widget_set_valign(thumb->w_indexed, GTK_ALIGN_START);
+    gtk_widget_set_halign(thumb->w_indexed, GTK_ALIGN_END);
+    gtk_widget_set_no_show_all(thumb->w_indexed, TRUE);
+    g_signal_connect(G_OBJECT(thumb->w_indexed), "enter-notify-event",
+                     G_CALLBACK(_event_btn_enter_leave), thumb);
+    g_signal_connect(G_OBJECT(thumb->w_indexed), "leave-notify-event",
+                     G_CALLBACK(_event_btn_enter_leave), thumb);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlays_parent), thumb->w_indexed);
+#endif
+
     // the group bouton
     thumb->w_group = dtgtk_thumbnail_btn_new(dtgtk_cairo_paint_grouping, 0, NULL);
     gtk_widget_set_name(thumb->w_group, "thumb-group-audio");
@@ -1810,6 +1847,9 @@ dt_thumbnail_t *dt_thumbnail_new(const int width,
   _thumb_update_tooltip_text(thumb);
   _thumb_update_altered_tooltip(thumb);
   _thumb_update_tags_tooltip(thumb);
+#ifdef HAVE_AI
+  _thumb_update_indexed_tooltip(thumb);
+#endif
 
   // get the file extension
   _thumb_write_extension(thumb);
@@ -1968,6 +2008,14 @@ static void _thumb_resize_overlays(dt_thumbnail_t *thumb)
     gtk_widget_set_margin_top(thumb->w_audio, thumb->img_margin->top);
     gtk_widget_set_margin_end(thumb->w_audio, thumb->img_margin->right + 7.5 * r1);
 
+#ifdef HAVE_AI
+    // the AI-index icon
+    gtk_widget_set_size_request(thumb->w_indexed, 2.0 * r1, 2.0 * r1);
+    gtk_widget_set_halign(thumb->w_indexed, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(thumb->w_indexed, thumb->img_margin->top);
+    gtk_widget_set_margin_end(thumb->w_indexed, thumb->img_margin->right + 10.0 * r1);
+#endif
+
     // the filmstrip cursor
     gtk_widget_set_size_request(thumb->w_cursor, 6.0 * r1, 3.0 * r1);
   }
@@ -2089,6 +2137,13 @@ static void _thumb_resize_overlays(dt_thumbnail_t *thumb)
     gtk_widget_set_halign(thumb->w_audio, GTK_ALIGN_START);
     gtk_widget_set_margin_top(thumb->w_audio, line3 + py);
     gtk_widget_set_margin_start(thumb->w_audio, r1 + px);
+#ifdef HAVE_AI
+    // the AI-index icon
+    gtk_widget_set_size_request(thumb->w_indexed, icon_size2, icon_size2);
+    gtk_widget_set_halign(thumb->w_indexed, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(thumb->w_indexed, line3 + py);
+    gtk_widget_set_margin_start(thumb->w_indexed, 16.0 * r1 + px);
+#endif
     // the zoomming indicator
     gtk_widget_set_margin_top(thumb->w_zoom_eb, line3 + py);
     gtk_widget_set_margin_start(thumb->w_zoom_eb, 18.0 * r1 + px);

@@ -35,6 +35,13 @@
       "task": "upscale",
       "min_version": "1.0",
       "default": true
+    },
+    {
+      "id": "embed-openclip-rn101-yfcc15m",
+      "name": "embed openclip rn101 yfcc15m",
+      "task": "embed",
+      "min_version": "0.1",
+      "default": true
     }
   ]
 }

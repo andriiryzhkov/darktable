@@ -461,6 +461,34 @@ if(USE_AI)
 
   list(APPEND LIBS darktable_ai)
 
+  # generate sqlite-vec.h from template
+  file(READ "${CMAKE_CURRENT_SOURCE_DIR}/external/sqlite-vec/VERSION" SQLITE_VEC_VERSION)
+  string(STRIP "${SQLITE_VEC_VERSION}" SQLITE_VEC_VERSION)
+  string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" _sv_match "${SQLITE_VEC_VERSION}")
+  set(SQLITE_VEC_VERSION_MAJOR "${CMAKE_MATCH_1}")
+  set(SQLITE_VEC_VERSION_MINOR "${CMAKE_MATCH_2}")
+  set(SQLITE_VEC_VERSION_PATCH "${CMAKE_MATCH_3}")
+  set(VERSION "${SQLITE_VEC_VERSION}")
+  set(VERSION_MAJOR "${SQLITE_VEC_VERSION_MAJOR}")
+  set(VERSION_MINOR "${SQLITE_VEC_VERSION_MINOR}")
+  set(VERSION_PATCH "${SQLITE_VEC_VERSION_PATCH}")
+  set(DATE "")
+  set(SOURCE "")
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/sqlite-vec/sqlite-vec.h.tmpl"
+    "${CMAKE_CURRENT_BINARY_DIR}/sqlite-vec.h"
+  )
+
+  # sqlite-vec compiled as part of darktable with SQLITE_CORE
+  # suppress warnings for external code (-Werror would fail otherwise)
+  set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/external/sqlite-vec/sqlite-vec.c"
+    PROPERTIES
+      COMPILE_DEFINITIONS "SQLITE_CORE;SQLITE_VEC_STATIC"
+      COMPILE_OPTIONS "-Wno-shadow;-Wno-error"
+  )
+  include_directories(SYSTEM "${CMAKE_CURRENT_BINARY_DIR}")
+
   FILE(GLOB SOURCE_FILES_AI
     "common/ai_models.c"
     "common/ai/segmentation.c"
@@ -468,8 +496,10 @@ if(USE_AI)
     "common/ai/restore_rgb.c"
     "common/ai/restore_raw_bayer.c"
     "common/ai/restore_raw_linear.c"
+    "common/ai/embeddings.c"
     "develop/masks/object.c"
     "gui/preferences_ai.c"
+    "external/sqlite-vec/sqlite-vec.c"
   )
   set(SOURCES ${SOURCES} ${SOURCE_FILES_AI})
   add_definitions("-DHAVE_AI")

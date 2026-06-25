@@ -18,6 +18,9 @@
 
 #include "common/debug.h"
 #include "common/darktable.h"
+#ifdef HAVE_AI
+#include "common/ai/embeddings.h"
+#endif
 #include "bauhaus/bauhaus.h"
 #include "common/variables.h"
 #include "common/colorlabels.h"
@@ -952,6 +955,14 @@ static char *_get_base_value(dt_variables_params_t *params, char **variable)
   else if(_has_prefix(variable, "DARKTABLE.NAME")
           || _has_prefix(variable, "DARKTABLE_NAME"))
     result = g_strdup(PACKAGE_NAME);
+#ifdef HAVE_AI
+  else if(_has_prefix(variable, "AI.INDEXED")
+          || _has_prefix(variable, "AI_INDEXED"))
+  {
+    if(params->imgid > 0 && dt_ai_embed_has(params->imgid))
+      result = g_strdup("#");
+  }
+#endif
   else
   {
     // metadata
