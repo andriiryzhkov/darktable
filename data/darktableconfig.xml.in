@@ -418,6 +418,13 @@
     <longdescription>path to a custom ONNX Runtime shared library with GPU support (e.g. CUDA, MIGraphX, OpenVINO). when empty, darktable uses its bundled CPU-only library. set this to enable GPU acceleration without rebuilding.</longdescription>
   </dtconfig>
   <dtconfig>
+    <name>plugins/ai/auto_check_updates</name>
+    <type>bool</type>
+    <default>true</default>
+    <shortdescription>auto-check for updates</shortdescription>
+    <longdescription>fetch the model repository once per session (when the AI preferences tab is opened) to detect available updates. disable to avoid any background network access; you can still trigger a check manually from the AI preferences</longdescription>
+  </dtconfig>
+  <dtconfig>
     <name>plugins/ai/repository</name>
     <type>string</type>
     <default>darktable-org/darktable-ai</default>

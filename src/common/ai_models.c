@@ -61,6 +61,7 @@ struct dt_ai_registry_t
 // config keys
 #define CONF_AI_ENABLED "plugins/ai/enabled"
 #define CONF_AI_REPOSITORY "plugins/ai/repository"
+#define CONF_AI_AUTO_CHECK_UPDATES "plugins/ai/auto_check_updates"
 #define CONF_MODEL_ENABLED_PREFIX "plugins/ai/models/"
 #define CONF_ACTIVE_MODEL_PREFIX "plugins/ai/models/active/"
 
@@ -970,14 +971,21 @@ static gpointer _check_updates_worker(gpointer data)
   return NULL;
 }
 
-void dt_ai_models_check_updates(void)
+void dt_ai_models_check_updates(gboolean force)
 {
   dt_ai_registry_t *registry = darktable.ai_registry;
   if(!registry) return;
 
-  // only check once per session
+  // auto path: honour the user's preference, and only check once per session
+  if(!force && !dt_conf_get_bool(CONF_AI_AUTO_CHECK_UPDATES))
+  {
+    dt_print(DT_DEBUG_AI,
+             "[ai_models] auto update check disabled by preference");
+    return;
+  }
+
   g_mutex_lock(&registry->lock);
-  if(registry->updates_checked)
+  if(!force && registry->updates_checked)
   {
     g_mutex_unlock(&registry->lock);
     return;

@@ -106,6 +106,9 @@ typedef struct dt_prefs_ai_data_t
   GtkWidget *settings_grid;
   int controls_start_row;   // first row to grey out when AI disabled
   guint supported_providers;
+
+  GtkWidget *check_updates_btn;
+  guint check_updates_timeout_id;  // 0 when idle
 } dt_prefs_ai_data_t;
 
 #ifdef HAVE_AI_DOWNLOAD
@@ -204,7 +207,7 @@ static void _refresh_model_list(dt_prefs_ai_data_t *data)
   gtk_list_store_clear(data->model_store);
 
   dt_ai_models_refresh_status();
-  dt_ai_models_check_updates();
+  dt_ai_models_check_updates(FALSE);
 
   const int count = dt_ai_models_get_count();
   dt_print(DT_DEBUG_AI, "[preferences_ai] refreshing model list, count=%d", count);
@@ -272,15 +275,25 @@ static void _refresh_model_list(dt_prefs_ai_data_t *data)
 #endif
 }
 
+static void _reset_check_updates_button(dt_prefs_ai_data_t *data);
+
 static void _ai_models_changed_cb(gpointer instance, gpointer user_data)
 {
   dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
-  if(data) _refresh_model_list(data);
+  if(!data) return;
+  // a check kicked off by the button is finishing — restore it and notify
+  const gboolean was_checking = data->check_updates_timeout_id != 0;
+  _reset_check_updates_button(data);
+  _refresh_model_list(data);
+  if(was_checking) dt_control_log(_("checked for AI model updates"));
 }
 
 // disconnect before free so a late signal dispatch can't touch freed data
 static void _prefs_ai_data_free(gpointer user_data)
 {
+  dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
+  if(data && data->check_updates_timeout_id)
+    g_source_remove(data->check_updates_timeout_id);
   DT_CONTROL_SIGNAL_DISCONNECT(_ai_models_changed_cb, user_data);
   g_free(user_data);
 }
@@ -1068,6 +1081,82 @@ static void _on_install_model(GtkButton *button, gpointer user_data)
   g_string_free(errors, TRUE);
 }
 
+static void _reset_check_updates_button(dt_prefs_ai_data_t *data)
+{
+  if(data->check_updates_timeout_id)
+  {
+    g_source_remove(data->check_updates_timeout_id);
+    data->check_updates_timeout_id = 0;
+  }
+  if(data->check_updates_btn)
+  {
+    gtk_button_set_label(GTK_BUTTON(data->check_updates_btn),
+                         _("check for updates"));
+    gtk_widget_set_sensitive(data->check_updates_btn, TRUE);
+    // release the pinned width so future DPI / font changes can resize us
+    gtk_widget_set_size_request(data->check_updates_btn, -1, -1);
+  }
+}
+
+// fires only when the remote fetch never came back — network error path
+// (a successful fetch raises DT_SIGNAL_AI_MODELS_CHANGED first)
+static gboolean _check_updates_timeout(gpointer user_data)
+{
+  dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
+  data->check_updates_timeout_id = 0;
+  _reset_check_updates_button(data);
+  dt_control_log(_("could not check for AI model updates"
+                   " — see log for details"));
+  return G_SOURCE_REMOVE;
+}
+
+static void _on_check_updates(GtkButton *button, gpointer user_data)
+{
+  (void)button;
+  dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
+
+  // pin current width before swapping to a shorter label — otherwise the
+  // button shrinks under "checking…" and reflows the button box
+  GtkAllocation alloc;
+  gtk_widget_get_allocation(data->check_updates_btn, &alloc);
+  gtk_widget_set_size_request(data->check_updates_btn, alloc.width, -1);
+
+  // immediate feedback: relabel and disable so the user sees the click land
+  gtk_button_set_label(GTK_BUTTON(data->check_updates_btn), _("checking…"));
+  gtk_widget_set_sensitive(data->check_updates_btn, FALSE);
+
+  // fallback: if the fetch fails silently, restore the button after 30s
+  if(data->check_updates_timeout_id)
+    g_source_remove(data->check_updates_timeout_id);
+  data->check_updates_timeout_id =
+    g_timeout_add_seconds(30, _check_updates_timeout, data);
+
+  // force bypasses both the auto-check preference and the once-per-session
+  // guard; completion refreshes the model list via DT_SIGNAL_AI_MODELS_CHANGED
+  dt_ai_models_check_updates(TRUE);
+}
+
+static void _on_auto_check_toggled(GtkToggleButton *toggle, gpointer user_data)
+{
+  (void)user_data;
+  dt_conf_set_bool("plugins/ai/auto_check_updates",
+                   gtk_toggle_button_get_active(toggle));
+}
+
+// double-click on label resets the auto-check toggle to default
+static gboolean
+_reset_auto_check_click(GtkWidget *label, GdkEventButton *event, GtkWidget *widget)
+{
+  if(event->type == GDK_2BUTTON_PRESS)
+  {
+    const gboolean def = dt_confgen_get_bool("plugins/ai/auto_check_updates",
+                                             DT_DEFAULT);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), def);
+    return TRUE;
+  }
+  return FALSE;
+}
+
 static void _on_delete_selected(GtkButton *button, gpointer user_data)
 {
   dt_prefs_ai_data_t *data = (dt_prefs_ai_data_t *)user_data;
@@ -1690,6 +1779,33 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   }
 #endif // !__APPLE__
 
+  // auto-check-for-updates toggle — last row of the general section.
+  // label/tooltip come from the XML schema so the shortdescription /
+  // longdescription in darktableconfig.xml.in stay authoritative.
+  {
+    const char *ac_key = "plugins/ai/auto_check_updates";
+    GtkWidget *ac_label = gtk_label_new(dt_confgen_get_label(ac_key));
+    gtk_widget_set_halign(ac_label, GTK_ALIGN_START);
+    GtkWidget *ac_labelev = gtk_event_box_new();
+    gtk_widget_add_events(ac_labelev, GDK_BUTTON_PRESS_MASK);
+    gtk_container_add(GTK_CONTAINER(ac_labelev), ac_label);
+    gtk_event_box_set_visible_window(GTK_EVENT_BOX(ac_labelev), FALSE);
+
+    GtkWidget *ac_indicator = _create_indicator(ac_key);
+    GtkWidget *ac_toggle = gtk_check_button_new();
+    gtk_widget_set_tooltip_text(ac_toggle, dt_confgen_get_tooltip(ac_key));
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ac_toggle),
+                                 dt_conf_get_bool(ac_key));
+    g_signal_connect(ac_toggle, "toggled",
+                     G_CALLBACK(_on_auto_check_toggled), data);
+    g_signal_connect(ac_labelev, "button-press-event",
+                     G_CALLBACK(_reset_auto_check_click), ac_toggle);
+
+    gtk_grid_attach(GTK_GRID(settings_grid), ac_labelev, 0, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(settings_grid), ac_indicator, 1, row, 1, 1);
+    gtk_grid_attach(GTK_GRID(settings_grid), ac_toggle, 2, row++, 1, 1);
+  }
+
   dt_gui_box_add(main_box, settings_grid);
 
   // controls_box wraps the models section - greyed out when AI disabled
@@ -1931,6 +2047,16 @@ void init_tab_ai(GtkWidget *dialog, GtkWidget *stack)
   dt_gui_add_help_link(help_btn, "ai");
   g_signal_connect(help_btn, "clicked", G_CALLBACK(dt_gui_show_help), NULL);
   dt_gui_box_add(button_box, dt_gui_align_right(help_btn));
+
+  // check for updates button — forces a remote refresh regardless of the
+  // auto-check preference. Placed after the help button so it anchors at the
+  // right edge, past the hexpanding help widget
+  data->check_updates_btn = gtk_button_new_with_label(_("check for updates"));
+  gtk_widget_set_tooltip_text(data->check_updates_btn,
+    _("fetch the model repository now to detect available updates"));
+  g_signal_connect(data->check_updates_btn, "clicked",
+                   G_CALLBACK(_on_check_updates), data);
+  dt_gui_box_add(button_box, data->check_updates_btn);
 
   dt_gui_box_add(data->controls_box, models_grid);
 
