@@ -1,0 +1,232 @@
+{
+  "version": 1,
+  "colorspaces": [
+    {
+      "id": "srgb",
+      "name": "sRGB",
+      "transfer": { "type": "srgb" },
+      "primaries": {
+        "red":   [0.640, 0.330],
+        "green": [0.300, 0.600],
+        "blue":  [0.150, 0.060]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "rec709",
+      "name": "Rec.709",
+      "transfer": { "type": "rec709" },
+      "primaries": {
+        "red":   [0.640, 0.330],
+        "green": [0.300, 0.600],
+        "blue":  [0.150, 0.060]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "linear-rec709",
+      "name": "linear Rec.709",
+      "transfer": { "type": "linear" },
+      "primaries": {
+        "red":   [0.640, 0.330],
+        "green": [0.300, 0.600],
+        "blue":  [0.150, 0.060]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "vlog-vgamut",
+      "name": "Panasonic V-Log / V-Gamut",
+      "transfer": {
+        "type": "log",
+        "cut": 0.01,
+        "cut_code": 0.181,
+        "b": 0.00873,
+        "c": 0.241514,
+        "d": 0.598206,
+        "e": 5.6,
+        "f": 0.125
+      },
+      "primaries": {
+        "red":   [0.730,  0.280],
+        "green": [0.165,  0.840],
+        "blue":  [0.100, -0.030]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "slog3-sgamut3",
+      "name": "Sony S-Log3 / S-Gamut3",
+      "transfer": {
+        "type": "log",
+        "cut": 0.01125,
+        "cut_code": 0.167361,
+        "b": 0.01,
+        "c": 0.25562072,
+        "d": 0.59492271,
+        "e": 6.62194422,
+        "f": 0.09286413
+      },
+      "primaries": {
+        "red":   [0.730,  0.280],
+        "green": [0.140,  0.855],
+        "blue":  [0.100, -0.050]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "slog3-sgamut3cine",
+      "name": "Sony S-Log3 / S-Gamut3.Cine",
+      "transfer": {
+        "type": "log",
+        "cut": 0.01125,
+        "cut_code": 0.167361,
+        "b": 0.01,
+        "c": 0.25562072,
+        "d": 0.59492271,
+        "e": 6.62194422,
+        "f": 0.09286413
+      },
+      "primaries": {
+        "red":   [0.766,  0.275],
+        "green": [0.225, -0.078],
+        "blue":  [0.089, -0.099]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "flog2-fgamut",
+      "name": "Fujifilm F-Log2 / F-Gamut",
+      "transfer": {
+        "type": "log",
+        "cut": 0.000889,
+        "cut_code": 0.100687,
+        "b": 0.01166922,
+        "c": 0.24528100,
+        "d": 0.56698351,
+        "e": 8.799461,
+        "f": 0.092864
+      },
+      "primaries": {
+        "red":   [0.708, 0.292],
+        "green": [0.170, 0.797],
+        "blue":  [0.131, 0.046]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "dlog-dgamut",
+      "name": "DJI D-Log / D-Gamut",
+      "transfer": {
+        "type": "log",
+        "cut": 0.0078,
+        "cut_code": 0.139895,
+        "b": 0.01091791,
+        "c": 0.25666300,
+        "d": 0.58334460,
+        "e": 6.025,
+        "f": 0.0929
+      },
+      "primaries": {
+        "red":   [0.710,  0.300],
+        "green": [0.210,  0.880],
+        "blue":  [0.090, -0.080]
+      },
+      "white_point": [0.3127, 0.3290]
+    },
+    {
+      "id": "bmd-film-gen5",
+      "name": "Blackmagic Film Gen 5 / BMD Wide Gamut",
+      "transfer": {
+        "type": "log",
+        "cut": 0.005,
+        "cut_code": 0.133884,
+        "b": 0.00549407,
+        "c": 0.20016087,
+        "d": 0.53001334,
+        "e": 8.28360593,
+        "f": 0.09246575
+      },
+      "primaries": {
+        "red":   [0.7177215,  0.3171181],
+        "green": [0.2280410,  0.8615690],
+        "blue":  [0.1005841, -0.0820452]
+      },
+      "white_point": [0.3127170, 0.3290312]
+    }
+  ],
+  "targets": [
+    {
+      "id": "panasonic-vlog",
+      "name": "Panasonic V-Log",
+      "description": "for Panasonic Lumix cameras with the Real Time LUT feature",
+      "input_colorspace": "vlog-vgamut",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "resolve-rec709",
+      "name": "DaVinci Resolve (Rec.709)",
+      "description": "for a Rec.709 timeline in an NLE",
+      "input_colorspace": "rec709",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "srgb-photo",
+      "name": "sRGB (photo tools)",
+      "description": "sRGB in, sRGB out, for Capture One / Lightroom / Photoshop",
+      "input_colorspace": "srgb",
+      "output_colorspace": "srgb",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "sony-slog3-cine",
+      "name": "Sony S-Log3 / S-Gamut3.Cine",
+      "description": "for Sony cameras recording S-Log3 with S-Gamut3.Cine",
+      "input_colorspace": "slog3-sgamut3cine",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "sony-slog3",
+      "name": "Sony S-Log3 / S-Gamut3",
+      "description": "for Sony cameras recording S-Log3 with the wider S-Gamut3",
+      "input_colorspace": "slog3-sgamut3",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "fuji-flog2",
+      "name": "Fujifilm F-Log2",
+      "description": "for Fujifilm cameras recording F-Log2",
+      "input_colorspace": "flog2-fgamut",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "dji-dlog",
+      "name": "DJI D-Log",
+      "description": "for DJI cameras and drones recording D-Log",
+      "input_colorspace": "dlog-dgamut",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    },
+    {
+      "id": "blackmagic-film-gen5",
+      "name": "Blackmagic Film Gen 5",
+      "description": "for Blackmagic cameras recording Blackmagic Film Gen 5",
+      "input_colorspace": "bmd-film-gen5",
+      "output_colorspace": "rec709",
+      "grid_size": 33,
+      "format": "cube"
+    }
+  ]
+}

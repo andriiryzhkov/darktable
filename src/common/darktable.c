@@ -27,6 +27,8 @@
 
 #include "common/collection.h"
 #include "common/colorspaces.h"
+#include "common/lut_export_colorspace.h"
+#include "common/lut_export_target.h"
 #include "common/darktable.h"
 #include "common/datetime.h"
 #include "common/exif.h"
@@ -2364,6 +2366,8 @@ void dt_cleanup()
   dt_mipmap_cache_cleanup();
 
   dt_colorspaces_cleanup(darktable.color_profiles);
+  dt_lut_target_cleanup();
+  dt_lut_cs_cleanup();
 #ifdef HAVE_AI
   dt_ai_models_cleanup();
   dt_ai_backend_cleanup_globals();
