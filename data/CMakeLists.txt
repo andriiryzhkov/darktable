@@ -150,6 +150,9 @@ endif()
 FILE(COPY noiseprofiles.json DESTINATION "${DARKTABLE_DATADIR}")
 install(FILES noiseprofiles.json DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable COMPONENT DTApplication)
 
+configure_file(lut_export.json "${DARKTABLE_DATADIR}/lut_export.json" COPYONLY)
+install(FILES lut_export.json DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable COMPONENT DTApplication)
+
 #
 # Install wb presets
 #

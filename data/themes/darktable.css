@@ -1867,7 +1867,10 @@ treeview *:active
   color: @field_active_fg;
 }
 
+/* bauhaus widgets get no background of their own, which reads fine inside a
+   module but leaves them indistinguishable from plain text on a dialog */
 #preferences-box .dt_bauhaus,
+#lut-export-box .dt_bauhaus,
 treeview check:selected
 {
   background-color: @button_bg;

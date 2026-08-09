@@ -3189,6 +3189,20 @@
     <longdescription>if non-negative, this overrides the per-image output color profile rendering intent on export.</longdescription>
   </dtconfig>
   <dtconfig>
+    <name>plugins/lut_export/target</name>
+    <type>string</type>
+    <default>panasonic-vlog</default>
+    <shortdescription>LUT export target</shortdescription>
+    <longdescription>id of the target last used when exporting a 3D LUT, as defined in lut_export.json.</longdescription>
+  </dtconfig>
+  <dtconfig>
+    <name>plugins/lut_export/grid_size</name>
+    <type>int</type>
+    <default>33</default>
+    <shortdescription>LUT export grid size</shortdescription>
+    <longdescription>number of samples per axis in an exported 3D LUT.</longdescription>
+  </dtconfig>
+  <dtconfig>
     <name>plugins/darkroom/groups</name>
     <type>int</type>
     <default>2</default>

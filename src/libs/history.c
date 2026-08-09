@@ -18,6 +18,9 @@
 
 #include "common/darktable.h"
 #include "common/debug.h"
+#include "common/lut_export.h"
+#include "common/lut_export_target.h"
+#include "gui/lut_export_dialog.h"
 #include "common/math.h"
 #include "common/styles.h"
 #include "common/undo.h"
@@ -56,6 +59,7 @@ typedef struct dt_lib_history_t
   GtkWidget *history_box;
   GtkWidget *create_button;
   GtkWidget *compress_button;
+  GtkWidget *export_lut_button;
   gboolean record_undo;
   int record_history_level; // set to +1 in signal DT_SIGNAL_DEVELOP_HISTORY_WILL_CHANGE
                             // and back to -1 in DT_SIGNAL_DEVELOP_HISTORY_CHANGE. We want
@@ -128,6 +132,66 @@ int position(const dt_lib_module_t *self)
   return 900;
 }
 
+// export the current edit as a .cube LUT. this is the source that suits a
+// log target: an edit made on a log frame already has its tone mapping set
+// for that frame's range, where a saved style generally does not
+static void _lib_history_export_lut_clicked_callback(GtkWidget *widget,
+                                                     gpointer user_data)
+{
+  const dt_imgid_t imgid = darktable.develop
+    ? darktable.develop->image_storage.id
+    : NO_IMGID;
+
+  if(!dt_is_valid_imgid(imgid))
+  {
+    dt_control_log(_("no image open to export as a LUT"));
+    return;
+  }
+
+  // what it is for, before where it goes
+  int grid = 33;
+  const dt_lut_target_t *target = dt_lut_export_dialog_run(&grid);
+  if(!target) return;
+
+  gchar *stem = g_strdup(darktable.develop->image_storage.filename);
+  gchar *dot = g_strrstr(stem, ".");
+  if(dot) *dot = '\0';
+  gchar *suggested = g_strdup_printf("%s.cube", stem);
+
+  GtkWidget *win = dt_ui_main_window(darktable.gui->ui);
+  GtkFileChooserNative *filechooser = gtk_file_chooser_native_new
+    (_("export edit as LUT"), GTK_WINDOW(win), GTK_FILE_CHOOSER_ACTION_SAVE,
+     _("_export"), _("_cancel"));
+
+  dt_conf_get_folder_to_file_chooser("ui_last/export_path",
+                                     GTK_FILE_CHOOSER(filechooser));
+  gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(filechooser), suggested);
+
+  if(gtk_native_dialog_run(GTK_NATIVE_DIALOG(filechooser)) == GTK_RESPONSE_ACCEPT)
+  {
+    gchar *path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(filechooser));
+
+    dt_lut_export_report_t report;
+    float *rgb = dt_lut_export_render_image(imgid,
+                                            target->input_cs,
+                                            target->output_cs,
+                                            grid, &report);
+
+    dt_lut_export_write_and_report(rgb, grid, stem, path, &report);
+
+    dt_lut_export_report_free(&report);
+    g_free(rgb);
+    g_free(path);
+
+    dt_conf_set_folder_from_file_chooser("ui_last/export_path",
+                                         GTK_FILE_CHOOSER(filechooser));
+  }
+
+  g_object_unref(filechooser);
+  g_free(suggested);
+  g_free(stem);
+}
+
 void gui_init(dt_lib_module_t *self)
 {
   /* initialize ui widgets */
@@ -157,9 +221,16 @@ void gui_init(dt_lib_module_t *self)
                    N_("create style from history"),
                    d->create_button, &dt_action_def_button);
 
+  d->export_lut_button = dt_action_button_new
+    (self, N_("export as LUT..."),
+     _lib_history_export_lut_clicked_callback, self,
+     _("bake the current edit into a .cube 3D LUT\n"
+       "modules a LUT cannot represent are skipped and reported"), 0, 0);
+
   self->widget = dt_gui_vbox
     (dt_ui_resize_wrap(d->history_box, 1, "plugins/darkroom/history/windowheight"),
-     dt_gui_hbox(dt_gui_expand(d->compress_button), d->create_button));
+     dt_gui_hbox(dt_gui_expand(d->compress_button), d->create_button),
+     d->export_lut_button);
   gtk_widget_set_name(self->widget, "history-ui");
   gtk_widget_show_all(self->widget);
 

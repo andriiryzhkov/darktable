@@ -18,6 +18,9 @@
 
 #include "bauhaus/bauhaus.h"
 #include "common/collection.h"
+#include "common/lut_export.h"
+#include "common/lut_export_target.h"
+#include "gui/lut_export_dialog.h"
 #include "common/styles.h"
 #include "common/darktable.h"
 #include "common/utility.h"
@@ -44,7 +47,7 @@ typedef struct dt_lib_styles_t
   GtkWidget *duplicate;
   GtkTreeView *tree;
   GtkWidget *create_button, *edit_button, *delete_button;
-  GtkWidget *import_button, *export_button, *applymode, *apply_button;
+  GtkWidget *import_button, *export_button, *export_lut_button, *applymode, *apply_button;
   GtkWidget *hide_preview;
 } dt_lib_styles_t;
 
@@ -583,6 +586,62 @@ static void _export_clicked(GtkWidget *w, dt_lib_styles_t *d)
   g_list_free_full(style_names, g_free);
 }
 
+// export the selected styles as .cube LUTs. needs no image selected or open
+static void _export_lut_clicked(GtkWidget *w, dt_lib_styles_t *d)
+{
+  GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(d->tree));
+  if(gtk_tree_selection_count_selected_rows(selection) == 0) return;
+
+  GtkTreeModel *model = gtk_tree_view_get_model(d->tree);
+  GList *selected_styles = gtk_tree_selection_get_selected_rows(selection, &model);
+  GList *style_names = _get_selected_style_names(selected_styles, model);
+  g_list_free_full(selected_styles, (GDestroyNotify) gtk_tree_path_free);
+  if(style_names == NULL) return;
+
+  // what it is for, before where it goes
+  int grid = 33;
+  const dt_lut_target_t *target = dt_lut_export_dialog_run(&grid);
+  if(!target)
+  {
+    g_list_free_full(style_names, g_free);
+    return;
+  }
+
+  GtkWidget *win = dt_ui_main_window(darktable.gui->ui);
+  GtkFileChooserNative *filechooser = gtk_file_chooser_native_new(
+    _("select directory for LUT export"), GTK_WINDOW(win),
+    GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+    _("_save"), _("_cancel"));
+  dt_conf_get_folder_to_file_chooser("ui_last/export_path", GTK_FILE_CHOOSER(filechooser));
+  gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(filechooser), FALSE);
+
+  if(gtk_native_dialog_run(GTK_NATIVE_DIALOG(filechooser)) == GTK_RESPONSE_ACCEPT)
+  {
+    char *filedir = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(filechooser));
+
+    for(const GList *s = style_names; s; s = g_list_next(s))
+    {
+      const char *name = s->data;
+      dt_lut_export_report_t report;
+      float *rgb = dt_lut_export_render_style(name,
+                                              target->input_cs,
+                                              target->output_cs,
+                                              grid, &report);
+      gchar *out = g_strdup_printf("%s/%s.cube", filedir, name);
+
+      dt_lut_export_write_and_report(rgb, grid, name, out, &report);
+
+      dt_lut_export_report_free(&report);
+      g_free(rgb);
+      g_free(out);
+    }
+    dt_conf_set_folder_from_file_chooser("ui_last/export_path", GTK_FILE_CHOOSER(filechooser));
+    g_free(filedir);
+  }
+  g_object_unref(filechooser);
+  g_list_free_full(style_names, g_free);
+}
+
 static void _import_clicked(GtkWidget *w, dt_lib_styles_t *d)
 {
   /* variables for overwrite dialog */
@@ -943,6 +1002,11 @@ void gui_init(dt_lib_module_t *self)
      _export_clicked, d,
      _("export the selected styles into a style files"), 0, 0);
 
+  d->export_lut_button = dt_action_button_new
+    (self, N_("export as LUT..."),
+     _export_lut_clicked, d,
+     _("export the selected styles as .cube LUT files"), 0, 0);
+
   // apply button
   d->apply_button = dt_action_button_new
     (self, N_("apply"),
@@ -963,6 +1027,7 @@ void gui_init(dt_lib_module_t *self)
      d->hide_preview, d->duplicate, d->applymode,
      dt_gui_hbox(d->create_button, d->edit_button, d->delete_button),
      dt_gui_hbox(d->import_button, d->export_button),
+     d->export_lut_button,
      d->apply_button);
 
   /* update filtered list */
