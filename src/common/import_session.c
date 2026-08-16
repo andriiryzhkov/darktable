@@ -244,7 +244,7 @@ const char *dt_import_session_name(const dt_import_session_t *self)
  */
 static char *_import_session_filename_from_pattern(dt_import_session_t *self, gchar *pattern)
 {
-  gchar *result_fname = dt_variables_expand(self->vp, pattern, TRUE);
+  gchar *result_fname = dt_variables_expand_path(self->vp, pattern, TRUE);
   return g_strchomp(result_fname);
 }
 
@@ -333,7 +333,7 @@ static const char *_import_session_path(dt_import_session_t *self, const gboolea
     return NULL;
   }
 
-  gchar *new_path = dt_variables_expand(self->vp, pattern, FALSE);
+  gchar *new_path = dt_variables_expand_path(self->vp, pattern, FALSE);
   g_free(pattern);
 
 #ifdef WIN32

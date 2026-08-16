@@ -46,6 +46,38 @@ int run_test(const test_t *test, int *n_tests, int *n_failed)
   return *n_failed > 0 ? 1 : 0;
 }
 
+// same cases through dt_variables_expand_path(). on Windows it normalizes
+// separators first; everywhere else it must behave exactly like plain
+// expansion, which is what this pins down
+int run_path_test(const test_t *test, int *n_tests, int *n_failed)
+{
+  dt_variables_params_t *params;
+  dt_variables_params_init(&params);
+  params->filename = test->filename;
+  params->jobcode = test->jobcode;
+  params->sequence = test->sequence;
+
+  *n_failed = 0;
+  *n_tests = 0;
+  for(const test_case_t *test_case = test->test_cases; test_case->input; test_case++)
+  {
+    (*n_tests)++;
+    char *result = dt_variables_expand_path(params, test_case->input, FALSE);
+    if(g_strcmp0(result, test_case->expected_result))
+    {
+      (*n_failed)++;
+      printf("  [FAIL] input: '%s', result: '%s', expected: '%s'\n",
+             test_case->input, result, test_case->expected_result);
+    }
+    else
+      printf("  [OK] input: '%s', result: '%s'\n", test_case->input, result);
+  }
+
+  dt_variables_params_destroy(params);
+
+  return *n_failed > 0 ? 1 : 0;
+}
+
 static const test_t test_variables = {
   "abcdef12345abcdef", "ABCDEF12345ABCDEF", 23,
   {
@@ -197,6 +229,32 @@ static const test_t test_real_paths = {
     printf("%d / %d tests failed\n\n", n_failed, n_tests);\
 }
 
+#define TEST_PATH(test)\
+{\
+    printf("[%s]\n", #test);\
+    int n_tests, n_failed;\
+    n_test_functions++;\
+    if(run_path_test(&test, &n_tests, &n_failed)) n_test_functions_failed++;\
+    n_tests_overall += n_tests;\
+    n_failed_overall += n_failed;\
+    printf("%d / %d tests failed\n\n", n_failed, n_tests);\
+}
+
+static const test_t test_paths = {
+  "/home/test/Images/IMG_0123.CR2", "/home/test/", 23,
+  {
+    // a path pattern must survive expansion, separators and all
+    {"$(FILE_FOLDER)/exported/$(FILE_NAME)",
+     "/home/test/Images/exported/IMG_0123"},
+    {"/home/test/$(JOBCODE)/img_$(SEQUENCE)",
+     "/home/test//home/test//img_0023"},
+    // escaping still works through this entry point
+    {"foo\\$(bar", "foo$(bar"},
+
+    {NULL, NULL}
+  }
+};
+
 int main(int argc, char* argv[])
 {
   char *argv_override[] = {"darktable-test-variables", "--library", ":memory:", "--conf", "write_sidecar_files=never", NULL};
@@ -218,6 +276,8 @@ int main(int argc, char* argv[])
   TEST(test_escapes)
 
   TEST(test_real_paths)
+
+  TEST_PATH(test_paths)
 
   printf("%d / %d tests failed (%d / %d)\n",
          n_failed_overall,

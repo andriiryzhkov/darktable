@@ -77,6 +77,17 @@ void dt_variables_set_tags_flags(dt_variables_params_t *params,
 char *dt_variables_expand(dt_variables_params_t *params,
                           gchar *source,
                           const gboolean iterate);
+/** expands variables in a string naming a filesystem path.
+
+    On Windows the escape character and the path separator are both '\',
+    so "D:\photos\$(YEAR)" would lose its separators and its variable.
+    Separators are normalized to '/' first, which Win32 accepts
+    everywhere; elsewhere this is dt_variables_expand().
+
+    The result should be freed with g_free(). */
+char *dt_variables_expand_path(dt_variables_params_t *params,
+                               gchar *source,
+                               const gboolean iterate);
 /** reset sequence number */
 void dt_variables_reset_sequence(dt_variables_params_t *params);
 

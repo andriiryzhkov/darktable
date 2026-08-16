@@ -1396,6 +1396,27 @@ char *dt_variables_expand(dt_variables_params_t *params,
   return result;
 }
 
+char *dt_variables_expand_path(dt_variables_params_t *params,
+                               gchar *source,
+                               const gboolean iterate)
+{
+  // '\' is the escape character here and the path separator on Windows, and
+  // the string alone cannot say which was meant. a path is unambiguous once
+  // it uses '/', which Win32 accepts wherever it accepts '\' – including in
+  // UNC names, where "\\server\share" becomes "//server/share".
+  // G_DIR_SEPARATOR is a compile-time constant, so this costs nothing where
+  // it does not apply, and both branches still get compiled everywhere
+  gchar *normalized = (G_DIR_SEPARATOR == '\\')
+    ? dt_util_str_replace(source, "\\", "/")
+    : NULL;
+
+  char *result = dt_variables_expand(params,
+                                     normalized ? normalized : source,
+                                     iterate);
+  g_free(normalized);
+  return result;
+}
+
 void dt_variables_params_init(dt_variables_params_t **params)
 {
   *params = g_malloc0(sizeof(dt_variables_params_t));
