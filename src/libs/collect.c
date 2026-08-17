@@ -28,6 +28,7 @@
 #include "common/metadata.h"
 #include "common/utility.h"
 #include "control/conf.h"
+#include "control/crawler.h"
 #include "control/control.h"
 #include "dtgtk/button.h"
 #include "dtgtk/thumbtable.h"
@@ -609,6 +610,246 @@ static void view_popup_menu_onRemove(GtkWidget *menuitem,
   }
 }
 
+// Syncing a film roll edited on another machine is two questions about the
+// same set of images: which sidecars are newer than the database, and which
+// images no longer exist. Both are answered by walking the film roll once,
+// which is also what keeps this usable on a large library – the startup
+// crawler has to scan everything, this only scans what was pointed at.
+typedef struct dt_sync_filmroll_t
+{
+  gchar *folder;
+  GList *changed;   // dt_control_crawler_result_t*, sidecars newer than the db
+  GList *missing;   // imgids whose file is gone
+  int total;
+} dt_sync_filmroll_t;
+
+static void _sync_filmroll_free(void *data)
+{
+  dt_sync_filmroll_t *s = (dt_sync_filmroll_t *)data;
+  dt_control_crawler_result_free(s->changed);
+  g_list_free(s->missing);
+  g_free(s->folder);
+  g_free(s);
+}
+
+static gboolean _sync_filmroll_progress(const double fraction,
+                                        gpointer user_data)
+{
+  dt_job_t *job = (dt_job_t *)user_data;
+  dt_control_job_set_progress(job, fraction);
+  return dt_control_job_get_state(job) != DT_JOB_STATE_CANCELLED;
+}
+
+// a button inside the dialog body, rather than in its action area, still
+// ends the dialog – it just has to say so itself
+#define DT_SYNC_RESPONSE_REVIEW 1
+#define DT_SYNC_RESPONSE_REMOVE 2
+
+static void _sync_review_clicked(GtkButton *button, gpointer user_data)
+{
+  gtk_dialog_response(GTK_DIALOG(user_data), DT_SYNC_RESPONSE_REVIEW);
+}
+
+static void _sync_remove_clicked(GtkButton *button, gpointer user_data)
+{
+  gtk_dialog_response(GTK_DIALOG(user_data), DT_SYNC_RESPONSE_REMOVE);
+}
+
+static void _sync_remove_missing(dt_sync_filmroll_t *s)
+{
+  // dt_control_remove_images() acts on the selection, asks first and reports
+  // progress, so hand it exactly the images we found
+  DT_DEBUG_SQLITE3_EXEC(dt_database_get(darktable.db),
+                        "DELETE FROM main.selected_images", NULL, NULL, NULL);
+
+  sqlite3_stmt *stmt;
+  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
+                              "INSERT INTO main.selected_images (imgid)"
+                              " VALUES (?1)", -1, &stmt, NULL);
+  for(GList *l = s->missing; l; l = g_list_next(l))
+  {
+    DT_DEBUG_SQLITE3_BIND_INT(stmt, 1, GPOINTER_TO_INT(l->data));
+    sqlite3_step(stmt);
+    sqlite3_reset(stmt);
+    sqlite3_clear_bindings(stmt);
+  }
+  sqlite3_finalize(stmt);
+
+  dt_control_remove_images();
+}
+
+// what the scan found, and a button for each thing that can be done about
+// it. nothing happens until one of them is pressed
+static gboolean _sync_filmroll_done(gpointer user_data)
+{
+  dt_sync_filmroll_t *s = (dt_sync_filmroll_t *)user_data;
+  const int n_changed = g_list_length(s->changed);
+  const int n_missing = g_list_length(s->missing);
+
+  if(!n_changed && !n_missing)
+  {
+    // name what was checked: a film roll and its parent folder are one
+    // right-click apart, and the answer only means something with the scope
+    dt_control_log(ngettext("%s: %d image checked, nothing to do",
+                            "%s: %d images checked, nothing to do", s->total),
+                   s->folder, s->total);
+    _sync_filmroll_free(s);
+    return G_SOURCE_REMOVE;
+  }
+
+  // every single file gone almost always means the drive is not mounted
+  // rather than that the photos were deleted, and removing them all would
+  // discard the edit history for the whole film roll
+  const gboolean unreachable = n_missing && (n_missing == s->total);
+
+  GtkWidget *dialog = gtk_dialog_new_with_buttons
+    (_("synchronize with folder"),
+     GTK_WINDOW(dt_ui_main_window(darktable.gui->ui)),
+     GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+     _("_close"), GTK_RESPONSE_CLOSE, NULL);
+  dt_gui_dialog_add_help(GTK_DIALOG(dialog), "collect");
+
+  GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, DT_PIXEL_APPLY_DPI(8));
+  gtk_widget_set_margin_start(box, DT_PIXEL_APPLY_DPI(8));
+  gtk_widget_set_margin_end(box, DT_PIXEL_APPLY_DPI(8));
+
+  gchar *heading = g_strdup_printf("<b>%s</b>", s->folder);
+  GtkWidget *label = gtk_label_new(NULL);
+  gtk_label_set_markup(GTK_LABEL(label), heading);
+  gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
+  gtk_widget_set_halign(label, GTK_ALIGN_START);
+  gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+  g_free(heading);
+
+  if(n_changed)
+  {
+    gchar *text = g_strdup_printf(ngettext("%d image has a newer sidecar file",
+                                           "%d images have newer sidecar files",
+                                           n_changed), n_changed);
+    GtkWidget *button = gtk_button_new_with_label(_("review..."));
+    g_signal_connect(button, "clicked", G_CALLBACK(_sync_review_clicked), dialog);
+    GtkWidget *row = dt_gui_hbox(dt_gui_expand(gtk_label_new(text)), button);
+    gtk_box_pack_start(GTK_BOX(box), row, FALSE, FALSE, 0);
+    g_free(text);
+  }
+
+  if(n_missing)
+  {
+    gchar *text = unreachable
+      ? g_strdup_printf(_("none of the %d images can be found;"
+                          " the folder is probably not mounted"), s->total)
+      : g_strdup_printf(ngettext("%d image is no longer on disk",
+                                 "%d images are no longer on disk",
+                                 n_missing), n_missing);
+    GtkWidget *row = NULL;
+    if(unreachable)
+      row = dt_gui_hbox(dt_gui_expand(gtk_label_new(text)));
+    else
+    {
+      GtkWidget *button = gtk_button_new_with_label(_("remove from library..."));
+      g_signal_connect(button, "clicked", G_CALLBACK(_sync_remove_clicked), dialog);
+      row = dt_gui_hbox(dt_gui_expand(gtk_label_new(text)), button);
+    }
+    gtk_box_pack_start(GTK_BOX(box), row, FALSE, FALSE, 0);
+    g_free(text);
+  }
+
+  dt_gui_dialog_add(dialog, box);
+  gtk_widget_show_all(dialog);
+
+  const gint response = gtk_dialog_run(GTK_DIALOG(dialog));
+  gtk_widget_destroy(dialog);
+
+  // both actions are modal in their own right, so they run once this dialog
+  // is gone rather than stacking windows
+  const gboolean do_review = response == DT_SYNC_RESPONSE_REVIEW;
+  const gboolean do_remove = response == DT_SYNC_RESPONSE_REMOVE;
+
+  if(do_remove) _sync_remove_missing(s);
+  if(do_review)
+  {
+    dt_control_crawler_show_image_list(s->changed);
+    s->changed = NULL;  // the dialog owns it now
+  }
+
+  _sync_filmroll_free(s);
+  return G_SOURCE_REMOVE;
+}
+
+static int32_t _sync_filmroll_job_run(dt_job_t *job)
+{
+  const gchar *folder = (const gchar *)dt_control_job_get_params(job);
+
+  dt_sync_filmroll_t *s = g_malloc0(sizeof(dt_sync_filmroll_t));
+  s->folder = g_strdup(folder);
+
+  // half the work: which sidecars are newer than the database
+  s->changed = dt_control_crawler_run(folder, _sync_filmroll_progress, job);
+
+  // the other half: which images no longer exist
+  gchar *pattern = g_strdup_printf("%s%%", folder);
+  sqlite3_stmt *stmt;
+  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
+                              "SELECT i.id,"
+                              "       f.folder || '" G_DIR_SEPARATOR_S "' || i.filename"
+                              " FROM main.images i, main.film_rolls f"
+                              " ON i.film_id = f.id"
+                              " WHERE f.folder LIKE ?1"
+                              " ORDER BY f.id, i.filename", -1, &stmt, NULL);
+  DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+
+  while(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    if(dt_control_job_get_state(job) == DT_JOB_STATE_CANCELLED) break;
+
+    const dt_imgid_t id = sqlite3_column_int(stmt, 0);
+    const char *path = (const char *)sqlite3_column_text(stmt, 1);
+
+    if(path && !g_file_test(path, G_FILE_TEST_EXISTS))
+      s->missing = g_list_prepend(s->missing, GINT_TO_POINTER(id));
+
+    s->total++;
+  }
+  sqlite3_finalize(stmt);
+  g_free(pattern);
+
+  if(dt_control_job_get_state(job) == DT_JOB_STATE_CANCELLED)
+  {
+    // giving up on the scan means giving up on its half-finished answer too
+    _sync_filmroll_free(s);
+    return 0;
+  }
+
+  g_idle_add(_sync_filmroll_done, s);
+  return 0;
+}
+
+static void view_popup_menu_onSyncFilmroll(GtkWidget *menuitem,
+                                           gpointer userdata)
+{
+  GtkTreeView *treeview = GTK_TREE_VIEW(userdata);
+  GtkTreeIter iter;
+  GtkTreeModel *model = gtk_tree_view_get_model(treeview);
+  GtkTreeSelection *selection = gtk_tree_view_get_selection(treeview);
+
+  if(!gtk_tree_selection_get_selected(selection, &model, &iter)) return;
+
+  gchar *filmroll_path = NULL;
+  gtk_tree_model_get(model, &iter, DT_LIB_COLLECT_COL_PATH, &filmroll_path, -1);
+  if(!filmroll_path) return;
+
+  dt_job_t *job = dt_control_job_create(&_sync_filmroll_job_run,
+                                        "synchronize film roll with folder");
+  if(!job)
+  {
+    g_free(filmroll_path);
+    return;
+  }
+  dt_control_job_set_params(job, filmroll_path, g_free);  // takes ownership
+  dt_control_job_add_progress(job, _("checking the folder"), TRUE);
+  dt_control_add_job(DT_JOB_QUEUE_USER_FG, job);
+}
+
 static void view_popup_menu(GtkWidget *treeview,
                             GdkEventButton *event,
                             dt_lib_collect_t *d)
@@ -620,6 +861,11 @@ static void view_popup_menu(GtkWidget *treeview,
   menuitem = gtk_menu_item_new_with_label(_("update path to files..."));
   g_signal_connect(menuitem, "activate",
                    G_CALLBACK(view_popup_menu_onSearchFilmroll), treeview);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuitem);
+
+  menuitem = gtk_menu_item_new_with_label(_("synchronize with folder..."));
+  g_signal_connect(menuitem, "activate",
+                   G_CALLBACK(view_popup_menu_onSyncFilmroll), treeview);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuitem);
 
   menuitem = gtk_menu_item_new_with_label(_("remove..."));

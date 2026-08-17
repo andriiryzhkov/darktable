@@ -26,15 +26,31 @@
  *  we can maybe refactor this, but for now it's good the way it is.
  */
 
-// this function iterates over ALL images from the database and checks whether
+// this function iterates over the images from the database and checks whether
 // - the XMP file on disk is newer than the timestamp from db
 // - there is a .txt or .wav file associated with the image and mark so in the db
 //   or if such a file no longer exists
 // it returns the list of images with a (supposedly) updated xmp file to let the user decide
-GList *dt_control_crawler_run();
+//
+// `folder` limits the scan to the film rolls at or below that path, which is
+// what makes it usable on a large library – the whole-library scan is only
+// bearable at startup. pass NULL for every image.
+//
+// `progress` is called every so often with how far along the scan is;
+// returning FALSE stops it early. pass NULL to report to the splash screen
+// instead, which is what startup wants and what nothing else can use.
+typedef gboolean (*dt_crawler_progress_cb)(const double fraction,
+                                           gpointer user_data);
+
+GList *dt_control_crawler_run(const char *folder,
+                              dt_crawler_progress_cb progress,
+                              gpointer user_data);
 
 // show a popup with the images, let the user decide what to do and free the list afterwards
 void dt_control_crawler_show_image_list(GList *images);
+
+// discard a list from dt_control_crawler_run() without showing it
+void dt_control_crawler_result_free(GList *images);
 
 // background thread updating all thumbnails is there is no user activity while being in lightroom
 void dt_update_thumbs_thread(void *ptr);

@@ -1814,7 +1814,7 @@ int dt_init(int argc,
     {
       dt_splash_screen_allow_create(TRUE); // allow splash screen if a message is to be displayed
       // scan for cases where the database and xmp files have different timestamps
-      changed_xmp_files = dt_control_crawler_run();
+      changed_xmp_files = dt_control_crawler_run(NULL, NULL, NULL);
       if(!dt_conf_get_bool("show_splash_screen"))
       {
         dt_splash_screen_destroy();

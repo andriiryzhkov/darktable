@@ -68,6 +68,16 @@ static void _free_crawler_result(dt_control_crawler_result_t *entry)
   entry->image_path = entry->xmp_path = NULL;
 }
 
+void dt_control_crawler_result_free(GList *images)
+{
+  for(GList *l = images; l; l = g_list_next(l))
+  {
+    _free_crawler_result((dt_control_crawler_result_t *)l->data);
+    free(l->data);
+  }
+  g_list_free(images);
+}
+
 static void _set_modification_time(char *filename,
                                    const time_t timestamp)
 {
@@ -110,17 +120,34 @@ static void _set_modification_time(char *filename,
 #define FAST_UPDATE 0.2
 #define SLOW_UPDATE 1.0
 
-GList *dt_control_crawler_run(void)
+GList *dt_control_crawler_run(const char *folder,
+                              dt_crawler_progress_cb progress,
+                              gpointer user_data)
 {
   sqlite3_stmt *stmt, *inner_stmt;
   GList *result = NULL;
   const gboolean look_for_xmp = dt_image_get_xmp_mode() != DT_WRITE_XMP_NEVER;
 
+  // a folder covers the film roll itself and any below it, matching what the
+  // collect module's context menu acts on
+  gchar *pattern = folder
+    ? g_strdup_printf("%s%%", folder)
+    : NULL;
+
   int total_images = 1;
   // clang-format off
-  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
-                              "SELECT COUNT(*) FROM main.images", -1, &stmt, 0);
+  if(pattern)
+    DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
+                                "SELECT COUNT(*)"
+                                " FROM main.images i, main.film_rolls f"
+                                " ON i.film_id = f.id"
+                                " WHERE f.folder LIKE ?1", -1, &stmt, 0);
+  else
+    DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
+                                "SELECT COUNT(*) FROM main.images", -1, &stmt, 0);
   // clang-format on
+  if(pattern)
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
   if(sqlite3_step(stmt) == SQLITE_ROW)
   {
     total_images = sqlite3_column_int(stmt, 0);
@@ -128,13 +155,25 @@ GList *dt_control_crawler_run(void)
   }
 
   // clang-format off
-  sqlite3_prepare_v2(dt_database_get(darktable.db),
-                     "SELECT i.id, write_timestamp, version,"
-                     "       folder || '" G_DIR_SEPARATOR_S "' || filename, flags"
-                     " FROM main.images i, main.film_rolls f"
-                     " ON i.film_id = f.id"
-                     " ORDER BY f.id, filename",
-                     -1, &stmt, NULL);
+  if(pattern)
+    sqlite3_prepare_v2(dt_database_get(darktable.db),
+                       "SELECT i.id, write_timestamp, version,"
+                       "       folder || '" G_DIR_SEPARATOR_S "' || filename, flags"
+                       " FROM main.images i, main.film_rolls f"
+                       " ON i.film_id = f.id"
+                       " WHERE f.folder LIKE ?1"
+                       " ORDER BY f.id, filename",
+                       -1, &stmt, NULL);
+  else
+    sqlite3_prepare_v2(dt_database_get(darktable.db),
+                       "SELECT i.id, write_timestamp, version,"
+                       "       folder || '" G_DIR_SEPARATOR_S "' || filename, flags"
+                       " FROM main.images i, main.film_rolls f"
+                       " ON i.film_id = f.id"
+                       " ORDER BY f.id, filename",
+                       -1, &stmt, NULL);
+  if(pattern)
+    DT_DEBUG_SQLITE3_BIND_TEXT(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
   sqlite3_prepare_v2(dt_database_get(darktable.db),
                      "UPDATE main.images SET flags = ?1 WHERE id = ?2", -1,
                      &inner_stmt, NULL);
@@ -165,9 +204,15 @@ GList *dt_control_crawler_run(void)
     if(curr_time >= last_time + ((curr_time - start_time > 4.0) ? SLOW_UPDATE : FAST_UPDATE))
     {
       const double fraction = image_count / (double)total_images;
-      dt_splash_screen_set_progress_percent(_("checking for updated sidecar files (%d%%)"),
-                                            fraction,
-                                            curr_time - start_time);
+      if(progress)
+      {
+        // the caller drives the feedback, and can stop us
+        if(!progress(fraction, user_data)) break;
+      }
+      else
+        dt_splash_screen_set_progress_percent(_("checking for updated sidecar files (%d%%)"),
+                                              fraction,
+                                              curr_time - start_time);
       last_time = curr_time;
     }
 
@@ -296,6 +341,7 @@ GList *dt_control_crawler_run(void)
 
   sqlite3_finalize(stmt);
   sqlite3_finalize(inner_stmt);
+  g_free(pattern);
 
   return g_list_reverse(result); // list was built in reverse order, so un-reverse it
 }
