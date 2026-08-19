@@ -2055,11 +2055,17 @@ static void _resize_state_free(gpointer data)
 
 // Drop the resize baseline + result cache for a form. Called whenever the shape
 // is changed by something other than a resize (node edits, deletion), so the
-// next resize re-captures a fresh baseline from the edited shape.
-static void _resize_state_invalidate(const dt_mask_id_t formid)
+// next resize re-captures a fresh baseline from the edited shape. Exported
+// (see blend.h) so masks/object.c can invalidate a child path's cache after
+// directly mutating its points for a bundle-wide SIZE/ROTATION edit.
+void dt_masks_path_resize_invalidate(const dt_mask_id_t formid)
 {
   if(_resize_states)
     g_hash_table_remove(_resize_states, GINT_TO_POINTER(formid));
+}
+static void _resize_state_invalidate(const dt_mask_id_t formid)
+{
+  dt_masks_path_resize_invalidate(formid);
 }
 
 // Fetch (lazily creating) the resize state for a form, capturing the current
@@ -3324,6 +3330,18 @@ static int _path_events_button_pressed(dt_iop_module_t *module,
     {
       gui->form_dragging = TRUE;
       gui->point_edited = -1;
+      // gpt (gui->points[index]) is only ever refreshed by a redraw
+      // (dt_masks_gui_form_create, called from the post_expose path) -- if the
+      // form's own geometry or the view changed since the last redraw without
+      // one landing before this click (e.g. an edit made elsewhere, or the
+      // click itself is the very first event after entering edit mode), the
+      // cached gpt->points[2]/[3] corner can be stale, giving a wildly wrong
+      // anchor and making the shape jump away on the first drag tick. Force a
+      // fresh recompute right before reading it -- cheap (one shape, not the
+      // whole pipe) and gpt itself stays the same struct/pointer across the
+      // call (see dt_masks_gui_form_create / dt_masks_gui_form_remove).
+      dt_masks_gui_form_create(form, gui, index, module);
+      if(!gpt->points || gpt->points_count == 0) return 0;
       gui->dx = gpt->points[2] - gui->posx;
       gui->dy = gpt->points[3] - gui->posy;
       return 1;
@@ -3587,28 +3605,19 @@ static int _path_events_button_released(dt_iop_module_t *module,
 
   if(gui->form_dragging)
   {
-    // we end the form dragging
+    // the move was already applied incrementally, tick by tick, in
+    // mouse_moved (each tick recomputes its own delta from the *current*
+    // corner, so the shape is already at the correct final position by the
+    // time the button comes up) -- just finalise, the same way form_rotating
+    // does right below. Do NOT recompute pts from this release event's own
+    // pzx/pzy and re-apply a second, independent delta here: that used the
+    // constant press-time anchor (gui->dx/dy) against whatever position this
+    // one event happens to carry, so any discrepancy between it and the last
+    // mouse_moved tick's position -- a slightly stale/short release event is
+    // enough -- silently re-moved the already-correctly-placed shape a
+    // second time, observed live as the shape snapping to a wrong position
+    // right on mouse-up.
     gui->form_dragging = FALSE;
-
-    // we get point0 new values
-    dt_masks_point_path_t *point = form->points->data;
-    float pts[2] = { pzx * wd + gui->dx, pzy * ht + gui->dy };
-    dt_masks_clamp_move_pts(pts, wd, ht);
-    dt_dev_distort_backtransform(darktable.develop, pts, 1);
-    const float dx = pts[0] / iwidth - point->corner[0];
-    const float dy = pts[1] / iheight - point->corner[1];
-
-    // we move all points
-    for(GList *points = form->points; points; points = g_list_next(points))
-    {
-      point = (dt_masks_point_path_t *)points->data;
-      point->corner[0] += dx;
-      point->corner[1] += dy;
-      point->ctrl1[0] += dx;
-      point->ctrl1[1] += dy;
-      point->ctrl2[0] += dx;
-      point->ctrl2[1] += dy;
-    }
 
     _resize_state_invalidate(form->formid);
     dt_dev_add_masks_history_item(darktable.develop, module, TRUE);
@@ -3642,15 +3651,13 @@ static int _path_events_button_released(dt_iop_module_t *module,
   }
   else if(gui->source_dragging)
   {
-    // we end the form dragging
+    // same reasoning as gui->form_dragging just above: mouse_moved already
+    // set form->source fresh on every tick, so recomputing it again here
+    // from this release event's own pzx/pzy is redundant and risks
+    // re-moving the already-correctly-placed source a second time if this
+    // event's position ever diverges from the last tick's.
     gui->source_dragging = FALSE;
 
-    // we change the source value
-    float pts[2] = { pzx * wd + gui->dx, pzy * ht + gui->dy };
-    dt_masks_clamp_move_pts(pts, wd, ht);
-    dt_dev_distort_backtransform(darktable.develop, pts, 1);
-    form->source[0] = pts[0] / iwidth;
-    form->source[1] = pts[1] / iheight;
     dt_dev_add_masks_history_item(darktable.develop, module, TRUE);
 
     // we recreate the form points
