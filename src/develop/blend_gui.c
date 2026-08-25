@@ -958,6 +958,10 @@ typedef struct dt_masks_param_row_editor_t
   // _update_param_row_visibility. Delta-applied via the shared
   // _props_row_apply, same as every other row kind's opacity control.
   GtkWidget *opacity_box;
+  // the widget the precise-entry popup is anchored and clamped against. Was
+  // the editor's owning row back when a row owned one; now the editor's own
+  // top-level box, since it lives in the panel's element inspector instead.
+  GtkWidget *row;
   GtkWidget *opacity_slider;
   float opacity_last_value;
   // collapsed state docks the input slider directly onto the row's own header
@@ -965,27 +969,6 @@ typedef struct dt_masks_param_row_editor_t
   // slot, wired up from _make_shape_row after this editor is built (NULL until
   // then, and left NULL entirely for a legacy multi-channel form, which is
   // still edited via the shared tabbed editor, not one of these per-row ones).
-  // Always visible and always the row's sole expanding child (see
-  // _make_shape_row's packing of evbox/header_slot) -- whether or not the
-  // slider is currently docked inside it, so the name label never has to
-  // fight it for a share of the header's free width (that used to be done by
-  // toggling the name's own GtkBox "expand" child property at dock time,
-  // which left a dead gap whenever the two were briefly out of sync). See
-  // _update_param_row_header_dock.
-  GtkWidget *header_slot;
-  // the row's own full-width outer box (icon/name/slider/actions), wired up
-  // from _make_shape_row exactly like header_slot above -- used only to size
-  // and place the precise-value popup (see _param_row_slider_precise_place)
-  // against the row's real on-screen width/position, not the header_slot's
-  // (which starts only after the name label).
-  GtkWidget *row;
-  // the row's picker button (master_picker's own wrapper, see
-  // _build_param_row_editor's picker_box_out) permanently docked as
-  // header_inner's fixed-width first child, immediately left of whichever
-  // slider is currently docked there -- see _update_param_row_header_dock /
-  // _param_header_slot_size_allocate. Never reparented itself, unlike the
-  // input/opacity sliders, which swap in and out of header_inner's second slot.
-  GtkWidget *header_inner;
 } dt_masks_param_row_editor_t;
 
 static void _update_param_row_display(dt_masks_param_row_editor_t *ed);
@@ -1052,6 +1035,49 @@ static guint _form_kind(const dt_masks_form_t *form);
 static const char *_kind_name(const guint kind, const gboolean plural);
 static DTGTKCairoPaintIconFunc _kind_icon_paint(const guint kind);
 static const char *_form_type_prefix(const dt_masks_form_t *form);
+// a property slider for the shape currently being drawn. The in-creation form
+// is not in dev->forms yet -- it is appended only on commit (see
+// dt_masks_gui_form_save_creation) -- so _props_row_apply's id lookup cannot
+// find it and the whole properties-editor path is unavailable here. Drive
+// form->functions->modify_property against the form pointer directly instead,
+// which is the same thing that path ends up calling, and the same bypass the
+// AI object sliders already use.
+static void _pending_prop_changed(GtkWidget *w, dt_iop_module_t *module)
+{
+  if(DT_IN_GUI_UPDATE()) return;
+  dt_masks_form_t *form = darktable.develop ? darktable.develop->form_visible : NULL;
+  if(!form || !form->functions || !form->functions->modify_property) return;
+
+  const dt_masks_property_t prop =
+    (dt_masks_property_t)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "dt-prop"));
+  float *last = g_object_get_data(G_OBJECT(w), "last-value");
+  const float new_val = dt_bauhaus_slider_get(w);
+  const float old_val = last ? *last : new_val;
+  if(last) *last = new_val;
+
+  float sum = 0.0f, min = 0.0f, max = 1.0f;
+  int count = 0;
+  form->functions->modify_property(form, prop, old_val, new_val, &sum, &count, &min, &max);
+  // no dt_masks_gui_form_create() here: the shape is still being drawn, so its
+  // gui points are not built yet and that call walks straight into a NULL
+  // deref (observed as a SIGSEGV in _ellipse_get_points_border). The canvas
+  // rebuilds the in-creation shape on its own; a redraw is all that is needed,
+  // which is also all the canvas scroll gesture does for the same edit.
+  dt_control_queue_redraw_center();
+}
+
+// probe whether `prop` applies to `form` at all: modify_property with an
+// unchanged value is a documented no-op that only reports back through count
+// (the same test _props_row_apply uses to decide which controls to show).
+static gboolean _pending_prop_applies(dt_masks_form_t *form, const dt_masks_property_t prop)
+{
+  if(!form || !form->functions || !form->functions->modify_property) return FALSE;
+  float sum = 0.0f, min = 0.0f, max = 1.0f;
+  int count = 0;
+  form->functions->modify_property(form, prop, 0.5f, 0.5f, &sum, &count, &min, &max);
+  return count != 0;
+}
+
 static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form_t *form);
 // if removing `src` would empty its group, build an empty-group placeholder (same
 // operator/screen/anchor) so the group persists instead of vanishing; else NULL.
@@ -1755,6 +1781,15 @@ void dt_iop_gui_blend_mask_enable(dt_iop_module_t *module)
   if(!module || !module->blend_data) return;
   dt_iop_request_focus(module);
   _blendop_mask_enable(module);
+}
+
+// see blend.h: the placeholder row for an in-creation shape has no other way
+// to learn that creation was abandoned.
+void dt_iop_gui_blend_masks_list_refresh(dt_iop_module_t *module)
+{
+  dt_iop_gui_blend_data_t *bd = module ? module->blend_data : NULL;
+  if(!bd || !bd->masks_inited) return;
+  _queue_masks_list_rebuild(module);
 }
 
 void dt_iop_gui_blend_sync_pending_ai_sliders(dt_iop_module_t *module)
@@ -3599,8 +3634,9 @@ static void _refine_reset_clicked(GtkWidget *btn, dt_iop_gui_blend_data_t *bd)
 // the refinement section caption always states which of the three scopes is
 // active -- whole mask, a named group, or one specific element -- so the
 // scope is never ambiguous at a glance. The caption is title-only now (no
-// selector control): "whole mask refinement" / "group refinement -- <name>"
-// / "element refinement -- <name>". Selecting the scope happens only via the
+// selector control): "whole mask" / "group -- <name>" / "element -- <name>",
+// shown in the section's own subheader (the section title says "refinement")
+// / "element -- <name>". Selecting the scope happens only via the
 // mask list itself (see _select_form / _select_group).
 static void _refine_update_header(dt_iop_module_t *module)
 {
@@ -3612,7 +3648,7 @@ static void _refine_update_header(dt_iop_module_t *module)
   {
     dt_masks_form_t *form =
       dt_masks_get_from_id(darktable.develop, bd->masks_refine_scope_formid);
-    full = g_strdup_printf(_("element refinement -- %s"),
+    full = g_strdup_printf(_("element -- %s"),
                            form ? form->name : _("shape"));
   }
   else if(bd->masks_refine_scope_kind == REFINE_SCOPE_GROUP)
@@ -3630,7 +3666,7 @@ static void _refine_update_header(dt_iop_module_t *module)
       ? g_strdup(custom_name)
       : g_strdup_printf("%s-%d", _op_name_for_state(head ? head->state : 0),
                         _group_ordinal_of_cid(module, bd->masks_refine_scope_formid));
-    full = g_strdup_printf(_("group refinement -- %s"), name);
+    full = g_strdup_printf(_("group -- %s"), name);
     g_free(name);
   }
   else if(bd->masks_refine_scope_kind == REFINE_SCOPE_EMPTY_GROUP)
@@ -3644,11 +3680,11 @@ static void _refine_update_header(dt_iop_module_t *module)
       ? g_strdup(custom_name)
       : g_strdup_printf("%s-%d", _op_name_for_state(_empty_group_op(bd->selected_empty)),
                         _group_ordinal_any(module, INVALID_MASKID, bd->selected_empty));
-    full = g_strdup_printf(_("group refinement -- %s"), name);
+    full = g_strdup_printf(_("group -- %s"), name);
     g_free(name);
   }
   else
-    full = g_strdup(_("whole mask refinement"));
+    full = g_strdup(_("whole mask"));
 
   gtk_label_set_text(GTK_LABEL(bd->masks_refine_header_label), full);
   g_free(full);
@@ -3679,7 +3715,22 @@ static void _refine_scope_combo_rebuild(dt_iop_module_t *module)
 
 // defined with the other badge helpers (it needs the row/run lookups), but
 // called from _props_row_apply below on every opacity change
+// set an opacity readout without allocating: this runs for every row on every
+// tick of an opacity drag, so a g_strdup_printf per row per tick is real waste.
+// Skipping the write when the text is unchanged also keeps GTK from queueing a
+// relayout for a label that already says 100%.
+static void _set_opacity_readout(GtkWidget *readout, const float value)
+{
+  if(!readout) return;
+  char txt[16];
+  snprintf(txt, sizeof(txt), "%d%%", (int)roundf(value * 100.0f));
+  const char *cur = gtk_label_get_text(GTK_LABEL(readout));
+  if(cur && !strcmp(cur, txt)) return;
+  gtk_label_set_text(GTK_LABEL(readout), txt);
+}
+
 static void _refresh_lowop_badges(dt_iop_module_t *module);
+static void _set_opacity_readout(GtkWidget *readout, const float value);
 static void _set_badge_active(GtkWidget *badge, gboolean active, const char *tooltip_when_active);
 static const char *_solo_badge_tooltip(void);
 static const char *_soloedit_badge_tooltip(void);
@@ -4269,32 +4320,20 @@ static void _props_row_toggled(GtkWidget *btn, dt_iop_module_t *module)
   // too: their props toggle sits under row_evbox, which has no
   // selection-changing press/release handler to consume this flag at all.
   bd->masks_skip_group_select_release = TRUE;
+  bd->masks_skip_group_select_release_time = gtk_get_current_event_time();
+  // and the element-row equivalent: _row_click_release consumes this flag
+  // instead, so a chevron click cannot fall through and select the row
+  bd->masks_row_click_handled = TRUE;
   const dt_mask_id_t key = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "props-key"));
   const gboolean active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(btn));
 
-  // a shape/raster row's own toggle has no bubbling ancestor to select it the
-  // way a group's toggle does above -- select it explicitly here instead, if
-  // it wasn't already selected (never deselect: same select-only rule as
-  // every other action control, see _set_form_target).
-  //
-  // bd->masks_suppress_toggle_select guards this against a real recursion
-  // bug: "auto-expand selected shape" (_auto_expand_selected_row)
-  // programmatically flips OTHER rows' toggles off to enforce
-  // single-expansion, with that flag set for the duration. Without this
-  // guard, collapsing a non-selected row's toggle here would re-select it
-  // (key != panel_selected_formid is true for exactly the rows being
-  // collapsed) -- which calls _auto_expand_selected_row again for that row,
-  // which collapses the previously-selected row's toggle, re-selecting
-  // *that* one, and so on: two rows pinging the selection back and forth
-  // forever, blowing the stack (observed as a SIGSEGV "excessive recursion"
-  // crash). A plain DT_ENTER/LEAVE_GUI_UPDATE would also work here, except
-  // this function already bails out entirely on DT_IN_GUI_UPDATE() (see
-  // above), which would then also suppress the hash/visibility update this
-  // programmatic toggle still needs -- hence a separate, narrower flag.
-  const gboolean is_group = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(btn), "props-is-group"));
-  if(!bd->masks_suppress_toggle_select && !is_group && bd->panel_selected_formid != key)
-    _set_form_target(module, key);
-
+  // expanding a row no longer selects it. The chevron is a visible control of
+  // its own now, and a click on a control should do that control's job and
+  // nothing else -- opening a row to look at its size or feather is not a
+  // statement about which element you are working on. Selection still follows
+  // the gestures that mean "this row": a plain click, shift+click, or a
+  // double-click (see _row_click_release / _row_click_press, both of which
+  // select before driving this toggle).
   if(!bd->masks_props_expanded)
     bd->masks_props_expanded = g_hash_table_new(g_direct_hash, g_direct_equal);
   g_hash_table_insert(bd->masks_props_expanded, GUINT_TO_POINTER(key), GINT_TO_POINTER(active));
@@ -4384,75 +4423,6 @@ static void _style_opacity_gradient(GtkWidget *slider)
   dt_bauhaus_slider_set_feedback(slider, FALSE);
 }
 
-// style a _build_props_row_editor(..., opacity_only=TRUE) box for inline
-// display in a row's own header instead of docked below it (shape/raster
-// rows -- mirrors the group header's own opacity slider treatment, see the
-// group header build): drop the box's own below-row margins and hide the
-// slider's label/value (the tooltip above stands in for them on hover). Sizing
-// and right-alignment within the header's free width are handled by the
-// caller instead (see _opacity_slot_size_allocate) -- unlike the group
-// header's own opacity slider, an element row's is capped to at most half
-// the row's width, so it cannot be styled the same simple hexpand-to-fill
-// way. The box (not just its one slider child) is what the caller packs --
-// reparenting just the slider out of it would orphan the
-// dt_masks_props_row_editor_t the box's own destruction is tied to (see
-// _build_props_row_editor's "props-editor" data), while the slider's signal
-// handler keeps referencing it.
-static void _style_inline_opacity_box(GtkWidget *box)
-{
-  dt_gui_remove_class(box, "mask-props-row-editor");
-  GList *kids = gtk_container_get_children(GTK_CONTAINER(box));
-  GtkWidget *slider = kids ? GTK_WIDGET(kids->data) : NULL;
-  g_list_free(kids);
-  if(!slider) return;
-  dt_bauhaus_widget_hide_label(slider);
-  dt_gui_add_class(slider, "mask-inline-opacity");
-  _style_opacity_gradient(slider);
-  _inline_opacity_tooltip_changed(slider, NULL);
-  g_signal_connect(G_OBJECT(slider), "value-changed",
-                   G_CALLBACK(_inline_opacity_tooltip_changed), NULL);
-}
-
-// size a row's inline opacity box to roughly a third of the *row's* own
-// width (not just whatever this slot happens to have left after the row's
-// other controls, which -- once other siblings like a fixed-width name
-// column, badges and operator chips are accounted for -- could otherwise
-// leave a visibly stingier slider on a crowded row than an uncrowded one),
-// and pin it to the right edge, vertically centered. Shared by every row
-// kind's own inline opacity slider (group headers, shape/raster rows -- see
-// _make_shape_row and the group header build) so they all read the same
-// size regardless of how much else that particular row is showing. Capped to
-// this slot's own allocation as a fallback (never overlaps a neighbouring
-// control) if the row is unusually narrow. See _param_header_slot_size_allocate
-// (further down this file, the parametric row's own header dock) for why
-// this overrides the child's *allocation* directly instead of fighting
-// GtkBox's own placement decision (same "does not reliably stretch/shrink as
-// its expand/fill properties alone suggest" issue, same fix).
-// group headers pass a compound box (within-group selector + slider, see the
-// group header build below) as `box` instead of a bare slider -- tagged with
-// an "extra-width" data value (the selector's own fixed width) so that width
-// is added on top of the row/2 budget rather than carved out of it, keeping
-// the slider portion itself the same width as a plain element row's slider
-// gets from the same row/2 share. Untagged (the common, single-slider) case
-// reads back 0 and behaves exactly as before.
-static void _opacity_slot_size_allocate(GtkWidget *slot, GtkAllocation *alloc,
-                                        gpointer user_data)
-{
-  GtkWidget *box = user_data;
-  if(!box || gtk_widget_get_parent(box) != slot) return;
-  gint min_h = 0, nat_h = 0;
-  gtk_widget_get_preferred_height(box, &min_h, &nat_h);
-  GtkWidget *row = gtk_widget_get_parent(slot);
-  const int row_w = row ? gtk_widget_get_allocated_width(row) : alloc->width;
-  const int extra_w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(box), "extra-width"));
-  const int target_w = MAX(row_w / 2, 1) + extra_w;
-  GtkAllocation child_alloc = *alloc;
-  child_alloc.width = MIN(target_w, MAX(alloc->width, 1));
-  child_alloc.height = MAX(nat_h, 1);
-  child_alloc.x = alloc->x + (alloc->width - child_alloc.width);
-  child_alloc.y = alloc->y + (alloc->height - child_alloc.height) / 2;
-  gtk_widget_size_allocate(box, &child_alloc);
-}
 
 // Recursively walk a stored mask group, recording each *leaf* shape's effective
 // hidden state (its own HIDDEN bit OR-ed with that of every enclosing group point)
@@ -4701,10 +4671,8 @@ static void _apply_group_header_dimming(GtkWidget *w, const gboolean solo_active
       // build's own group_bypassed handling, which this must not fight: a
       // bypassed group's controls stay insensitive regardless of solo).
       GtkWidget *within_sel = g_object_get_data(G_OBJECT(child), "within-sel-widget");
-      GtkWidget *opacity_slider = g_object_get_data(G_OBJECT(child), "group-opacity-widget");
       const gboolean bypassed = g_object_get_data(G_OBJECT(child), "group-bypassed") != NULL;
       if(within_sel) gtk_widget_set_sensitive(within_sel, !suppressed && !bypassed);
-      if(opacity_slider) gtk_widget_set_sensitive(opacity_slider, !suppressed && !bypassed);
       // tag the *soloed* group's whole block so its own cluster headers stay lit
       // (they dim by default under .mask-solo-active -- see darktable.css); a
       // group is being shown in full, so nothing inside it should read as
@@ -5158,8 +5126,6 @@ static void _update_shape_row_state(dt_iop_gui_blend_data_t *bd, GtkWidget *row_
   if(param_box) gtk_widget_set_sensitive(param_box, !hidden);
   GtkWidget *props_box = g_object_get_data(G_OBJECT(row_vbox), "props-editor-box");
   if(props_box) gtk_widget_set_sensitive(props_box, !hidden);
-  GtkWidget *opacity_box = g_object_get_data(G_OBJECT(row_vbox), "opacity-editor-box");
-  if(opacity_box) gtk_widget_set_sensitive(opacity_box, !hidden);
   // solo-edit only makes sense on a shape that is actually shown -- a
   // solo-suppressed shape contributes nothing to the composite, so nothing to
   // edit. There is no persistent solo-edit widget to grey out any more (it is
@@ -5242,9 +5208,11 @@ static void _apply_group_lowop_badges(GtkWidget *w, dt_masks_form_t *grp)
     if(g_object_get_data(G_OBJECT(child), "mask-header"))
     {
       const guint cid = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(child), "group-key"));
+      const float gop = _group_own_opacity(grp, (dt_mask_id_t)cid);
       GtkWidget *badge = g_object_get_data(G_OBJECT(child), "lowop-badge");
       if(badge)
-        _update_lowop_badge(badge, _group_own_opacity(grp, (dt_mask_id_t)cid), TRUE, FALSE);
+        _update_lowop_badge(badge, gop, TRUE, FALSE);
+      _set_opacity_readout(g_object_get_data(G_OBJECT(child), "opacity-readout"), gop);
     }
     else
       _apply_group_lowop_badges(child, grp);  // recurse into expanders / boxes
@@ -5274,12 +5242,26 @@ static void _refresh_lowop_badges(dt_iop_module_t *module)
     if(row_vbox)
     {
       const dt_masks_form_t *const sel = dt_masks_get_from_id(darktable.develop, pt->formid);
+      // the badge warns when this element contributes almost nothing, which
+      // genuinely depends on its group's gain -- so that stays effective
+      const float effective = pt->opacity * run_group_opacity;
       _update_lowop_badge(g_object_get_data(G_OBJECT(row_vbox), "lowop-badge"),
-                          pt->opacity * run_group_opacity, FALSE,
+                          effective, FALSE,
                           _parametric_form_is_noop(sel));
+      // the readout shows the element's *own* opacity, not the effective one.
+      // Showing element x group made every row's figure move whenever the
+      // group's opacity slider was dragged, which reads as "the group slider
+      // just changed all my masks" -- it does not: _group_opacity_changed
+      // only ever writes pt->group_opacity. A row's number should be the value
+      // that row's own control edits, and nothing else.
+      _set_opacity_readout(g_object_get_data(G_OBJECT(row_vbox), "opacity-readout"),
+                           pt->opacity);
     }
   }
   _apply_group_lowop_badges(GTK_WIDGET(bd->masks_list_box), grp);
+  // the in-creation row, if one is showing: its value follows the group the
+  // shape would land in, which changes as the pointer moves between groups
+  _set_opacity_readout(bd->pending_opacity_readout, bd->insert_opacity);
 }
 
 // is cid the base (bottom-most) group? grp->points is ordered bottom-up (see
@@ -6283,17 +6265,10 @@ static void _auto_expand_selected_row(dt_iop_module_t *module, const dt_mask_id_
 
   if(bd->masks_last_expanded_shape == id) return;  // already the one that's expanded
 
-  // every gtk_toggle_button_set_active below is a programmatic enforcement
-  // move, not a user click -- guarded by masks_suppress_toggle_select so
-  // _props_row_toggled's own "toggling this row's expander also selects it"
-  // behavior (meant for a real click) does not fire back into
-  // _set_form_target -> _auto_expand_selected_row for the row being
-  // collapsed here, which would re-select it and recurse without end (see
-  // _props_row_toggled's own comment on this exact failure mode). Not
-  // DT_ENTER/LEAVE_GUI_UPDATE: _props_row_toggled bails out entirely on
-  // DT_IN_GUI_UPDATE(), which would also block the hash/visibility update
-  // these calls are made for in the first place.
-  bd->masks_suppress_toggle_select = TRUE;
+  // the toggles below are flipped programmatically, not clicked. That once
+  // needed guarding: _props_row_toggled selected the row it expanded, which
+  // fed straight back into this function and recursed. Expanding no longer
+  // touches the selection, so there is nothing left to guard against.
 
   // collapse only the previously-expanded shape (there is at most one, by
   // construction) -- not "every other shape row": a row that was somehow
@@ -6311,8 +6286,6 @@ static void _auto_expand_selected_row(dt_iop_module_t *module, const dt_mask_id_
   if(!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(toggle)))
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(toggle), TRUE);
   bd->masks_last_expanded_shape = id;
-
-  bd->masks_suppress_toggle_select = FALSE;
 }
 
 static void _set_form_target(dt_iop_module_t *module, const dt_mask_id_t id)
@@ -6367,6 +6340,7 @@ static gchar *_form_display_name(const dt_masks_form_t *form)
   }
   return g_strdup(rest);
 }
+
 
 static void _rename_commit(GtkWidget *entry, dt_iop_module_t *module)
 {
@@ -6629,6 +6603,8 @@ static GtkWidget *_build_shape_actions_menu(dt_iop_module_t *module, const dt_ma
 // press arrived the element read as deselected even though it was the solo
 // target, and force-selecting it back afterward was never fully reliable.
 // Solo an element via its own solo badge, or the row's actions menu, instead.
+static void _toggle_expand_widget(GtkWidget *src);
+
 static gboolean _row_click_press(GtkWidget *w, GdkEventButton *ev, dt_iop_module_t *module)
 {
   const dt_mask_id_t id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "formid"));
@@ -6657,6 +6633,20 @@ static gboolean _row_click_press(GtkWidget *w, GdkEventButton *ev, dt_iop_module
     GtkWidget *evbox = g_object_get_data(G_OBJECT(w), "name-evbox");
     GtkWidget *menu = _build_shape_actions_menu(module, id, handle, evbox);
     gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)ev);
+    return TRUE;
+  }
+  if(ev->type == GDK_2BUTTON_PRESS && ev->button == GDK_BUTTON_PRIMARY
+     && !dt_modifier_is(ev->state, GDK_CONTROL_MASK)
+     && !dt_modifier_is(ev->state, GDK_SHIFT_MASK))
+  {
+    // the same thing shift+click does, on the gesture most people try first.
+    // The first click of the pair has already selected this row via its own
+    // release; masks_row_click_handled then swallows the second release, which
+    // would otherwise run _select_form again and toggle the row straight back
+    // off (see _row_click_release's own use of the flag).
+    dt_iop_gui_blend_data_t *bd = module->blend_data;
+    _toggle_expand_widget(g_object_get_data(G_OBJECT(w), "handle-widget"));
+    bd->masks_row_click_handled = TRUE;
     return TRUE;
   }
   // a plain primary press must return FALSE so this widget's own drag source
@@ -6834,6 +6824,11 @@ typedef struct dt_masks_empty_group_t
   // (see dt_masks_gui_form_save_creation); a group restored from a saved
   // layout preset carries the preset's own remembered opacity instead.
   float opacity;
+  // whether this group's expanded controls are open. Kept on the staged group
+  // rather than in a widget: _build_masks_list rebuilds this row on all sorts
+  // of unrelated events, and with nowhere to persist it the chevron snapped
+  // shut again the moment anything else touched the panel.
+  gboolean props_expanded;
   // group refinement staged before the group has any members. Per-group
   // refinement normally lives in each member's dt_masks_point_group_t, so an
   // empty group has nowhere to put it -- without this, selecting the sole
@@ -7801,6 +7796,10 @@ static void _recompute_insert_hint(dt_iop_module_t *module)
       }
     }
   }
+
+  // keep the in-creation row's readout in step: insert_opacity has just been
+  // recomputed for whatever group the shape would now land in.
+  _set_opacity_readout(bd->pending_opacity_readout, bd->insert_opacity);
 }
 
 // the group id (selectable group identity) of the run containing form `fid`:
@@ -8634,6 +8633,19 @@ static gboolean _group_header_press(GtkWidget *w, GdkEventButton *e,
                         GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "group-key")), NULL);
     return TRUE;
   }
+  if(e->type == GDK_2BUTTON_PRESS && e->button == GDK_BUTTON_PRIMARY
+     && !dt_modifier_is(e->state, GDK_CONTROL_MASK)
+     && !dt_modifier_is(e->state, GDK_SHIFT_MASK))
+  {
+    // toggling expand, unlike the solo attempt described above, survives the
+    // interleaved release: masks_skip_group_select_release makes the second
+    // release re-assert the selection instead of toggling it away, so the
+    // group ends up selected and expanded rather than deselected.
+    dt_iop_gui_blend_data_t *bd = module->blend_data;
+    _toggle_expand_widget(w);
+    bd->masks_skip_group_select_release = TRUE;
+    return TRUE;
+  }
   if(e->button == GDK_BUTTON_SECONDARY)
   {
     // right-click opens the same operator-chooser/actions menu a plain click
@@ -8684,6 +8696,13 @@ static gboolean _group_header_release(GtkWidget *w, GdkEventButton *e,
   dt_iop_gui_blend_data_t *bd = module->blend_data;
   const dt_mask_id_t cid =
     (dt_mask_id_t)GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(w), "group-key"));
+  // a chevron click: leave the selection exactly as it was
+  if(bd->masks_suppress_group_select)
+  {
+    bd->masks_suppress_group_select = FALSE;
+    bd->masks_skip_group_select_release = FALSE;
+    return FALSE;
+  }
   if(bd->masks_skip_group_select_release)
   {
     bd->masks_skip_group_select_release = FALSE;
@@ -8874,9 +8893,10 @@ static GtkWidget *_make_within_selector(dt_iop_module_t *module, GList *formids,
   // darktable.css)
   dt_gui_add_class(box, "mask-within-combo");
   // same footprint as the between-group operator chip (_make_drag_handle's
-  // own 18dpi plate) -- the two read as a matched pair of operator icons
-  // either side of the group's title/opacity, not a big chip and a small one.
-  gtk_widget_set_size_request(box, DT_PIXEL_APPLY_DPI(18), DT_PIXEL_APPLY_DPI(18));
+  // own plate) -- the two read as a matched pair of operator icons either
+  // side of the group's title/opacity, not a big chip and a small one. Keep
+  // this in step with _make_drag_handle's size request.
+  gtk_widget_set_size_request(box, DT_PIXEL_APPLY_DPI(15), DT_PIXEL_APPLY_DPI(15));
   gtk_widget_set_valign(box, GTK_ALIGN_CENTER);
   g_object_set_data(G_OBJECT(inner), "module", module);
   if(formids)
@@ -9110,6 +9130,38 @@ static gboolean _group_opacity_press(GtkWidget *w, GdkEventButton *ev, dt_iop_mo
 // group header always represents exactly one run, so there is no multi-select
 // ambiguity a delta needs to resolve. Broadcast onto every member of the run,
 // same convention as invert-output/bypass above (see _group_toggle_output_invert).
+// reveal/hide a group header's own controls (its opacity slider), the group
+// equivalent of _props_row_toggled for an element row
+static void _group_props_toggled(GtkWidget *btn, gpointer user_data)
+{
+  const gboolean open = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(btn));
+  GtkWidget *box = g_object_get_data(G_OBJECT(btn), "group-props-box");
+  if(box) gtk_widget_set_visible(box, open);
+  // an empty group passes itself in so the state outlives the next rebuild
+  // (see dt_masks_empty_group_t.props_expanded); a real group passes NULL.
+  dt_masks_empty_group_t *eg = user_data;
+  if(eg) eg->props_expanded = open;
+
+  // the chevron sits inside the header, so this click's release also reaches
+  // _group_header_release, which would treat it as a click on the title and
+  // toggle the group's selection. Expanding is not selecting: suppress that
+  // one release. The timestamp is what _group_header_press matches on before
+  // clearing the flag, so both have to be set (see there).
+  dt_iop_module_t *module = g_object_get_data(G_OBJECT(btn), "module");
+  dt_iop_gui_blend_data_t *bd = module ? module->blend_data : NULL;
+  if(bd)
+  {
+    bd->masks_skip_group_select_release = TRUE;
+    bd->masks_skip_group_select_release_time = gtk_get_current_event_time();
+    bd->masks_row_click_handled = TRUE;
+    // the flag above only suppresses a *deselect*: its branch in
+    // _group_header_release still selects a group that was not selected yet,
+    // which is why the first chevron click on an unselected group changed the
+    // selection and later ones did not. This one suppresses it outright.
+    bd->masks_suppress_group_select = TRUE;
+  }
+}
+
 static void _group_opacity_changed(GtkWidget *w, dt_iop_module_t *module)
 {
   if(DT_IN_GUI_UPDATE()) return;
@@ -9965,6 +10017,7 @@ static void _pending_ai_slider_changed(GtkWidget *widget, dt_iop_module_t *modul
 // and this form is, by definition, not committed yet.
 static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form_t *form)
 {
+  dt_iop_gui_blend_data_t *bd = module->blend_data;
   const guint kind = _form_kind(form);
 
   GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -9972,11 +10025,14 @@ static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form
       _("this shape has not been added yet -- finish drawing it on canvas to add it"));
   gtk_box_pack_start(GTK_BOX(row), handle, FALSE, FALSE, 0);
 
-  gchar *text = g_strdup_printf(_("new %s"), _kind_name(kind, FALSE));
+  // brackets mark it as provisional in the list itself, not just in the rail:
+  // "[new circle]" reads as a placeholder where "new circle" reads as a name
+  gchar *text = g_strdup_printf(_("[new %s]"), _kind_name(kind, FALSE));
   GtkWidget *name = gtk_label_new(text);
   g_free(text);
   gtk_label_set_xalign(GTK_LABEL(name), 0.0f);
   gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_MIDDLE);
+  dt_gui_add_class(name, "mask-row-name");
   gtk_widget_set_tooltip_text(name,
       _("this shape has not been added yet -- finish drawing it on canvas to add it"));
   gtk_box_pack_start(GTK_BOX(row), name, TRUE, TRUE, 0);
@@ -9986,10 +10042,47 @@ static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form
   dt_gui_add_class(row_vbox, "mask-panel-row");
   dt_gui_add_class(row_vbox, "mask-row-pending");
 
+  // the same expandable controls a committed row has, so the row does not
+  // change shape the moment it commits: whatever the tool exposes while
+  // drawing lives here, behind the same chevron, in the same place.
+  GtkWidget *pending_props = dt_gui_vbox();
+  dt_gui_add_class(pending_props, "mask-props-row-editor");
+
+  GtkWidget *pending_expand = dtgtk_togglebutton_new(_paint_param_inout, 0, NULL);
+  dt_gui_add_class(pending_expand, "mask-inout-toggle");
+  gtk_widget_set_tooltip_text(pending_expand,
+      _("show/hide this shape's expanded controls"));
+  g_object_set_data(G_OBJECT(pending_expand), "group-props-box", pending_props);
+  g_object_set_data(G_OBJECT(pending_expand), "module", module);
+  g_signal_connect(G_OBJECT(pending_expand), "toggled",
+                   G_CALLBACK(_group_props_toggled), NULL);
+
+  // the opacity the shape will be created with (see bd->insert_opacity, which
+  // a new element inherits from the group it lands in)
+  GtkWidget *pending_readout = gtk_label_new(NULL);
+  gtk_label_set_xalign(GTK_LABEL(pending_readout), 1.0f);
+  dt_gui_add_class(pending_readout, "mask-opacity-readout");
+  gtk_widget_set_tooltip_text(pending_readout,
+      _("the opacity this shape will be created with"));
+  {
+    _set_opacity_readout(pending_readout, bd->insert_opacity);
+    bd->pending_opacity_readout = pending_readout;
+  }
+
+  // same trailing cluster, in the same order, as every committed row -- which
+  // is also what gives this row the same height as its neighbours
+  GtkWidget *pending_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_size_request(pending_spacer, DT_PIXEL_APPLY_DPI(15), -1);
+  gtk_box_pack_end(GTK_BOX(row), pending_expand, FALSE, FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(row), pending_readout, FALSE, FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(row), pending_spacer, FALSE, FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(row), _make_badge_stack(_make_lowop_badge(), _make_solo_status_badge()),
+                   FALSE, FALSE, DT_PIXEL_APPLY_DPI(2));
+
 #ifdef HAVE_AI
   if(kind == DT_MASKS_OBJECT)
   {
-    dt_iop_gui_blend_data_t *bd = module->blend_data;
+    // bd is already in scope from the top of this function
     float smoothing = 0.0f;
     int cleanup = 0;
     dt_masks_object_creation_get_preview_params(&smoothing, &cleanup);
@@ -10009,7 +10102,7 @@ static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form
           "same as scrolling on the canvas while drawing."));
     g_object_set_data(G_OBJECT(sm), "dt-prop", GINT_TO_POINTER(DT_MASKS_PROPERTY_SMOOTHING));
     g_signal_connect(G_OBJECT(sm), "value-changed", G_CALLBACK(_pending_ai_slider_changed), module);
-    gtk_box_pack_start(GTK_BOX(row_vbox), sm, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(pending_props), sm, FALSE, FALSE, 0);
     bd->pending_ai_smoothing_slider = sm;
 
     bd->pending_ai_cleanup_last = (float)cleanup;
@@ -10026,12 +10119,50 @@ static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form
           "same as shift+scrolling on the canvas while drawing."));
     g_object_set_data(G_OBJECT(cl), "dt-prop", GINT_TO_POINTER(DT_MASKS_PROPERTY_CLEANUP));
     g_signal_connect(G_OBJECT(cl), "value-changed", G_CALLBACK(_pending_ai_slider_changed), module);
-    gtk_box_pack_start(GTK_BOX(row_vbox), cl, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(pending_props), cl, FALSE, FALSE, 0);
     bd->pending_ai_cleanup_slider = cl;
   }
 #endif
 
+  // every property this shape's own tool accepts while it is being drawn,
+  // discovered from the form itself rather than from a per-kind list
+  for(int i = 0; i < DT_MASKS_PROPERTY_LAST; i++)
+  {
+    if(i == DT_MASKS_PROPERTY_OPACITY) continue;  // shown in the header
+    if(_blend_masks_properties[i].boolean) continue;
+    if(!_pending_prop_applies(form, (dt_masks_property_t)i)) continue;
+#ifdef HAVE_AI
+    // the AI tool's own two sliders are built above, with their own handler
+    if(kind == DT_MASKS_OBJECT
+       && (i == DT_MASKS_PROPERTY_SMOOTHING || i == DT_MASKS_PROPERTY_CLEANUP)) continue;
+#endif
+    GtkWidget *ps = dt_bauhaus_slider_new_with_range(module,
+        _blend_masks_properties[i].min, _blend_masks_properties[i].max, 0,
+        (_blend_masks_properties[i].min + _blend_masks_properties[i].max) * 0.5f, 3);
+    dt_bauhaus_widget_set_label(ps, N_("blend"), _blend_masks_properties[i].name);
+    dt_bauhaus_slider_set_format(ps, _blend_masks_properties[i].format);
+    dt_bauhaus_widget_set_quad_visibility(ps, FALSE);
+    dt_gui_add_class(ps, "mask-props-slider");
+    g_object_set_data(G_OBJECT(ps), "dt-prop", GINT_TO_POINTER(i));
+    float *lastv = g_malloc(sizeof(float));
+    *lastv = dt_bauhaus_slider_get(ps);
+    g_object_set_data_full(G_OBJECT(ps), "last-value", lastv, g_free);
+    g_signal_connect(G_OBJECT(ps), "value-changed",
+                     G_CALLBACK(_pending_prop_changed), module);
+    gtk_box_pack_start(GTK_BOX(pending_props), ps, FALSE, FALSE, 0);
+  }
+
+  // packed after its contents so show_all below reveals the controls inside
+  // it, then closed: the chevron opens it, exactly as on a committed row.
+  gtk_box_pack_start(GTK_BOX(row_vbox), pending_props, FALSE, FALSE, 0);
   gtk_widget_show_all(row_vbox);
+  gtk_widget_set_no_show_all(pending_props, TRUE);
+  gtk_widget_set_visible(pending_props, FALSE);
+  // nothing to expand for a shape whose tool exposes no controls while it is
+  // being drawn -- hide the chevron rather than offer an empty box
+  GList *pending_kids = gtk_container_get_children(GTK_CONTAINER(pending_props));
+  gtk_widget_set_visible(pending_expand, pending_kids != NULL);
+  g_list_free(pending_kids);
   return row_vbox;
 }
 
@@ -10040,6 +10171,25 @@ static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form
 // An empty group has no members, so there is nothing to solo/mute yet -- that
 // column is simply omitted, same as a populated group. Clicking selects it;
 // right-click removes it; dropping a shape onto it fills (realizes) the group.
+// an empty group's opacity is staged on the group itself (eg->opacity) until it
+// gets its first element, which then inherits it (see bd->insert_opacity). So
+// the slider is editable even with no members: it sets what the group *will*
+// scale by, and the value survives into the group-layout entries either way.
+static void _empty_group_opacity_changed(GtkWidget *w, gpointer user_data)
+{
+  if(DT_IN_GUI_UPDATE()) return;
+  dt_masks_empty_group_t *eg = user_data;
+  if(!eg) return;
+  const float value = dt_bauhaus_slider_get(w);
+  eg->opacity = value;
+  _group_opacity_update_tooltip(w, value);
+  GtkWidget *readout = g_object_get_data(G_OBJECT(w), "opacity-readout");
+  if(readout)
+  {
+    _set_opacity_readout(readout, value);
+  }
+}
+
 static void _pack_empty_group_header(dt_iop_module_t *module,
                                      dt_masks_empty_group_t *eg,
                                      const gboolean is_base)
@@ -10154,13 +10304,11 @@ static void _pack_empty_group_header(dt_iop_module_t *module,
   g_signal_connect_data(G_OBJECT(ehandle), "button-press-event",
                         G_CALLBACK(_empty_op_press), eg, NULL, 0);
   gtk_box_pack_start(GTK_BOX(hdr), ehandle, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(hdr), labevt, FALSE, FALSE, 0);
+  gtk_widget_set_hexpand(labevt, TRUE);
+  gtk_box_pack_start(GTK_BOX(hdr), labevt, TRUE, TRUE, 0);
 
-  // a disabled opacity slider, matching a populated group's own header
-  // exactly (same slot/alignment machinery, see _opacity_slot_size_allocate)
-  // -- an empty group has no members to scale yet, but showing the row
-  // without one just made it visibly thinner than every other row, not
-  // meaningfully different in what it offers.
+  // the group's opacity slider, living in this header's expanded controls just
+  // as a populated group's does.
   GtkWidget *opacity_slider = dt_bauhaus_slider_new_with_range(module,
       _blend_masks_properties[DT_MASKS_PROPERTY_OPACITY].min,
       _blend_masks_properties[DT_MASKS_PROPERTY_OPACITY].max, 0, 1.0f, 2);
@@ -10168,27 +10316,54 @@ static void _pack_empty_group_header(dt_iop_module_t *module,
   dt_bauhaus_slider_set_format(opacity_slider, "%");
   dt_bauhaus_slider_set_digits(opacity_slider, 2);
   dt_bauhaus_widget_set_quad_visibility(opacity_slider, FALSE);
-  dt_bauhaus_widget_hide_label(opacity_slider);
+  // no hide_label, no .mask-inline-opacity and no centred valign: those were
+  // for the cramped in-row slider this used to be. It lives in the group's
+  // expanded controls now, so it is built exactly like a populated group's
+  // (see the group header build) and reads "opacity  100.00%" like every
+  // other slider in the panel.
   dt_gui_add_class(opacity_slider, "mask-props-slider");
-  dt_gui_add_class(opacity_slider, "mask-inline-opacity");
   _style_opacity_gradient(opacity_slider);
-  gtk_widget_set_valign(opacity_slider, GTK_ALIGN_CENTER);
-  DT_ENTER_GUI_UPDATE();  // populate only, no listener attached anyway
+  DT_ENTER_GUI_UPDATE();  // populate only -- must not fire the handler below
   dt_bauhaus_slider_set(opacity_slider, eg->opacity);
   DT_LEAVE_GUI_UPDATE();
   _group_opacity_update_tooltip(opacity_slider, eg->opacity);
-  gtk_widget_set_sensitive(opacity_slider, FALSE);
+  g_signal_connect(G_OBJECT(opacity_slider), "value-changed",
+                   G_CALLBACK(_empty_group_opacity_changed), eg);
 
-  GtkWidget *opacity_inner = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-  gtk_box_pack_start(GTK_BOX(opacity_inner), within_sel, FALSE, FALSE, 0);
-  gtk_box_pack_start(GTK_BOX(opacity_inner), opacity_slider, TRUE, TRUE, 0);
-  g_object_set_data(G_OBJECT(opacity_inner), "extra-width",
-                    GINT_TO_POINTER(DT_PIXEL_APPLY_DPI(18)));
-  GtkWidget *opacity_slot = dt_gui_hbox(opacity_inner);
-  gtk_widget_set_hexpand(opacity_slot, TRUE);
-  g_signal_connect_after(G_OBJECT(opacity_slot), "size-allocate",
-                         G_CALLBACK(_opacity_slot_size_allocate), opacity_inner);
-  gtk_box_pack_start(GTK_BOX(hdr), opacity_slot, TRUE, TRUE, 0);
+  // the empty group's own expanded controls, revealed by the header's chevron
+  // exactly as a populated group's are.
+  GtkWidget *eg_props_box = dt_gui_vbox(opacity_slider);
+  dt_gui_add_class(eg_props_box, "mask-props-row-editor");
+  gtk_widget_show_all(eg_props_box);
+  gtk_widget_set_no_show_all(eg_props_box, TRUE);
+  gtk_widget_set_visible(eg_props_box, eg->props_expanded);
+
+  GtkWidget *eg_expand = dtgtk_togglebutton_new(_paint_param_inout, 0, NULL);
+  dt_gui_add_class(eg_expand, "mask-inout-toggle");
+  gtk_widget_set_tooltip_text(eg_expand, _("show/hide this group's expanded controls"));
+  g_object_set_data(G_OBJECT(eg_expand), "group-props-box", eg_props_box);
+  g_object_set_data(G_OBJECT(eg_expand), "module", module);
+  // set active before connecting, so restoring the state cannot fire the
+  // handler straight back into eg->props_expanded
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(eg_expand), eg->props_expanded);
+  g_signal_connect(G_OBJECT(eg_expand), "toggled",
+                   G_CALLBACK(_group_props_toggled), eg);
+
+  GtkWidget *eg_readout = gtk_label_new(NULL);
+  gtk_label_set_xalign(GTK_LABEL(eg_readout), 1.0f);
+  dt_gui_add_class(eg_readout, "mask-opacity-readout");
+  gtk_widget_set_tooltip_text(eg_readout, _("this group's opacity"));
+  {
+    _set_opacity_readout(eg_readout, eg->opacity);
+  }
+
+  // same right-to-left order as every other row kind (see _make_shape_row and
+  // the real group header build): expander, opacity readout, operator, badges
+  g_object_set_data(G_OBJECT(opacity_slider), "opacity-readout", eg_readout);
+
+  gtk_box_pack_end(GTK_BOX(hdr), eg_expand, FALSE, FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(hdr), eg_readout, FALSE, FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(hdr), within_sel, FALSE, FALSE, 0);
   // always-present-but-blank badge stack, matching a populated group's own
   // header exactly (see _make_badge_stack) -- neither solo nor low-opacity
   // has any meaning for a group with no members yet, but leaving the cell
@@ -10241,7 +10416,18 @@ static void _pack_empty_group_header(dt_iop_module_t *module,
                    G_CALLBACK(_group_drop_leave), hdr);
 
   GtkWidget *block = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+  // the same block class a populated group's own carries, so an empty group
+  // gets its rail and its separation from the group above from the moment it
+  // is created -- without it a new group had no rail at all until its first
+  // element turned it into a real group (see _build_masks_list's own block)
+  gtk_widget_set_name(block, "mask-group-block");
+  dt_gui_add_class(block, "mask-group-block");
   gtk_box_pack_start(GTK_BOX(block), hdr_evbox, FALSE, FALSE, 0);
+  // the expanded controls sit directly under the header, exactly as a real
+  // group's do (see the group header build)
+  gtk_box_pack_start(GTK_BOX(block), eg_props_box, FALSE, FALSE, 0);
+  // so shift+click and double-click on the header drive the chevron too
+  g_object_set_data(G_OBJECT(hdr_evbox), "expand-toggle", eg_expand);
   // see the "header-widget"/"group-header-widget" split comment above: this
   // tag is what _apply_empty_selection shades, and it must be the whole
   // block (matching a real group's own group_block target) so a selected
@@ -10562,7 +10748,7 @@ static GtkWidget *_make_drag_handle(DTGTKCairoPaintIconFunc kind_paint,
   GtkWidget *eb = gtk_event_box_new();
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(eb), TRUE);
   gtk_widget_set_app_paintable(eb, TRUE);
-  gtk_widget_set_size_request(eb, DT_PIXEL_APPLY_DPI(18), DT_PIXEL_APPLY_DPI(18));
+  gtk_widget_set_size_request(eb, DT_PIXEL_APPLY_DPI(15), DT_PIXEL_APPLY_DPI(15));
   gtk_widget_set_valign(eb, GTK_ALIGN_CENTER);
   // a rounded plate behind every handle, always -- not just when inverted --
   // so a blocky icon (e.g. the raster mask checkerboard) reads as a rounded
@@ -10641,140 +10827,7 @@ static gboolean _param_row_inverted(dt_iop_module_t *module, const dt_mask_id_t 
   return gp && (gp->state & DT_MASKS_STATE_INVERSE);
 }
 
-// size whichever slider is currently docked in header_slot (see
-// _update_param_row_header_dock): the compact input slider, collapsed --
-// covering the slot's entire allocation, same as before -- or the opacity
-// slider, expanded -- capped to at most half the slot's width and
-// right-aligned instead, mirroring a shape/raster row's own inline opacity
-// treatment (see _opacity_slot_size_allocate). Either way this overrides the
-// *allocation* directly instead of trying to influence GtkBox's placement
-// decision: GtkBox's own "expand"/"fill" child properties were, in practice,
-// not reliably stretching the input slider to the full width (it kept
-// rendering at some narrow, roughly-natural width instead). Deliberately
-// does not touch either slider's own size REQUEST
-// (get_preferred_width/gtk_widget_set_size_request): doing that from a
-// size-allocate handler ratchets, since a size_request participates in the
-// upward min-size negotiation an ancestor's own resize (e.g. a user shrinking
-// the panel) has to satisfy -- once written large it can never shrink back,
-// because the negotiation that would allocate this row smaller again is
-// itself blocked by the stale, now-too-large minimum. Overriding only the
-// allocation has no such memory: every pass simply matches whatever
-// header_slot was just given, growing or shrinking, with nothing retained.
-static void _param_header_slot_size_allocate(GtkWidget *slot, GtkAllocation *alloc,
-                                             gpointer user_data)
-{
-  dt_masks_param_row_editor_t *ed = user_data;
-  if(!ed->header_inner || gtk_widget_get_parent(ed->header_inner) != slot) return;
-  GtkWidget *input_slider = GTK_WIDGET(ed->filter[0].slider);
-  GtkWidget *docked =
-    (input_slider && gtk_widget_get_parent(input_slider) == ed->header_inner) ? input_slider
-    : (ed->opacity_slider && gtk_widget_get_parent(ed->opacity_slider) == ed->header_inner)
-      ? ed->opacity_slider
-    : NULL;
-  if(!docked) return;
 
-  // the picker button (see ed->header_inner's own comment) is header_inner's
-  // permanent first child -- always allocated its own natural width at the
-  // slot's left edge, with the docked slider taking whatever is left. Absent
-  // if this row somehow has no picker (picker_box_out came back NULL).
-  GtkWidget *picker = NULL;
-  {
-    GList *kids = gtk_container_get_children(GTK_CONTAINER(ed->header_inner));
-    if(kids && kids->data != docked) picker = kids->data;
-    g_list_free(kids);
-  }
-  gint picker_min_w = 0, picker_nat_w = 0, picker_min_h = 0, picker_nat_h = 0;
-  if(picker)
-  {
-    gtk_widget_get_preferred_width(picker, &picker_min_w, &picker_nat_w);
-    gtk_widget_get_preferred_height(picker, &picker_min_h, &picker_nat_h);
-  }
-  const int picker_w = MIN(picker_nat_w, MAX(alloc->width, 0));
-
-  gint min_h = 0, nat_h = 0;
-  gtk_widget_get_preferred_height(docked, &min_h, &nat_h);
-  const int row_h = MAX(MAX(nat_h, picker_nat_h), 1);
-
-  GtkAllocation child_alloc = *alloc;
-  child_alloc.height = MAX(nat_h, 1);
-  if(docked == ed->opacity_slider)
-  {
-    // mirrors a group header's within-group selector sitting immediately
-    // left of its own opacity slider (see _opacity_slot_size_allocate's own
-    // "extra-width" comment): the slider itself still gets the same row/2
-    // share every other row kind's inline opacity slider gets, with the
-    // picker's width added on top rather than carved out of it, so the
-    // slider portion lines up across every row kind and the picker lines up
-    // with the group header's within-group selector column.
-    GtkWidget *row = gtk_widget_get_parent(slot);
-    const int row_w = row ? gtk_widget_get_allocated_width(row) : alloc->width;
-    const int target_w = MAX(row_w / 2, 1) + picker_w;
-    const int total_w = MIN(target_w, MAX(alloc->width, 1));
-    child_alloc.width = MAX(total_w - picker_w, 1);
-    child_alloc.x = alloc->x + (alloc->width - total_w) + picker_w;
-    if(picker)
-    {
-      GtkAllocation picker_alloc = { alloc->x + (alloc->width - total_w),
-                                     alloc->y + (alloc->height - row_h) / 2,
-                                     picker_w, row_h };
-      gtk_widget_size_allocate(picker, &picker_alloc);
-    }
-  }
-  else
-  {
-    // collapsed: the picker sits fixed at the slot's own left edge (this is
-    // "move the picker to the left" for the common, collapsed case), and the
-    // input slider fills the rest -- no right-alignment/capping needed since
-    // it already claims all remaining width either way.
-    if(picker)
-    {
-      GtkAllocation picker_alloc = { alloc->x, alloc->y + (alloc->height - row_h) / 2,
-                                     picker_w, row_h };
-      gtk_widget_size_allocate(picker, &picker_alloc);
-    }
-    child_alloc.x = alloc->x + picker_w;
-    child_alloc.width = MAX(alloc->width - picker_w, 1);
-  }
-  child_alloc.y = alloc->y + (alloc->height - child_alloc.height) / 2;
-  gtk_widget_size_allocate(docked, &child_alloc);
-}
-
-// dock whichever slider belongs in the row's own header bar right now: the
-// compact input slider while collapsed (see _make_shape_row, which wires up
-// ed->header_slot once), full-width like the header slot's own free space --
-// or the opacity slider while expanded, right-aligned and capped instead,
-// mirroring a shape/raster row's own inline opacity treatment (see
-// _param_header_slot_size_allocate, which sizes whichever of the two is
-// currently docked here) -- "for symmetry and to save vertical space" per the
-// user's request, so expanding a parametric row's properties no longer grows
-// it by a whole extra line. Either slider's *other* home (compact_row for the
-// input slider, opacity_box for opacity, see _apply_param_row_filter_layout /
-// the opacity slider's own construction above) is where _reparent_into pulls
-// it back from -- nothing needs an explicit "undock" step, it simply isn't
-// asked to move this time. header_slot itself stays visible either way -- it
-// is always the row's one expanding child (see _make_shape_row), so it keeps
-// reserving the same free-width share the name label would otherwise have to
-// compete for, with no toggling needed.
-static void _update_param_row_header_dock(dt_masks_param_row_editor_t *ed,
-                                          const gboolean collapsed)
-{
-  if(!ed->header_slot || !ed->header_inner) return;
-  if(collapsed)
-  {
-    _reparent_into(ed->opacity_slider, ed->opacity_box, FALSE, TRUE);
-    GtkWidget *slider = GTK_WIDGET(ed->filter[0].slider);
-    _reparent_into(slider, ed->header_inner, FALSE, TRUE);
-    gtk_widget_set_hexpand(slider, TRUE);
-    gtk_widget_set_halign(slider, GTK_ALIGN_FILL);
-    gtk_container_child_set(GTK_CONTAINER(ed->header_inner), slider,
-                            "expand", TRUE, "fill", TRUE, NULL);
-  }
-  else
-  {
-    _reparent_into(ed->opacity_slider, ed->header_inner, FALSE, TRUE);
-    gtk_widget_set_hexpand(ed->opacity_slider, TRUE);
-  }
-}
 
 // show/hide this row's output slider and boost-factor slider -- output only
 // once the row's expander is toggled on (p->in_out), and the boost slider only
@@ -10795,13 +10848,10 @@ static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
   const gboolean show_boost = show_output && channel && channel->boost_factor_enabled;
   gtk_widget_set_visible(GTK_WIDGET(ed->filter[1].box), show_output);
   gtk_widget_set_visible(ed->boost_box, show_boost);
-  // the opacity slider rides the same expander as output/boost (per the
-  // user's request), but -- unlike boost -- docks into the row's own header
-  // instead of showing below the row (see _update_param_row_header_dock,
-  // called at the end of this function): opacity_box is only ever its
-  // parking spot while collapsed, so it stays permanently hidden here rather
-  // than toggling with show_output.
-  gtk_widget_set_visible(ed->opacity_box, FALSE);
+  // the editor is revealed as a whole by the row's own expander, so opacity
+  // rides the same state as output/boost rather than being permanently shown:
+  // a collapsed parametric row is identity only, like every other row kind.
+  gtk_widget_set_visible(ed->opacity_box, show_output);
   // a box that was hidden since creation (no_show_all, never shown by an
   // ancestor's show_all) was never given a real size allocation -- flipping
   // its own "visible" property is not always enough to make an ancestor
@@ -10809,19 +10859,20 @@ static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
   gtk_widget_queue_resize(GTK_WIDGET(ed->filter[1].box));
   gtk_widget_queue_resize(ed->boost_box);
 
-  // collapsed is a compact, input-only slider (no label, values hidden);
-  // expanded shows input/output in full, each with its own label -- one
-  // combined state (p->in_out), not a separate compact toggle.
-  const gboolean compact = !show_output;
-  _apply_param_row_filter_layout(&ed->filter[0], compact, FALSE);
-  _apply_param_row_filter_layout(&ed->filter[1], compact, FALSE);
-
-  // collapsed also has nothing left to show in the below-row editor at all
-  // (input's own box above is now empty -- its slider moves onto the row's
-  // header bar instead, see _update_param_row_header_dock): hide it too, so
-  // the row doesn't carry an empty sliver underneath.
+  // full, labelled sliders throughout: nothing docks into the row header any
+  // more, so there is no reason for the cramped label-less variant it needed.
+  _apply_param_row_filter_layout(&ed->filter[0], FALSE, FALSE);
+  _apply_param_row_filter_layout(&ed->filter[1], FALSE, FALSE);
+  // the input range is part of the expanded controls too -- collapsed, the row
+  // shows only its channel code, name and opacity readout.
   gtk_widget_set_visible(GTK_WIDGET(ed->filter[0].box), show_output);
-  _update_param_row_header_dock(ed, compact);
+  // and hide the editor's own wrapper, not just the boxes inside it: the
+  // colour-picker cluster is packed directly into the wrapper (see
+  // _make_shape_row's parametric branch) rather than into any of the boxes
+  // toggled above, so toggling children alone left a stray dropper showing on
+  // a collapsed row. NULL while the editor is still being built -- this runs
+  // once before the wrapper exists (see _build_param_row_editor).
+  if(ed->row) gtk_widget_set_visible(ed->row, show_output);
 }
 
 // refresh this row's own slider markers/values/labels/boost-slider display from
@@ -12264,7 +12315,7 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module, dt_masks_form
   // other row kind's opacity control. Docks into the row's own header_slot
   // while expanded, right alongside the between-groups-style inline sliders
   // shape/raster/group rows show -- "for symmetry and to save vertical
-  // space" (see _update_param_row_header_dock) -- so it is styled the same
+  // space" -- so it is styled the same
   // inline way (label/value hidden, tooltip stands in for them) rather than
   // the labeled, below-row style boost_box uses.
   ed->opacity_slider = dt_bauhaus_slider_new_with_range(module,
@@ -12278,7 +12329,9 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module, dt_masks_form
   dt_bauhaus_slider_set_digits(ed->opacity_slider, 2);
   // no quad icon -- see the same call for the shape/group properties sliders
   dt_bauhaus_widget_set_quad_visibility(ed->opacity_slider, FALSE);
-  dt_bauhaus_widget_hide_label(ed->opacity_slider);
+  // the label stays visible: this slider used to be squeezed into a row header
+  // where it had no room for one, but it lives in the element inspector now
+  // and an unlabelled slider under a range widget is unidentifiable.
   ed->opacity_last_value = dt_bauhaus_slider_get(ed->opacity_slider);
   g_object_set_data(G_OBJECT(ed->opacity_slider), "dt-prop",
                     GINT_TO_POINTER(DT_MASKS_PROPERTY_OPACITY));
@@ -12294,7 +12347,7 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module, dt_masks_form
   g_signal_connect(G_OBJECT(ed->opacity_slider), "value-changed",
                    G_CALLBACK(_inline_opacity_tooltip_changed), NULL);
   // opacity_slider's only real home is header_slot, docked there while
-  // expanded (see _update_param_row_header_dock) -- opacity_box is just a
+  // expanded -- opacity_box is just a
   // parking spot for it the rest of the time (collapsed, or before this row
   // even has a header_slot yet), permanently hidden: unlike boost_box it is
   // never itself shown, so it carries none of boost_box's below-row margin
@@ -12308,6 +12361,9 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module, dt_masks_form
   // class-based rules (shared by every parametric row's own editor instance)
   gtk_widget_set_name(wrap, "mask-param-row-editor");
   dt_gui_add_class(wrap, "mask-param-row-editor");
+  // anchor the precise-entry popup against the editor's own box: with the
+  // editor in the panel's element inspector there is no owning row to use
+  ed->row = wrap;
 
   _update_param_row_display(ed);
   g_object_set_data_full(G_OBJECT(wrap), "param-editor", ed, g_free);
@@ -12326,6 +12382,11 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module, dt_masks_form
   gtk_widget_set_no_show_all(GTK_WIDGET(ed->filter[1].box), TRUE);
   gtk_widget_set_no_show_all(ed->boost_box, TRUE);
   gtk_widget_set_no_show_all(ed->opacity_box, TRUE);
+  // the wrapper itself too: _update_param_row_visibility hides it outright on
+  // a collapsed row (it holds the picker cluster, which sits in none of the
+  // boxes above), and without this an ancestor's show_all would undo that.
+  gtk_widget_set_no_show_all(wrap, TRUE);
+  gtk_widget_set_no_show_all(GTK_WIDGET(ed->filter[0].box), TRUE);
   for(int in_out = 0; in_out < 2; in_out++)
   {
     gtk_widget_set_no_show_all(ed->filter[in_out].values_box, TRUE);
@@ -12444,13 +12505,13 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   // name (expands): see _row_click_press/_row_click_release for the full set
   // of gestures, shared with the handle above and the row's own background
   // below. The selected row is shown by the border highlight (see row_vbox
-  // below). The type prefix (e.g. "circle", "Cz") is stripped from the
-  // displayed text -- the handle already says what kind this is (icon, or
-  // channel code for a parametric row), so repeating it in the label would
-  // be redundant (see _form_type_prefix).
-  gchar *display_name = _form_display_name(form);
-  GtkWidget *name = gtk_label_new(display_name);
-  g_free(display_name);
+  // below). The full name, exactly as the mask manager shows it ("circle #1",
+  // not "#1" -- see _set_iter_name in libs/masks.c): users already know their
+  // masks by those names, and a bare ordinal is not a name. The handle icon
+  // does repeat the type, but the cost of that is small next to naming the
+  // same shape differently in two places. Only the rename entry still strips
+  // the prefix, so it cannot be typed over (see _form_display_name).
+  GtkWidget *name = gtk_label_new(form->name);
   gtk_label_set_xalign(GTK_LABEL(name), 0.0f);
   gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_MIDDLE);
   // ellipsize alone only kicks in once the label is squeezed below its own
@@ -12517,9 +12578,6 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   GtkWidget *soloedit;
   GtkWidget *param_editor = NULL;
   GtkWidget *param_picker_box = NULL;
-  // collapsed-state home for a parametric row's input slider, packed directly
-  // into the row's own header bar (see below); NULL for every other row kind.
-  GtkWidget *param_header_slot = NULL;
   // properties expander: every shape and raster row gets one (see
   // _make_props_row_toggle); parametric rows do not -- their existing in/out
   // toggle above (soloedit, in this branch) already reveals opacity too.
@@ -12528,11 +12586,6 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   // holder its own "toggled" handler already knows how to drive.
   GtkWidget *props_toggle = NULL;
   GtkWidget *props_editor_box = NULL;
-  // shape/raster rows' own opacity slider, shown directly, always, inline in
-  // the header next to the name (see _style_inline_opacity_box) -- mirrors
-  // the group header's own treatment. NULL for a parametric row, which
-  // already reveals opacity through its own in/out chevron instead.
-  GtkWidget *opacity_box = NULL;
   // the row's own properties/expanded-view toggle, whichever widget that is
   // for this row kind (see below) -- shift+click on the lead handle or the
   // title (see _row_click_release / _row_click_release) drives it
@@ -12558,72 +12611,32 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
     g_signal_connect(G_OBJECT(soloedit), "toggled",
                      G_CALLBACK(_masks_param_inout_toggled), module);
     expand_toggle = soloedit;
-    // built here (rather than after row_vbox exists, below) so its two picker
-    // buttons are ready to pack into the header actions cluster next to the
-    // expander/power icons -- they are per-channel controls, not part of the
-    // always-visible slider editor (see _build_param_row_editor)
+    // tagged like a shape row's own props toggle so _find_props_toggle_in
+    // recognises it: the "auto-expand selected shape" option drives whatever
+    // that lookup returns, and a parametric row's expander is this in/out
+    // toggle rather than a props one. The data is only ever read by that
+    // lookup and by _props_row_toggled, which this toggle is not connected to.
+    g_object_set_data(G_OBJECT(soloedit), "props-key", GINT_TO_POINTER(fid));
+    // the channel/range/opacity/boost editor is built here but shown only
+    // while the row is expanded -- collapsed, a parametric row is identity
+    // only, exactly like every other row kind. Nothing docks into the header
+    // any more, which is what retired the old opacity/range swap.
     param_editor = _build_param_row_editor(module, form, &param_picker_box);
-
-    // wire up the header-bar slot for the collapsed input slider (see
-    // _update_param_row_header_dock) -- packed into `row` itself further
-    // down, alongside the name, so a collapsed row's slider draws right on
-    // the header bar instead of on its own line underneath.
-    dt_masks_param_row_editor_t *ped =
-      param_editor ? g_object_get_data(G_OBJECT(param_editor), "param-editor") : NULL;
-    if(ped)
-    {
-      ped->row = row;
-      param_header_slot = dt_gui_hbox();
-      gtk_widget_set_hexpand(param_header_slot, TRUE);
-      // its own class (not .mask-param-row-editor -- that one also carries an
-      // 8px left/right margin meant for the below-row editor, which would
-      // shift this slider away from sitting flush against the name label):
-      // zeroes out the generic .dt_gslider_multivalue padding (0.56em all
-      // around, sized for the slider's usual home nested under the row's own
-      // label column), which otherwise read as a dead margin on both sides
-      // of the bar once docked here, on the row's header bar instead.
-      dt_gui_add_class(param_header_slot, "mask-param-header-slot");
-      // _after: a plain g_signal_connect runs *before* GtkBox's own default
-      // handler (which is what actually allocates the slider, its child, in
-      // response to this same signal) -- connecting before it would have our
-      // override immediately clobbered by GtkBox's own (narrow) allocation
-      // decision right afterward. _after guarantees we get the final word.
-      g_signal_connect_after(G_OBJECT(param_header_slot), "size-allocate",
-                             G_CALLBACK(_param_header_slot_size_allocate), ped);
-      // always shown -- it is this row's one expanding child (see the
-      // evbox/param_header_slot packing below), whether or not the slider is
-      // currently docked inside it, so it always reserves the header's free
-      // width instead of the name label ever having to claim a share of it
-      gtk_widget_show(param_header_slot);
-      ped->header_slot = param_header_slot;
-      // the picker button moves from the row's trailing actions cluster (see
-      // param_picker_box below) to sit permanently at the *start* of the
-      // header slot instead -- immediately left of whichever slider is
-      // currently docked there, mirroring a group header's within-group
-      // selector sitting immediately left of its own opacity slider (see the
-      // group header build further down). Packed once, here, and never
-      // reparented again; only the slider (input while collapsed, opacity
-      // while expanded) swaps in and out of this same inner box's second
-      // slot -- see _update_param_row_header_dock /
-      // _param_header_slot_size_allocate, which allocates both children by
-      // hand for the same reason header_slot's own child always was.
-      ped->header_inner = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-      if(param_picker_box)
-        gtk_box_pack_start(GTK_BOX(ped->header_inner), param_picker_box, FALSE, FALSE, 0);
-      gtk_container_add(GTK_CONTAINER(param_header_slot), ped->header_inner);
-      gtk_widget_show(ped->header_inner);
-      _update_param_row_header_dock(ped, !out);
-    }
+    // the second half of what _find_props_toggle_in matches on (see the
+    // "props-key" tag above): the widget this toggle reveals
+    if(param_editor)
+      g_object_set_data(G_OBJECT(soloedit), "props-editor-box", param_editor);
   }
   else if(form->type & DT_MASKS_RASTER)
   {
-    // a raster mask has no on-canvas geometry to solo-edit, and opacity (its
-    // only property -- modify_property is NULL for a raster form) is now
-    // always shown inline in the header instead of behind an expander, so
-    // this slot has nothing left to hold.
+    // a raster mask has no on-canvas geometry to solo-edit, so this slot has
+    // nothing left to hold. Opacity is its only property (modify_property is
+    // NULL for a raster form), and like every other row kind it lives behind
+    // the row's own expander.
     soloedit = NULL;
-    opacity_box = _build_props_row_editor(module, fid, FALSE, TRUE, FALSE);
-    _style_inline_opacity_box(opacity_box);
+    props_toggle = _make_props_row_toggle(module, fid, FALSE, TRUE, FALSE,
+        _("show/hide this mask's opacity"), &props_editor_box);
+    expand_toggle = props_toggle;
   }
   else
   {
@@ -12633,28 +12646,28 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
     // _build_shape_actions_menu / _row_click_press).
     soloedit = NULL;
 
-    // opacity is shown directly, always, inline in the header next to the
-    // name (see _style_inline_opacity_box) -- everything else this shape has
-    // (size, hardness, feather, rotation, curvature, compression, cleanup,
-    // smoothing, refine-mask-boundary) stays behind its own separate
-    // expander, excluding opacity so it is not editable a second time from
-    // there -- see _make_props_row_toggle.
-    opacity_box = _build_props_row_editor(module, fid, FALSE, TRUE, FALSE);
-    _style_inline_opacity_box(opacity_box);
-    props_toggle = _make_props_row_toggle(module, fid, FALSE, FALSE, TRUE,
-        _("show/hide this shape's expanded controls (size, hardness, etc.)"), &props_editor_box);
+    // every control this shape has -- opacity included -- lives behind its own
+    // expander. The row itself keeps only the read-only effective-opacity
+    // figure, so a list of elements stays scannable without any row carrying
+    // a live slider competing with its name for width.
+    props_toggle = _make_props_row_toggle(module, fid, FALSE, FALSE, FALSE,
+        _("show/hide this shape's expanded controls (opacity, size, feather, ...)"),
+        &props_editor_box);
     expand_toggle = props_toggle;
   }
 
-  // no visible chevron for any row kind any more -- shift+click on the lead
-  // handle or the title (see _row_click_release / _row_click_release)
-  // drives expand_toggle's own "toggled" handler programmatically instead,
-  // so it stays alive (still packed into `actions` below) purely as a state
-  // holder and its docked editor box keeps working unchanged.
+  // a visible chevron, matching the one a group header carries: an expander is
+  // the one control that has to be visible, because it is the way into
+  // everything else the row can do. Shift+click on the lead handle or the
+  // title, and double-click anywhere on the row, still drive the same toggle
+  // (see _row_click_press / _row_click_release) -- the button is the
+  // discoverable route, the gestures are the fast ones.
   if(expand_toggle)
   {
-    gtk_widget_set_no_show_all(expand_toggle, TRUE);
-    gtk_widget_hide(expand_toggle);
+    gtk_widget_show(expand_toggle);
+    gtk_widget_set_tooltip_text(expand_toggle,
+        _("show/hide this element's expanded controls\n"
+          "(double-click the row, or shift+click its icon or name)"));
     g_object_set_data(G_OBJECT(handle), "expand-toggle", expand_toggle);
     g_object_set_data(G_OBJECT(evbox), "expand-toggle", expand_toggle);
   }
@@ -12683,64 +12696,51 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   // The properties expander itself is never shown any more (see expand_toggle
   // above) -- shift+click the handle or the title toggles it instead -- but it
   // still gets packed here so it stays part of this row's own widget tree and
-  // is destroyed along with it. A parametric row's picker button lives at the
-  // *start* of its header_slot instead now (see param_header_slot above), not
-  // here in the trailing actions cluster.
+  // is destroyed along with it.
   GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
   if(soloedit) gtk_box_pack_start(GTK_BOX(actions), soloedit, FALSE, FALSE, 0);
   if(props_toggle) gtk_box_pack_start(GTK_BOX(actions), props_toggle, FALSE, FALSE, 0);
-  // a parametric row's name never claims free width for itself -- its
-  // header_slot (always present, see above) is the row's one expanding
-  // child instead, whether or not the slider is currently docked inside it,
-  // so the name only ever takes the tight space its own (ellipsized) text
-  // needs. A shape/raster row's name likewise no longer expands -- its own
-  // opacity_box (packed right after it, inside a claiming/capping slot --
-  // see _opacity_slot_size_allocate) is the expanding child instead.
-  const gboolean name_expand = !param_header_slot && !opacity_box;
-  gtk_widget_set_hexpand(evbox, name_expand);
-  // a fixed name-column width (instead of the label's own, per-row-varying
-  // natural width, which max_width_chars capped to near nothing above) so
-  // every row's name column is actually visible rather than collapsing to
-  // the ellipsis alone. For a shape/raster row this also keeps the opacity
-  // slider -- capped and right-aligned within whatever space is left after
-  // this column, see _opacity_slot_size_allocate -- starting at the same x
-  // regardless of how long this particular row's name happens to be: with
-  // the column fixed and the trailing badges/actions the same width on every
-  // such row (the properties/solo-edit toggles are always hidden now, taking
-  // no space), the opacity slot ends up the same width everywhere too, so
-  // the slider vertically lines up down the whole element list. Long names
-  // still ellipsize (PANGO_ELLIPSIZE_MIDDLE, set above) rather than push the
-  // slider (or, for a parametric row, the header slot) out of alignment.
+  // no row kind has a competing header child any more, so the name always
+  // takes the row's free width
+  gtk_widget_set_hexpand(evbox, TRUE);
+  // a minimum name-column width so a row never collapses to the ellipsis
+  // alone; long names still ellipsize (PANGO_ELLIPSIZE_MIDDLE, set above)
   gtk_widget_set_size_request(evbox, DT_PIXEL_APPLY_DPI(50), -1);
-  gtk_box_pack_start(GTK_BOX(row), evbox, name_expand, name_expand, 0);
-  if(param_header_slot) gtk_box_pack_start(GTK_BOX(row), param_header_slot, TRUE, TRUE, 0);
-  if(opacity_box)
-  {
-    // claims the row's free width like any other expanding header child, but
-    // _opacity_slot_size_allocate then caps opacity_box itself to at most
-    // half of whatever this slot ends up with and pins it to the right edge
-    // -- "right-aligned, extending at most to 50% of the row's width".
-    GtkWidget *opacity_slot = dt_gui_hbox(opacity_box);
-    gtk_widget_set_hexpand(opacity_slot, TRUE);
-    g_signal_connect_after(G_OBJECT(opacity_slot), "size-allocate",
-                           G_CALLBACK(_opacity_slot_size_allocate), opacity_box);
-    gtk_box_pack_start(GTK_BOX(row), opacity_slot, TRUE, TRUE, 0);
-  }
+  gtk_box_pack_start(GTK_BOX(row), evbox, TRUE, TRUE, 0);
+  // effective opacity, read-only, right-aligned: the row's own slider moved to
+  // the element inspector, and without something anchored to the right edge a
+  // row trails off into empty space. Gives back the at-a-glance scan of the
+  // whole list the slider used to provide, in a fraction of the width, and
+  // shows the *effective* value (element x group), which no single slider
+  // ever did. Kept up to date by _refresh_lowop_badges, which already walks
+  // every row with both numbers to hand.
+  GtkWidget *opacity_readout = gtk_label_new(NULL);
+  gtk_label_set_xalign(GTK_LABEL(opacity_readout), 1.0f);
+  dt_gui_add_class(opacity_readout, "mask-opacity-readout");
+  gtk_widget_set_tooltip_text(opacity_readout, _("this element's opacity"));
+
   // one fixed-size stack instead of separately-packed badges (see
   // _make_badge_stack) -- its own size never changes as badges turn on/off,
   // so nothing else in the row shifts when solo/solo-edit/low-opacity toggle.
   // Both packed from the end (right edge) so they sit flush against it
   // regardless of how much leftover width the row's own expanding children
   // (name/opacity slot) leave unclaimed -- pack_start would leave them
-  // wherever the preceding sibling ends, short of the true edge. The badge
-  // stack is packed first (in pack_end order, first packed = outermost/
-  // nearest the edge) so it is the true rightmost thing in the row, ahead of
-  // `actions` (the parametric row's own colour-picker button, when present)
-  // -- a row's status badges read as more of a fixed landmark than its
-  // per-kind action button, so they get the edge.
+  // wherever the preceding sibling ends, short of the true edge. In pack_end
+  // order the first call is the outermost, so this reads right-to-left and
+  // matches a group header's trailing cluster exactly (see the group header
+  // build): expander at the edge, then the opacity readout, then the operator
+  // slot, then the badges. The expander gets the edge because it is the one
+  // control on the row the user aims at repeatedly.
+  gtk_box_pack_end(GTK_BOX(row), actions, FALSE, FALSE, 0);
+  gtk_box_pack_end(GTK_BOX(row), opacity_readout, FALSE, FALSE, 0);
+  // an element has no operator of its own -- the group owns it -- but it
+  // reserves the same width a group header spends on its within-group chip,
+  // so every column lines up across both row kinds.
+  GtkWidget *op_spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_size_request(op_spacer, DT_PIXEL_APPLY_DPI(15), -1);
+  gtk_box_pack_end(GTK_BOX(row), op_spacer, FALSE, FALSE, 0);
   gtk_box_pack_end(GTK_BOX(row), _make_badge_stack(lowop_badge, solo_badge),
                    FALSE, FALSE, DT_PIXEL_APPLY_DPI(2));
-  gtk_box_pack_end(GTK_BOX(row), actions, FALSE, FALSE, 0);
 
   // hidden shapes contribute nothing to the composite: dim the whole row
   if(fpt->state & DT_MASKS_STATE_HIDDEN)
@@ -12823,6 +12823,7 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   g_object_set_data(G_OBJECT(row_vbox), "handle-widget", handle);
   g_object_set_data(G_OBJECT(row_vbox), "solo-badge", solo_badge);
   g_object_set_data(G_OBJECT(row_vbox), "lowop-badge", lowop_badge);
+  g_object_set_data(G_OBJECT(row_vbox), "opacity-readout", opacity_readout);
   g_object_set_data(G_OBJECT(row_vbox), "actions-box", actions);
   // tag the properties editor box too (mirrors "param-editor-box" below) so
   // _update_shape_row_state can make it insensitive while this row is
@@ -12831,27 +12832,21 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   // "param-editor-box" instead).
   if(props_editor_box)
     g_object_set_data(G_OBJECT(row_vbox), "props-editor-box", props_editor_box);
-  // same, for the always-visible inline opacity box (shape/raster rows) --
-  // see _update_shape_row_state's own "opacity-editor-box" lookup
-  if(opacity_box)
-    g_object_set_data(G_OBJECT(row_vbox), "opacity-editor-box", opacity_box);
   if(dt_is_valid_maskid(bd->panel_selected_formid) && fid == bd->panel_selected_formid)
     dt_gui_add_class(row_vbox, "mask-list-row-selected");
   if(bd->solo_formid == fid || bd->soloedit_formid == fid)
     dt_gui_add_class(row_vbox, "mask-list-row-solo");
   gtk_box_pack_start(GTK_BOX(row_vbox), row_evbox, FALSE, FALSE, 0);
 
-  // every parametric mask row gets its own permanently visible slider editor
-  // (see _build_param_row_editor) -- no expand/collapse or docking needed
+  // a parametric row's editor: packed like the shape/raster properties editor
+  // below and revealed by the same row expander, wrapped in a real-window
+  // event box so hovering its sliders/pickers drives the row's hover
+  // highlight too (a windowless box only sees crossings in the gaps between
+  // its children, same reasoning as row_evbox above).
   if(param_editor)
   {
-    // indent/inset entirely via CSS (.mask-param-row-editor's margin-left/
-    // margin-right in darktable.css), not hardcoded here, so a theme can
-    // restyle it without a rebuild
-    // wrap in a real-window event box so hovering any of its sliders/pickers
-    // (not just the row header above) also drives the row's hover highlight
-    // -- a windowless box only sees crossings in the gaps between its child
-    // widgets (same reasoning as row_evbox above).
+    if(param_picker_box)
+      gtk_box_pack_start(GTK_BOX(param_editor), param_picker_box, FALSE, FALSE, 0);
     GtkWidget *param_evbox = gtk_event_box_new();
     gtk_event_box_set_visible_window(GTK_EVENT_BOX(param_evbox), TRUE);
     gtk_container_add(GTK_CONTAINER(param_evbox), param_editor);
@@ -12864,10 +12859,9 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
     g_signal_connect(G_OBJECT(param_evbox), "leave-notify-event",
                      G_CALLBACK(_row_crossing), module);
     gtk_box_pack_start(GTK_BOX(row_vbox), param_evbox, FALSE, FALSE, 0);
-    // "param-editor-box" must keep pointing at the editor itself (not the
-    // hover wrapper): _masks_param_inout_toggled / _masks_param_compact_press
-    // look up the "param-editor" data that _build_param_row_editor attached
-    // to this exact widget.
+    // "param-editor-box" must point at the editor itself, not the hover
+    // wrapper: _masks_param_inout_toggled and friends look up the
+    // "param-editor" data _build_param_row_editor attached to that widget.
     g_object_set_data(G_OBJECT(row_vbox), "param-editor-box", param_editor);
   }
 
@@ -12903,9 +12897,7 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   {
     gtk_widget_set_opacity(row, 0.45);
     gtk_widget_set_sensitive(actions, FALSE);
-    if(param_editor) gtk_widget_set_sensitive(param_editor, FALSE);
     if(props_editor_box) gtk_widget_set_sensitive(props_editor_box, FALSE);
-    if(opacity_box) gtk_widget_set_sensitive(opacity_box, FALSE);
   }
 
   return row_vbox;
@@ -13076,6 +13068,7 @@ static void _build_masks_list(dt_iop_module_t *module)
   // repopulates these below if a pending row is actually built this pass.
   bd->pending_ai_smoothing_slider = NULL;
   bd->pending_ai_cleanup_slider = NULL;
+  bd->pending_opacity_readout = NULL;
 
   // reset the formid -> row index; it is repopulated as _make_shape_row builds
   // each row below. Cleared here (before any new rows) so it never holds a
@@ -13447,7 +13440,7 @@ static void _build_masks_list(dt_iop_module_t *module)
     // same fixed title-column width as a shape/raster row's own name (see
     // _make_shape_row) -- so a group's opacity slider, capped and
     // right-aligned within whatever space is left after this column exactly
-    // like an element row's own (see _opacity_slot_size_allocate below),
+    // like an element row's own,
     // starts at the same x as every element row's slider too, not just other
     // groups'.
     gtk_widget_set_size_request(labevt, DT_PIXEL_APPLY_DPI(50), -1);
@@ -13560,19 +13553,12 @@ static void _build_masks_list(dt_iop_module_t *module)
                        G_CALLBACK(_group_drag_begin), module);
     }
 
-    // opacity control: a persistent, multiplicative gain on this run's own
-    // finished sub-mask (see dt_masks_point_group_t.group_opacity and
-    // _group_get_mask_roi_flexi in group.c), applied on top of -- not instead
-    // of -- each member's own independent opacity. Shown directly, always,
-    // right next to the group's name instead of behind a properties expander
-    // (there is nothing else to show for a group, unlike shape/raster/
-    // parametric rows, see _make_props_row_toggle). An absolute value bound
-    // straight to the persisted field via _group_opacity_changed, unlike the
-    // delta convention every multi-target properties row uses
-    // (_props_row_apply): a group header always represents exactly one run,
-    // so there is no multi-select ambiguity to resolve. The label/value are
-    // hidden to keep the header compact -- the tooltip stands in for them
-    // (see _group_opacity_update_tooltip), refreshed live on every drag tick.
+    // a group's opacity is its own persisted field (dt_masks_point_group_t.
+    // group_opacity), an absolute multiplicative gain on the run's finished
+    // sub-mask -- not its members' own opacities, which is what a properties
+    // editor built with is_group would edit instead. So it needs its own
+    // slider rather than _make_props_row_toggle's, kept behind the header's
+    // expander the same way every element row keeps its controls.
     GtkWidget *group_opacity_slider = dt_bauhaus_slider_new_with_range(module,
         _blend_masks_properties[DT_MASKS_PROPERTY_OPACITY].min,
         _blend_masks_properties[DT_MASKS_PROPERTY_OPACITY].max, 0, 1.0f, 2);
@@ -13580,19 +13566,8 @@ static void _build_masks_list(dt_iop_module_t *module)
     dt_bauhaus_slider_set_format(group_opacity_slider, "%");
     dt_bauhaus_slider_set_digits(group_opacity_slider, 2);
     dt_bauhaus_widget_set_quad_visibility(group_opacity_slider, FALSE);
-    dt_bauhaus_widget_hide_label(group_opacity_slider);
-    // the pill-background fix every other props slider needs (see
-    // .mask-boost-factor-slider in darktable.css); no margins of its own
-    // since this one sits inline in the header, not docked below a row.
     dt_gui_add_class(group_opacity_slider, "mask-props-slider");
-    dt_gui_add_class(group_opacity_slider, "mask-inline-opacity");
     _style_opacity_gradient(group_opacity_slider);
-    // a bauhaus slider's own natural height (line_height + baseline) is taller
-    // than this row's other, icon-sized controls -- FILL (the GtkWidget
-    // default) would stretch it to match the row instead of the other way
-    // around, leaving it looking vertically off; centering it in whatever
-    // height the row ends up with reads right instead.
-    gtk_widget_set_valign(group_opacity_slider, GTK_ALIGN_CENTER);
     {
       const dt_masks_point_group_t *head_pt = _group_point(grp, (dt_mask_id_t)cid);
       const float go = head_pt ? head_pt->group_opacity : 1.0f;
@@ -13608,6 +13583,12 @@ static void _build_masks_list(dt_iop_module_t *module)
     g_signal_connect(G_OBJECT(group_opacity_slider), "button-press-event",
                      G_CALLBACK(_group_opacity_press), module);
 
+    GtkWidget *group_props_box = dt_gui_vbox(group_opacity_slider);
+    dt_gui_add_class(group_props_box, "mask-props-row-editor");
+    gtk_widget_show_all(group_props_box);
+    gtk_widget_set_no_show_all(group_props_box, TRUE);
+    gtk_widget_set_visible(group_props_box, FALSE);
+
     GtkWidget *hdr = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     // unique per-kind id (#mask-group-header-row); .mask-panel-row is the
     // shared base styling class every row/header kind in the panel keeps
@@ -13619,33 +13600,39 @@ static void _build_masks_list(dt_iop_module_t *module)
     dt_gui_add_class(hdr, "mask-group-header");
     if(group_solo) dt_gui_add_class(hdr, "mask-list-row-solo");
     gtk_box_pack_start(GTK_BOX(hdr), ghandle, FALSE, FALSE, 0);
-    // the name takes its fixed column width (see labevt's size request
-    // above). The within-group chooser sits directly against the slider's
-    // own left edge -- inside the same capped/right-aligned slot as the
-    // slider (see _opacity_slot_size_allocate), not packed separately
-    // before it, so the two move as one unit and there is no gap between
-    // them regardless of how much free width the slot ends up with; only
-    // the pair together is right-aligned within the row, same as ever.
-    gtk_box_pack_start(GTK_BOX(hdr), labevt, FALSE, FALSE, 0);
-    GtkWidget *group_opacity_inner = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    // within_sel keeps its own fixed size (never expands/shrinks); the
-    // slider is the only expanding/shrinking child, exactly as in an element
-    // row's own opacity slot -- see the "extra-width" comment on
-    // _opacity_slot_size_allocate for why within_sel's width is added on top
-    // of, rather than carved out of, the slider's usual row/3 budget.
-    gtk_box_pack_start(GTK_BOX(group_opacity_inner), within_sel, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(group_opacity_inner), group_opacity_slider, TRUE, TRUE, 0);
-    g_object_set_data(G_OBJECT(group_opacity_inner), "extra-width",
-                      GINT_TO_POINTER(DT_PIXEL_APPLY_DPI(18)));
-    GtkWidget *group_opacity_slot = dt_gui_hbox(group_opacity_inner);
-    gtk_widget_set_hexpand(group_opacity_slot, TRUE);
-    g_signal_connect_after(G_OBJECT(group_opacity_slot), "size-allocate",
-                           G_CALLBACK(_opacity_slot_size_allocate), group_opacity_inner);
-    gtk_box_pack_start(GTK_BOX(hdr), group_opacity_slot, TRUE, TRUE, 0);
-    // the solo/low-opacity badges are the true rightmost thing in the header
-    // now, with nothing else trailing them -- one fixed-size stack (see
-    // _make_badge_stack), not packed as individual siblings, so their own
-    // active/blank state never affects the title column's fixed width.
+    // with the slider gone the name is the header's one expanding child
+    gtk_widget_set_hexpand(labevt, TRUE);
+    gtk_box_pack_start(GTK_BOX(hdr), labevt, TRUE, TRUE, 0);
+    // the header carries the within-group operator, a read-only opacity figure
+    // matching the element rows', and a chevron revealing the group's own
+    // controls -- no live slider, so the name keeps the row's width
+    GtkWidget *gexpand = dtgtk_togglebutton_new(_paint_param_inout, 0, NULL);
+    dt_gui_add_class(gexpand, "mask-inout-toggle");
+    gtk_widget_set_tooltip_text(gexpand, _("show/hide this group's expanded controls"));
+    g_object_set_data(G_OBJECT(gexpand), "group-props-box", group_props_box);
+    g_object_set_data(G_OBJECT(gexpand), "module", module);
+    g_signal_connect(G_OBJECT(gexpand), "toggled",
+                     G_CALLBACK(_group_props_toggled), NULL);
+
+    GtkWidget *group_opacity_readout = gtk_label_new(NULL);
+    gtk_label_set_xalign(GTK_LABEL(group_opacity_readout), 1.0f);
+    dt_gui_add_class(group_opacity_readout, "mask-opacity-readout");
+    gtk_widget_set_tooltip_text(group_opacity_readout, _("this group's opacity"));
+    {
+      const dt_masks_point_group_t *gpt = _group_point(grp, (dt_mask_id_t)cid);
+      _set_opacity_readout(group_opacity_readout,
+                           gpt ? gpt->group_opacity : 1.0f);
+    }
+
+    // the trailing cluster is packed in the same order on every row kind, so
+    // its columns line up down the whole panel. pack_end places the first
+    // call rightmost, so this reads right-to-left: expander at the very right
+    // edge, then the opacity readout, then the within-group operator, then
+    // the badges. An element row packs a fixed-size spacer where this header
+    // has its operator (see _make_shape_row).
+    gtk_box_pack_end(GTK_BOX(hdr), gexpand, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(hdr), group_opacity_readout, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(hdr), within_sel, FALSE, FALSE, 0);
     gtk_box_pack_end(GTK_BOX(hdr), _make_badge_stack(group_lowop_badge, group_solo_badge),
                      FALSE, FALSE, DT_PIXEL_APPLY_DPI(2));
     // dimmed when the group contributes nothing: every element hidden, or the
@@ -13663,7 +13650,6 @@ static void _build_masks_list(dt_iop_module_t *module)
     if(group_bypassed)
     {
       gtk_widget_set_sensitive(within_sel, FALSE);
-      gtk_widget_set_sensitive(group_opacity_slider, FALSE);
     }
 
     // an event box wraps the header so the canvas<->list hover sync can locate
@@ -13718,8 +13704,15 @@ static void _build_masks_list(dt_iop_module_t *module)
     g_object_set_data(G_OBJECT(hdr_evbox), "solo-badge", group_solo_badge);
     // same, for the group's low-opacity warning (see _apply_group_lowop_badges)
     g_object_set_data(G_OBJECT(hdr_evbox), "lowop-badge", group_lowop_badge);
+    // so _apply_group_lowop_badges can keep this figure current in place --
+    // the group's opacity slider lives in its expanded controls and never
+    // rebuilds the list, so nothing else would ever update it
+    g_object_set_data(G_OBJECT(hdr_evbox), "opacity-readout", group_opacity_readout);
     if(is_base_group)
       g_object_set_data(G_OBJECT(hdr_evbox), "is-base-group", GINT_TO_POINTER(1));
+    // so shift+click and double-click on the header can drive it, exactly as
+    // an element row's handle carries its own (see _make_shape_row)
+    g_object_set_data(G_OBJECT(hdr_evbox), "expand-toggle", gexpand);
     g_signal_connect(G_OBJECT(hdr_evbox), "button-press-event",
                      G_CALLBACK(_group_header_press), module);
     g_signal_connect(G_OBJECT(hdr_evbox), "button-release-event",
@@ -13736,6 +13729,9 @@ static void _build_masks_list(dt_iop_module_t *module)
     gtk_widget_set_name(group_block, "mask-group-block");
     dt_gui_add_class(group_block, "mask-group-block");
     gtk_box_pack_start(GTK_BOX(group_block), hdr_evbox, FALSE, FALSE, 0);
+    // the group's own expanded controls sit directly under its header, above
+    // the member rows -- the group equivalent of an element row's props editor
+    gtk_box_pack_start(GTK_BOX(group_block), group_props_box, FALSE, FALSE, 0);
     g_object_set_data(G_OBJECT(hdr_evbox), "header-widget", group_block);
     // "header-widget" above targets the whole block (selection shades the
     // group's entire body); solo-suppression dimming (_apply_group_header_dimming)
@@ -13755,7 +13751,6 @@ static void _build_masks_list(dt_iop_module_t *module)
     // disabled; a merely solo-suppressed group's stayed fully interactive
     // despite reading as disabled).
     g_object_set_data(G_OBJECT(hdr_evbox), "within-sel-widget", within_sel);
-    g_object_set_data(G_OBJECT(hdr_evbox), "group-opacity-widget", group_opacity_slider);
     // read back by _apply_group_header_dimming's in-place refresh, so a solo
     // change elsewhere never re-enables a group that is independently
     // bypassed (bypass and solo-suppression are separate reasons a group's
@@ -14925,6 +14920,8 @@ void dt_iop_gui_cleanup_blending(dt_iop_module_t *module)
   if(bd->masks_rebuild_idle_id)
     g_source_remove(bd->masks_rebuild_idle_id);
 
+  g_free(bd->masks_refine_section);
+  bd->masks_refine_section = NULL;
   if(bd->masks_cluster_expanded) g_hash_table_destroy(bd->masks_cluster_expanded);
   if(bd->masks_props_expanded) g_hash_table_destroy(bd->masks_props_expanded);
   if(bd->masks_row_map) g_hash_table_destroy(bd->masks_row_map);
@@ -15570,10 +15567,15 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
                                   N_("mask enabled"), NULL,
                                   G_CALLBACK(_blendop_mask_enable_toggled),
                                   FALSE, 0, 0,
-                                  dtgtk_cairo_paint_switch, NULL);
-    // background always blends with the module's own background, on or off
-    // -- only the glyph itself (drawn by dtgtk_cairo_paint_switch) shows state,
-    // same convention as module->off (see imageop.c)
+                                  dtgtk_cairo_paint_masks_multi, NULL);
+    // not dtgtk_cairo_paint_switch: a power symbol at the head of a header is
+    // darktable's signature for a *module* header, and borrowing it here is
+    // why this panel gets mistaken for one. The glyph stays in the leading
+    // slot -- that is where an on/off control belongs -- and says what it
+    // governs instead. masks_multi (a shape plus a curve) is the simplest of
+    // the unused mask glyphs and stays legible at toggle size; a purpose-drawn
+    // one would be better still. State reads from the foreground colour, so
+    // the background stays blended with the module's own either way.
     dt_gui_add_class(bd->mask_enable_toggle, "dt_transparent_background");
 
     GtkWidget *caption_label = dt_ui_label_new(_("blend mask"));
@@ -15779,11 +15781,25 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
     g_signal_connect(G_OBJECT(bd->contrast_slider), "value-changed",
                      G_CALLBACK(_refine_control_changed), bd);
 
-    // section caption names the refinement target -- "whole mask refinement",
-    // "group refinement -- <op>-<n>", or "element refinement -- <name>" --
+    // the subheader names the refinement target -- "whole mask",
+    // "group -- <op>-<n>", or "element -- <name>" --
     // and follows the mask list selection alone now (see
     // _flexi_refine_follow_selection); no separate selector control.
-    bd->masks_refine_header_label = dt_ui_label_new(_("whole mask refinement"));
+    // zone 5 -- refinement, as a collapsible section. Its section label is the
+    // same widget _refine_update_header retargets, so the header still names
+    // the current scope ("element -- <name>", ...) in its own subheader.
+    GtkWidget *refine_zone = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    bd->masks_refine_section = g_malloc0(sizeof(dt_gui_collapsible_section_t));
+    dt_gui_new_collapsible_section(bd->masks_refine_section,
+                                   "plugins/darkroom/masks/expand_refinement",
+                                   _("refinement"),
+                                   GTK_BOX(refine_zone),
+                                   DT_ACTION(module));
+    dt_gui_collapsible_section_t *rcs = bd->masks_refine_section;
+    // a subheader inside the section names the current scope, so the section
+    // title stays a plain "refinement" and the reset button sits next to the
+    // thing it resets rather than in the collapsible header
+    bd->masks_refine_header_label = dt_ui_label_new(_("whole mask"));
     gtk_widget_set_tooltip_text(bd->masks_refine_header_label,
       _("refinements follow the panel selection: an element, a group, or the whole mask if nothing is selected."));
     // the disabled-state hint (see _update_refine_sensitivity) is appended to
@@ -15791,8 +15807,6 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
     // controls -- stash it now so later calls only ever append/withdraw the
     // hint, never clobber the explanation itself.
     _stash_base_tooltip(bd->masks_refine_header_label);
-    GtkWidget *hbox = dt_gui_hbox(dt_gui_expand(bd->masks_refine_header_label));
-    dt_gui_add_class(hbox, "dt_section_label");
 
     bd->masks_refine_scope_kind = REFINE_SCOPE_GLOBAL;
     bd->masks_refine_scope_formid = INVALID_MASKID;
@@ -15806,7 +15820,10 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
                      G_CALLBACK(_refine_reset_clicked), bd);
     gtk_widget_set_no_show_all(bd->masks_refine_reset_btn, TRUE);
     gtk_widget_set_visible(bd->masks_refine_reset_btn, FALSE);
-    gtk_box_pack_end(GTK_BOX(hbox), bd->masks_refine_reset_btn, FALSE, FALSE, 0);
+    GtkWidget *rsub = dt_gui_hbox(dt_gui_expand(bd->masks_refine_header_label));
+    dt_gui_add_class(rsub, "mask-zone-subheader");
+    gtk_box_pack_end(GTK_BOX(rsub), bd->masks_refine_reset_btn, FALSE, FALSE, 0);
+    dt_gui_box_add(rcs->container, rsub);
     bd->masks_refine_bypass_all_btn = NULL;  // retired (dropped per user request)
     bd->masks_refine_bypass_btn = NULL;  // retired (per-group bypass folded away)
 
@@ -15832,14 +15849,14 @@ void dt_iop_gui_init_blending(GtkWidget *iopw,
     dt_gui_box_add(mask_panel, box);
     dt_iop_gui_init_masks(mask_panel, module);
 
-    bd->refine_box = GTK_BOX(dt_gui_vbox
-      (hbox,
+    dt_gui_box_add(rcs->container,
        bd->details_slider,
        bd->masks_feathering_guide_combo,
        bd->feathering_radius_slider,
        bd->blur_radius_slider,
        bd->brightness_slider,
-       bd->contrast_slider));
+       bd->contrast_slider);
+    bd->refine_box = GTK_BOX(refine_zone);
     _add_wrapped_box(mask_panel, bd->refine_box, "masks_refinement");
 
     // the standalone "element properties" panel that used to live here is

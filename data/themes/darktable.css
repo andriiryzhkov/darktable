@@ -578,20 +578,33 @@ dialog .sidebar row:selected:hover label,
 }
 
 /* #blending-tabs (the "blend mask" header) is a sibling of the module's own
-   .dt_plugin_ui_main content box, not a descendant of it -- padding only
-   insets a box's own children, never the box's own background, so matching
-   .dt_plugin_ui_main's horizontal inset here needs a real margin instead
-   (shrinking the header's own box, background included), left/right only so
-   .dt_section_label's vertical margin (applied via class, lower specificity
-   than this id) is left alone. Scoped to .blending-tabs-embedded (toggled in
-   _masks_flexi_relocate, blend_gui.c) because the flexi masks panel's other
-   two hosts -- the utility-module lib and the separate left/right panel --
-   already provide their own inset, so this margin would double up there. */
+   .dt_plugin_ui_main content box, not a descendant of it, so nothing upstream
+   insets it. It deliberately spans the module's full width: a header that
+   stops short of the edges reads as a floating card, while an edge-to-edge
+   bar reads as a divider between the module's controls above and its mask
+   below -- which is what it is. Padding, not margin, so the inset applies to
+   the header's contents while its own background still reaches both edges.
+   Scoped to .blending-tabs-embedded (toggled in _masks_flexi_relocate,
+   blend_gui.c) because the flexi masks panel's other two hosts -- the
+   utility-module lib and the separate left/right panel -- provide their own
+   inset already. */
 #blending-tabs.blending-tabs-embedded
 {
-  margin-left: 0.65em;
-  margin-right: 0.65em;
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0.65em;
+  padding-right: 0.65em;
 }
+
+/* no underline: .dt_section_label draws one to separate a caption from the
+   controls beneath it, but this header already separates itself by spanning
+   the module's full width, and the rule landed hard against the mask panel
+   below it. */
+#blending-tabs
+{
+  border-bottom: none;
+}
+
 
 /* Frame around blending boxes */
 #blending-tabs + #blending-box /* set top margin below blending tabs */
@@ -728,33 +741,60 @@ dialog .sidebar row:selected:hover label,
    otherwise two adjacent selected/hovered rows read as one fused block. */
 .mask-panel-row
 {
-  border: 2px solid transparent;
+  /* 1px reserved on every edge purely so the drag-and-drop insertion lines
+     below can colour one without shifting the layout -- deliberately thin,
+     since the row's height is the panel's scarcest resource once a mask has
+     more than a handful of elements. No radius and no padding: a row spans
+     its container edge to edge, the way a module header does. darktable
+     rounds small controls (handles, chips, toggles), never rows or panels. */
+  border: 1px solid transparent;
+  /* only top/bottom carry a drop indicator, so only those need reserving.
+     Left/right at 0 lets a row's background reach its container's edge --
+     otherwise the reserved edge shows as a gutter framing the row once the
+     row and its container both have a surface. */
+  border-left-width: 0;
+  border-right-width: 0;
+  margin-bottom: 1px;
+  /* the background still spans edge to edge; this only insets the row's
+     contents, so a lead icon never sits flush against the panel border. */
+  padding-left: 4px;
+  padding-right: 2px;
   border-radius: 3px;
-  margin-bottom: 2px;
 }
 
-/* "selected" wash, grayscale only: no accent colour, just a lighter shade of
-   the panel itself, so it reads as "highlighted" rather than "coloured".
-   Applied to the whole group block when a group is selected (see
-   _apply_group_selection / "header-widget" in _build_masks_list, which points
-   at the group's full body, not just its header) and to a single row when a
-   canvas-clicked shape is mirrored into the list (dt_iop_gui_masks_select_form). */
-.mask-list-row-selected
+/* nothing here: .mask-list-row-selected lands on the *whole* widget carrying
+   it -- an element's entire row_vbox (header plus the expanded controls it
+   reveals) and a group's entire block. Painting it therefore lit up a row's
+   controls and a group's members along with the thing actually selected, and
+   its radius rounded rows that are meant to span edge to edge. Selection is
+   drawn on the header alone instead, by the qualified rules below. */
+
+/* a selected group marks its header, not its whole block: the members inside
+   it are not what was selected. Two classes plus a descendant (0,3,0) outrank
+   the plain .mask-panel-row.mask-group-header rule that clears it at rest. */
+.mask-group-block.mask-list-row-selected .mask-group-header
 {
-  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.04));
-  border-radius: 3px;
+  background-color: shade(@field_selected_bg, 0.85);
 }
 
-/* selection border, grayscale only: a thin light frame around the whole
-   selected element row, in addition to the wash above -- the wash alone reads
-   too subtly once several rows are visible at once. Two classes (0,2,0) beat
-   the plain .mask-panel-row rule above (0,1,0) -- and, since every row kind
-   now has its own id instead of sharing one, this no longer needs an id to
-   also outrank a same-specificity kind-specific rule like .mask-group-header
-   (same pattern as .mask-list-row-hover/-solo/-drop below). */
+.mask-group-block.mask-list-row-selected .mask-group-header label
+{
+  color: @field_selected_fg;
+}
+
 .mask-panel-row.mask-list-row-selected
 {
-  border-color: rgba(255, 255, 255, 0.32);
+  /* a background, not a frame: a border draws a box around one row in a list
+     of otherwise frameless rows, which reads as heavier than "this is the
+     current one" warrants. Background and text always move together (the
+     theme defines @field_selected_bg/_fg as a pair), so contrast never
+     depends on which row kind happens to be selected. */
+  background-color: shade(@field_selected_bg, 0.85);
+}
+
+.mask-panel-row.mask-list-row-selected label
+{
+  color: @field_selected_fg;
 }
 
 /* disposable placeholder row for a shape still being drawn on canvas, not yet
@@ -762,10 +802,15 @@ dialog .sidebar row:selected:hover label,
    solid so it visually reads as "not real yet", reusing the same 2px border
    .mask-panel-row already reserves so nothing shifts once it turns solid on
    commit. */
-.mask-panel-row.mask-row-pending
+/* a shape being drawn on canvas but not yet committed. The rail goes dashed
+   rather than solid: same channel as every other row state, so it cannot
+   collide with a wash, and "dashed" reads as provisional in a way no colour
+   does. A dashed box around the row said the same thing far more loudly.
+   Needs an id in the selector to outrank #mask-shape-row's own rail colour. */
+#mask-shape-row.mask-row-pending
 {
-  border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.32);
+  border-left-style: dashed;
+  border-left-color: alpha(@fg_color, 0.55);
 }
 
 /* same border for a selected whole group -- .mask-group-block carries no
@@ -776,7 +821,19 @@ dialog .sidebar row:selected:hover label,
    the layout when it appears. */
 .mask-group-block.mask-list-row-selected
 {
-  border-color: rgba(255, 255, 255, 0.32);
+  /* a selected group marks its header, the same way a selected element marks
+     its own -- shading the entire block would be a third state level stacked
+     on the two structural ones, and it also swallowed the member rows. The
+     rail is deliberately left alone here: a blanket border-color would clear
+     the left edge too and the group would lose its rail exactly while it was
+     the group being worked on. */
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  /* and the rail lights with it: the header says "this one", the rail says
+     how far "this one" reaches. Together they answer both questions a
+     selection has to answer in a nested list -- what is selected, and what it
+     contains -- which is more than either does alone. */
+  border-left-color: alpha(@fg_color, 0.70);
 }
 
 /* transient hover wash (canvas <-> list sync): a soft neutral fill, distinct
@@ -785,9 +842,19 @@ dialog .sidebar row:selected:hover label,
    or over the docked parametric editor's own controls
    (_parametric_wrap_crossing), so hovering the panel reads exactly like
    hovering the matching shape on the canvas. */
-.mask-panel-row.mask-list-row-hover
+/* hover never applies to a selected row. Both states carry the same specificity
+   and hover is declared later, so without this it wins on source order and the
+   row you point at looks *less* selected than before you pointed at it. :not()
+   states the precedence explicitly instead of leaving it to declaration order,
+   which the next edit to this file would silently break. */
+.mask-panel-row.mask-list-row-hover:not(.mask-list-row-selected)
 {
-  background-color: rgba(255, 255, 255, 0.14);
+  background-color: @field_active_bg;
+}
+
+.mask-panel-row.mask-list-row-hover:not(.mask-list-row-selected) label
+{
+  color: @field_active_fg;
 }
 
 /* persistent solo / solo-edit wash: same look as the transient hover above, but
@@ -795,16 +862,30 @@ dialog .sidebar row:selected:hover label,
    than the pointer, so it survives hovering elsewhere in the panel or canvas
    (see _update_shape_row_state / _sync_solo_canvas_highlight). A separate class
    from mask-list-row-hover so _clear_hover_classes does not wipe it. */
-.mask-panel-row.mask-list-row-solo
+/* solo gets no wash -- that channel belongs to selection and hover -- but it
+   does need to be findable: while it is active every other row dims, so the
+   soloed row is the only undimmed one, and its rail is lifted to say which.
+   The inverted-eye badge names the state; the rail locates it. */
+.mask-panel-row.mask-list-row-solo,
+#mask-shape-row.mask-list-row-solo
 {
-  background-color: rgba(255, 255, 255, 0.14);
+  border-left-color: alpha(@fg_color, 0.85);
 }
 
 /* drag-and-drop drop target: while an element (or group) is dragged over a group
    header, lighten its frame so the destination group is obvious */
+/* a drop target is answered by the rail and the insertion line, not by a wash:
+   sharing @field_selected_bg with selection meant that mid-drag you could not
+   tell "this is where it lands" from "this is what was already selected". The
+   rail goes to full strength, which nothing else does. */
 .mask-panel-row.mask-list-row-drop
 {
-  background-color: rgba(255, 255, 255, 0.20);
+  border-left-color: @fg_color;
+}
+
+.mask-panel-row.mask-list-row-drop label
+{
+  color: @field_selected_fg;
 }
 
 /* group reorder DnD: a bright insertion line on the edge where the dragged group
@@ -813,12 +894,12 @@ dialog .sidebar row:selected:hover label,
    the layout. */
 .mask-panel-row.mask-list-row-drop-above
 {
-  border-top-color: #ffffff;
+  border-top-color: @fg_color;
 }
 
 .mask-panel-row.mask-list-row-drop-below
 {
-  border-bottom-color: #ffffff;
+  border-bottom-color: @fg_color;
 }
 
 /* each group (header + its element rows) is one visual block, separated from
@@ -835,10 +916,39 @@ dialog .sidebar row:selected:hover label,
    the group above is empty or has shapes -- only the very first item in the
    whole list (a group-block or an empty-group row) hugs the panel's own top
    border with no leading gap. */
+/* a group is delimited by elevation, not by a rule: it sits on the theme's own
+   nested-surface colour (@collapsible_bg_color), its header one step above
+   that, and its element rows ride the group's surface. Every level here is
+   derived from a theme token rather than a hardcoded white overlay: a variant
+   like elegant-grey has a mid-grey background with near-white text, so
+   lightening by a fixed amount moved the surface toward the text and destroyed
+   the contrast. Deriving from @collapsible_bg_color / @selected_bg_color makes
+   contrast the theme author's contract, the same one the rest of the app uses.
+   "These rows belong together" is then read from surface level the way the
+   rest of darktable does it, with no border, rail or divider anywhere. The
+   2px border is still reserved but never painted -- the drag-and-drop
+   insertion lines below colour one edge of it, and reserving the space is
+   what stops them shifting the layout. */
 .mask-group-block
 {
   margin-top: 4px;
-  border: 2px solid rgba(255, 255, 255, 0.06);
+  /* no rail, and no border of any kind: a group's extent is already marked
+     twice over -- its elevated header says where it starts, the gap above the
+     next block says where it ends. A left accent bar earns its place where it
+     is the only delimiter (a blockquote, a callout); here it was a third
+     signal for something unambiguous, and a redundant line is just noise.
+     Worth revisiting only if groups grow long enough for the header to scroll
+     out of view. Top/bottom stay reserved but transparent for the
+     drag-and-drop insertion lines below. */
+  /* the group's rail: one line at its left edge, running from the top of its
+     header to the bottom of its last member. This is what replaces a box --
+     it says the same thing (where the group starts, where it ends, what is
+     inside it) using one edge instead of four, so nothing is enclosed and no
+     horizontal space is spent on a right-hand border the eye never uses. */
+  border: 2px solid transparent;
+  border-left-color: alpha(@fg_color, 0.16);
+  border-right-width: 0;
+  padding-left: 4px;
 }
 
 .mask-group-block:first-child
@@ -851,17 +961,32 @@ dialog .sidebar row:selected:hover label,
    above/below the group (see _group_drop_motion / _group_drop_leave) */
 .mask-group-block.mask-list-row-drop-above
 {
-  border-top-color: #ffffff;
+  border-top-color: @fg_color;
 }
 
 .mask-group-block.mask-list-row-drop-below
 {
-  border-bottom-color: #ffffff;
+  border-bottom-color: @fg_color;
+}
+
+.mask-group-block.mask-list-row-hover:not(.mask-list-row-selected)
+{
+  border-left-color: alpha(@fg_color, 0.30);
 }
 
 .mask-group-block.mask-list-row-drop
 {
-  background-color: rgba(255, 255, 255, 0.20);
+  border-left-color: @fg_color;
+}
+
+.mask-group-block.mask-list-row-drop .mask-group-header
+{
+  background-color: @field_active_bg;
+}
+
+.mask-group-block.mask-list-row-drop .mask-group-header label
+{
+  color: @field_selected_fg;
 }
 
 /* a group's element rows sit indented under their header. No left rail here
@@ -875,9 +1000,20 @@ dialog .sidebar row:selected:hover label,
    _make_badge_stack / _opacity_slot_size_allocate). All indent/inset spacing
    in this file lives here in CSS, not hardcoded in blend_gui.c, so a theme
    can restyle it without a rebuild. */
+/* members indent under their header -- proximity and indentation carry the
+   grouping, with no guide line needed */
+/* members indent under their header, so the element rails sit inboard of the
+   group's rather than flush with it. Aligned, the two rails ended up 4px apart
+   and read as one thick band -- two levels only communicate hierarchy when
+   they are visibly offset. */
 .mask-group-elements
 {
-  margin-left: 8px;
+  margin-left: 4px;
+}
+
+.mask-cluster-elements
+{
+  margin-left: 4px;
 }
 
 /* an expanded cluster's own member rows (see _pack_group_elements), nested one
@@ -885,10 +1021,6 @@ dialog .sidebar row:selected:hover label,
    visually reads as revealing its members as its own children, not as more
    siblings at the group's own depth. Same left-only convention as
    .mask-group-elements above, for the same alignment reason. */
-.mask-cluster-elements
-{
-  margin-left: 8px;
-}
 
 /* while any element/group is soloed, dim same-kind cluster headers: the cluster
    as a whole is not the soloed thing (its member rows already dim individually
@@ -911,13 +1043,23 @@ dialog .sidebar row:selected:hover label,
   opacity: 1.0;
 }
 
-/* group headers (#mask-group-header-row and #mask-empty-header-row alike)
-   get a subtle resting background distinct from plain element rows, so "this
-   is a group heading" reads clearly even when nothing is selected/hovered --
-   grayscale only, no accent colour, one step lighter than the panel itself. */
+/* the group header is the only thing in the list with a resting surface, and
+   it gets exactly one level. Elevating the group *block* instead lifted the
+   header and its member rows together, so the two ended up on the same level
+   and the block read as one slab; the header is the heading, so the header is
+   what rises. Element rows keep no surface at all, which leaves state
+   (selected/hover) as the only other thing that paints. */
+/* the add/shape/channel toolbar above the list: line its first button up with
+   the rows below it rather than with the panel's own border. */
+.masks-toolbar
+{
+  padding-left: 4px;
+  padding-right: 2px;
+}
+
 .mask-panel-row.mask-group-header
 {
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: @collapsible_bg_color;
 }
 
 /* an empty group's own header doubles as its drag-drop highlight frame (see
@@ -929,7 +1071,12 @@ dialog .sidebar row:selected:hover label,
    same-specificity class combo that would again depend on declaration order. */
 #mask-empty-header-row.mask-list-row-drop
 {
-  background-color: rgba(255, 255, 255, 0.20);
+  background-color: @field_active_bg;
+}
+
+#mask-empty-header-row.mask-list-row-drop label
+{
+  color: @field_selected_fg;
 }
 
 /* each parametric mask row's own permanently-visible editor (see
@@ -978,6 +1125,90 @@ dialog .sidebar row:selected:hover label,
    so a shape/raster/group's own expanded properties read the same way a
    parametric row's does: nested under that one row, not under the whole
    group, and inset the same amount on both sides. */
+/* an element row is a vbox holding its header *and* the expanded controls the
+   header reveals, so a wash on the row itself paints behind the controls too
+   -- which is why an open, selected row used to read as one big highlighted
+   slab. Confine both state washes to the header (the row's first child), so
+   selection and hover mark the row without lighting up its contents. Group
+   headers are unaffected: they carry no nested editor, and a selected group
+   is handled by .mask-group-block.mask-list-row-selected instead. */
+/* each element gets its own, quieter rail, nested inside the group's. It spans
+   the row *and* the expanded controls beneath it, so an open element reads as
+   one unit rather than a row followed by loose sliders -- something a border
+   around the group cannot express at all. Two weights are enough to carry two
+   levels; a third would need a third weight and stop reading as a hierarchy. */
+#mask-shape-row
+{
+  border-left-width: 2px;
+  border-left-color: alpha(@fg_color, 0.16);
+  padding-left: 4px;
+}
+
+/* the rail lights with the row, so an expanded element stays traceable: the
+   header wash marks the row itself, the rail marks how far down its controls
+   go. Hover gets a lighter step so pointing at a row previews the extent it
+   would select, which is the guidance a flat list cannot give. */
+#mask-shape-row.mask-list-row-selected
+{
+  border-left-color: alpha(@fg_color, 0.70);
+}
+
+#mask-shape-row.mask-list-row-hover:not(.mask-list-row-selected)
+{
+  border-left-color: alpha(@fg_color, 0.30);
+}
+
+#mask-shape-row.mask-list-row-selected,
+#mask-shape-row.mask-list-row-hover
+{
+  background-color: transparent;
+}
+
+/* no colour override on a selected row: the theme's own @fg_color is what every
+   other row uses, and these washes derive from @selected_bg_color, so how far
+   selection sits from its neighbours is the theme's decision. A fixed light
+   grey read fine on the dark theme and washed out on grey. */
+#mask-shape-row.mask-list-row-selected > *:first-child,
+#mask-shape-row.mask-list-row-hover > *:first-child
+{
+  border-radius: 3px;
+}
+
+#mask-shape-row.mask-list-row-selected > *:first-child
+{
+  background-color: shade(@field_selected_bg, 0.85);
+}
+
+#mask-shape-row.mask-list-row-selected > *:first-child label
+{
+  color: @field_selected_fg;
+}
+
+#mask-shape-row.mask-list-row-hover:not(.mask-list-row-selected) > *:first-child
+{
+  background-color: @field_active_bg;
+}
+
+#mask-shape-row.mask-list-row-hover:not(.mask-list-row-selected) > *:first-child label
+{
+  color: @field_active_fg;
+}
+
+/* the four range values sit in one overlay over the gradient slider, spread by
+   xalign and staggered top/bottom by yalign (see _build_param_row_filter).
+   In a panel this narrow four numbers plus a decimal point each is more than
+   the width can take, and they run together. Trimming them keeps the pairs
+   apart without spending a second line on the row. */
+.mask-param-row-editor #blend-data
+{
+  font-size: 85%;
+}
+
+/* expanded controls carry no surface of their own: indentation and the gap
+   above/below already say they belong to the row that revealed them, and a
+   raised panel behind them reads as "highlighted" -- which is what selection
+   means everywhere else in this list. Controls should be the quietest thing
+   on screen, not the loudest. */
 .mask-props-row-editor
 {
   margin-top: 3px;
@@ -1073,7 +1304,7 @@ dialog .sidebar row:selected:hover label,
 /* operator selectors: a thin border alone marks them as choosers (no chevron) */
 .mask-op-combo
 {
-  border: 1px solid #808080;
+  border: 1px solid alpha(@fg_color, 0.45);
   border-radius: 3px;
 }
 
@@ -1087,7 +1318,11 @@ dialog .sidebar row:selected:hover label,
    _row_click_press/_row_click_release in blend_gui.c), not a special one. */
 .mask-list-handle
 {
-  background-color: alpha(@fg_color, 0.09);
+  /* no plate at rest: every row carries one of these, so a filled background
+     on each turned the list into a column of chips. The glyph alone says what
+     kind the element is; the plate is kept only for the inverted state below,
+     where it is a real signal rather than decoration. */
+  background-color: transparent;
   border-radius: 3px;
 }
 

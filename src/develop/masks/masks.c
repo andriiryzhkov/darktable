@@ -1603,6 +1603,11 @@ void dt_masks_clear_form_gui(const dt_develop_t *dev)
     dev->form_gui->feather_dragging = dev->form_gui->point_dragging = -1;
   dev->form_gui->creation_closing_form = dev->form_gui->creation = FALSE;
   dev->form_gui->pressure_sensitivity = DT_MASKS_PRESSURE_OFF;
+  // the module that was drawing, if any: its mask panel is showing a
+  // placeholder row for the shape and needs to drop it now that creation has
+  // ended without one being committed (a committed shape rebuilds the list
+  // through its own history item instead).
+  dt_iop_module_t *was_creating = dev->form_gui->creation_module;
   dev->form_gui->creation_module = NULL;
   dev->form_gui->point_edited = -1;
 
@@ -1611,6 +1616,8 @@ void dt_masks_clear_form_gui(const dt_develop_t *dev)
   dev->form_gui->edit_mode = DT_MASKS_EDIT_OFF;
   // allow to select a shape inside an iop
   dt_masks_select_form(NULL, NULL);
+
+  if(was_creating) dt_iop_gui_blend_masks_list_refresh(was_creating);
 }
 
 void dt_masks_change_form_gui(dt_masks_form_t *newform)

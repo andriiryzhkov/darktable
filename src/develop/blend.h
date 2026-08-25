@@ -577,6 +577,21 @@ typedef struct dt_iop_gui_blend_data_t
   // the flexi group list: each group's header followed by that group's element rows,
   // nested (indented) directly under it (built by _pack_group_elements).
   GtkBox *masks_list_box;
+
+
+
+  // masks_refine_section: the refinement zone's collapsible section. Its own
+  // label doubles as masks_refine_header_label, so _refine_update_header keeps
+  // naming the current target in the section header. Also a
+  // dt_gui_collapsible_section_t *, kept opaque here for the same reason.
+  void *masks_refine_section;
+
+  // set by a group chevron's own toggle handler, consumed by
+  // _group_header_release. Distinct from masks_skip_group_select_release,
+  // which is a *select-only* suppression (used by drag-begin and the operator
+  // chip, both of which do want the group selected): a click on the chevron
+  // must not change the selection at all, in either direction.
+  gboolean masks_suppress_group_select;
   // formid -> shape-row widget (the "mask-row" row_vbox) index, rebuilt alongside
   // masks_list_box so the per-formid lookups (hover sync, selection, in-place row
   // refresh) are O(1) instead of a recursive walk of the whole (nested) widget
@@ -645,6 +660,12 @@ typedef struct dt_iop_gui_blend_data_t
   // insert_realize_empty is set. 1.0 for every ordinary new group; a group
   // restored from a saved layout preset carries its own remembered value.
   float insert_opacity;
+  // the pending row's opacity readout, so _refresh_lowop_badges can keep it in
+  // step with insert_opacity. The pending shape has no dt_masks_point_group_t
+  // yet, so it is not reachable through the walk over grp->points that updates
+  // every committed row's readout -- it has to be held here, like the pending
+  // AI sliders above.
+  GtkWidget *pending_opacity_readout;
   // insert_realize_empty: the active target is an empty group, so the next drawn
   // shape realizes it. save_creation writes the new form id into insert_realized_fid
   // so the panel can drop the empty group and select the new run on the next rebuild.
@@ -707,18 +728,6 @@ typedef struct dt_iop_gui_blend_data_t
   // longer double as "did a drag happen in between" without also suppressing
   // the menu on every ordinary click.
   gboolean masks_group_op_drag_started;
-  // set around _auto_expand_selected_row's own programmatic
-  // gtk_toggle_button_set_active calls (see blend_gui.c): its own
-  // "toggling this row's expander also selects it" side effect is meant for
-  // a real user click, not a toggle flipped by code to enforce "auto-expand
-  // selected shape"'s single-expansion invariant -- without this guard,
-  // collapsing another row's toggle re-selects it, which recurses back into
-  // _auto_expand_selected_row without end. Deliberately a dedicated flag
-  // rather than DT_ENTER/LEAVE_GUI_UPDATE: that one already makes
-  // _props_row_toggled bail out entirely (see its own top-of-function
-  // guard), which would also suppress the hash/visibility update this
-  // programmatic toggle still needs to take effect.
-  gboolean masks_suppress_toggle_select;
   // "auto-expand selected shape" option: the most recently selected shape
   // that actually has its own props row (see _make_props_row_toggle /
   // _auto_expand_selected_row, blend_gui.c) -- kept separate from
@@ -1020,6 +1029,12 @@ void dt_iop_gui_blend_mask_enable(dt_iop_module_t *module);
 // stays in sync without a full masks-list rebuild (which would interrupt an
 // in-progress slider drag).
 void dt_iop_gui_blend_sync_pending_ai_sliders(dt_iop_module_t *module);
+
+// rebuild a module's mask list. Called from the masks code when creation ends
+// without a shape being committed (dt_masks_clear_form_gui): the panel shows a
+// placeholder row for the shape being drawn, and nothing else would tell it
+// that shape is gone, leaving an orphan row behind.
+void dt_iop_gui_blend_masks_list_refresh(dt_iop_module_t *module);
 
 gboolean blend_color_picker_apply(dt_iop_module_t *module,
                                   GtkWidget *picker,
