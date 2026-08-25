@@ -1141,7 +1141,10 @@ dialog .sidebar row:selected:hover label,
 {
   border-left-width: 2px;
   border-left-color: alpha(@fg_color, 0.16);
-  padding-left: 4px;
+  /* 2px of this is eaten by the rail, so the row's contents start 4px in --
+     enough that an inverted element's handle plate clears the left edge by
+     about what it clears above and below, instead of running into it. */
+  padding-left: 6px;
 }
 
 /* the rail lights with the row, so an expanded element stays traceable: the
@@ -1321,7 +1324,10 @@ dialog .sidebar row:selected:hover label,
   /* no plate at rest: every row carries one of these, so a filled background
      on each turned the list into a column of chips. The glyph alone says what
      kind the element is; the plate is kept only for the inverted state below,
-     where it is a real signal rather than decoration. */
+     where it is a real signal rather than decoration.
+
+     The row's own padding keeps the plate clear of its left edge (see
+     #mask-shape-row); nothing is needed here. */
   background-color: transparent;
   border-radius: 3px;
 }
