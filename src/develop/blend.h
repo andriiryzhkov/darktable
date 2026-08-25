@@ -666,6 +666,13 @@ typedef struct dt_iop_gui_blend_data_t
   // every committed row's readout -- it has to be held here, like the pending
   // AI sliders above.
   GtkWidget *pending_opacity_readout;
+
+  // the parametric add control (see _rebuild_param_channel_buttons): one
+  // button showing the channel a click would add, plus a chevron opening the
+  // full list. masks_param_channel_idx is the channel that button currently
+  // stands for, so repeat adds of the same channel stay a single click.
+  GtkWidget *masks_param_add_btn;
+  int masks_param_channel_idx;
   // insert_realize_empty: the active target is an empty group, so the next drawn
   // shape realizes it. save_creation writes the new form id into insert_realized_fid
   // so the panel can drop the empty group and select the new run on the next rebuild.

@@ -635,11 +635,12 @@ static void _masks_toolbar_place_shapes_box(dt_iop_gui_blend_data_t *bd)
 
 // an expanding, zero-content spacer: grows with the box so button clusters
 // stay apart proportionally to the panel's width instead of hugging the left
-static void _toolbar_pack_stretch(GtkWidget *box)
+static GtkWidget *_toolbar_pack_stretch(GtkWidget *box)
 {
   GtkWidget *stretch = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
   gtk_widget_show(stretch);
   gtk_box_pack_start(GTK_BOX(box), stretch, TRUE, TRUE, 0);
+  return stretch;
 }
 
 // defined much further down (grouping shape rows / naming clusters); forward
@@ -14181,13 +14182,6 @@ static void _add_parametric_channel(dt_iop_module_t *self,
 
 // one-click "add parametric" channel button (flexi row). Adds a single-channel
 // form for the button's channel, on the input sub-channel.
-static void _param_channel_clicked(GtkButton *button, gpointer user_data)
-{
-  if(DT_IN_GUI_UPDATE()) return;
-  dt_iop_module_t *self = user_data;
-  const int ch = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "param-channel"));
-  _add_parametric_channel(self, ch, 0);
-}
 
 // hovering a channel button alone does not preview anything -- exactly like
 // hovering a legacy blendif slider (see _blendop_blendif_enter/_key_press):
@@ -14263,10 +14257,59 @@ static gboolean _param_channel_button_leave(GtkWidget *widget,
   return FALSE;
 }
 
-// (re)build the flexi-only "add parametric" row: one flat, CSS-themeable button
-// (styled like the add-shape buttons) per channel of the module's blend
-// colorspace. Rebuilt only when the csp changes. The row's own visibility is
-// toggled per mode by the mask-mode callbacks.
+
+
+// adding from the chevron's menu also makes that channel the one the button
+// remembered so the next open of the menu can show which was used last
+static void _param_channel_menu_activate(GtkMenuItem *item, gpointer user_data)
+{
+  dt_iop_module_t *module = user_data;
+  dt_iop_gui_blend_data_t *bd = module->blend_data;
+  const int ch = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "param-channel"));
+  bd->masks_param_channel_idx = ch;
+  _add_parametric_channel(module, ch, 0);
+}
+
+
+static void _param_chooser_clicked(GtkButton *button, gpointer user_data)
+{
+  dt_iop_module_t *module = user_data;
+  dt_iop_gui_blend_data_t *bd = module->blend_data;
+  const dt_iop_gui_blendif_channel_t *channels = dt_develop_blendif_channels_for_csp(bd->csp);
+  if(!channels) return;
+
+  GtkWidget *menu = gtk_menu_new();
+  int idx = 0;
+  for(const dt_iop_gui_blendif_channel_t *ch = channels; ch->label; ch++, idx++)
+  {
+    // each row is the channel's own code badge -- the same mark its element
+    // rows carry in the list (see _make_channel_handle) -- beside the channel's
+    // full name, so the menu reads as a list of mask types rather than a row
+    // of two-letter codes.
+    GtkWidget *code = gtk_label_new(_(ch->label));
+    dt_gui_add_class(code, "mask-channel-handle");
+    gtk_label_set_xalign(GTK_LABEL(code), 0.5f);
+    gtk_widget_set_size_request(code, DT_PIXEL_APPLY_DPI(18), -1);
+
+    GtkWidget *text = gtk_label_new(ch->name ? _(ch->name) : _(ch->label));
+    gtk_label_set_xalign(GTK_LABEL(text), 0.0f);
+
+    GtkWidget *row = dt_gui_hbox(code, text);
+    gtk_box_set_spacing(GTK_BOX(row), DT_PIXEL_APPLY_DPI(6));
+
+    GtkWidget *item = gtk_menu_item_new();
+    gtk_container_add(GTK_CONTAINER(item), row);
+    gtk_widget_set_tooltip_text(item, _(ch->tooltip));
+    g_object_set_data(G_OBJECT(item), "param-channel", GINT_TO_POINTER(idx));
+    g_signal_connect(G_OBJECT(item), "activate",
+                     G_CALLBACK(_param_channel_menu_activate), module);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+  }
+  gtk_widget_show_all(menu);
+  dt_gui_menu_popup(GTK_MENU(menu), GTK_WIDGET(button), GDK_GRAVITY_SOUTH_WEST,
+                    GDK_GRAVITY_NORTH_WEST);
+}
+
 static void _rebuild_param_channel_buttons(dt_iop_module_t *module)
 {
   dt_iop_gui_blend_data_t *bd = module->blend_data;
@@ -14275,36 +14318,41 @@ static void _rebuild_param_channel_buttons(dt_iop_module_t *module)
   bd->param_channels_csp = (int)bd->csp;
 
   dt_gui_container_destroy_children(GTK_CONTAINER(bd->masks_param_channels_inner));
+  bd->masks_param_add_btn = NULL;
 
   const dt_iop_gui_blendif_channel_t *channels = dt_develop_blendif_channels_for_csp(bd->csp);
   if(!channels) return;
 
-  int idx = 0;
-  for(const dt_iop_gui_blendif_channel_t *ch = channels; ch->label; ch++, idx++)
-  {
-    GtkWidget *btn = gtk_button_new_with_label(_(ch->label));
-    dt_gui_add_class(btn, "dt_transparent_background");
-    dt_gui_add_class(btn, "mask-channel-add-btn");
-    gtk_widget_set_tooltip_text(btn, _(ch->tooltip));
-    _stash_base_tooltip(btn);
-    g_object_set_data(G_OBJECT(btn), "param-channel", GINT_TO_POINTER(idx));
-    g_signal_connect(G_OBJECT(btn), "clicked",
-                     G_CALLBACK(_param_channel_clicked), module);
-    gtk_widget_add_events(btn, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK);
-    g_signal_connect(G_OBJECT(btn), "enter-notify-event",
-                     G_CALLBACK(_param_channel_button_enter), module);
-    g_signal_connect(G_OBJECT(btn), "leave-notify-event",
-                     G_CALLBACK(_param_channel_button_leave), module);
-    g_signal_connect(G_OBJECT(btn), "key-press-event",
-                     G_CALLBACK(_param_channel_button_key_press), module);
-    gtk_widget_show(btn);
-    gtk_box_pack_start(GTK_BOX(bd->masks_param_channels_inner), btn, FALSE, FALSE, 0);
-    // makes each channel button individually shortcut-assignable, like the
-    // add-shape buttons (dt_iop_togglebutton_new does this internally for
-    // those; this is a plain gtk_button_new, rebuilt per csp, so it needs the
-    // call explicitly every time it is (re)created)
-    dt_action_define_iop(module, "blend`shapes", ch->label, btn, &dt_action_def_button);
-  }
+  int nch = 0;
+  while(channels[nch].label) nch++;
+  if(bd->masks_param_channel_idx < 0 || bd->masks_param_channel_idx >= nch)
+    bd->masks_param_channel_idx = 0;
+
+  // one control, not one button per channel. A parametric element is a peer of
+  // a shape or a raster element in the model, and a row of seven letter buttons
+  // made it look like a different kind of thing -- it also grew and shrank with
+  // the colorspace, so the toolbar had no stable shape. The button carries the
+  // parametric mask glyph, like every other add-element button carries its own
+  // kind's; clicking it opens the list of channels to add.
+  GtkWidget *add = dtgtk_button_new(dtgtk_cairo_paint_masks_parametric, 0, NULL);
+  dt_gui_add_class(add, "dt_transparent_background");
+  gtk_widget_set_tooltip_text(add, _("add a parametric mask element"));
+  _stash_base_tooltip(add);
+  g_signal_connect(G_OBJECT(add), "clicked", G_CALLBACK(_param_chooser_clicked), module);
+  // the hover/'c' overlay preview the per-channel buttons offered, kept on the
+  // one button that remains (see _param_channel_button_enter)
+  gtk_widget_add_events(add, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK);
+  g_signal_connect(G_OBJECT(add), "enter-notify-event",
+                   G_CALLBACK(_param_channel_button_enter), module);
+  g_signal_connect(G_OBJECT(add), "leave-notify-event",
+                   G_CALLBACK(_param_channel_button_leave), module);
+  g_signal_connect(G_OBJECT(add), "key-press-event",
+                   G_CALLBACK(_param_channel_button_key_press), module);
+  gtk_widget_show(add);
+  gtk_box_pack_start(GTK_BOX(bd->masks_param_channels_inner), add, FALSE, FALSE, 0);
+  bd->masks_param_add_btn = add;
+  dt_action_define_iop(module, "blend`shapes", N_("parametric"), add, &dt_action_def_button);
+
 }
 
 // add a raster mask element referencing the given upstream source module + mask
@@ -14660,7 +14708,12 @@ void dt_iop_gui_init_masks(GtkWidget *blendw, dt_iop_module_t *module)
     dt_gui_add_class(toolbar, "masks-toolbar");
     bd->masks_toolbar = toolbar;
     GtkWidget *toolbar_row1 = dt_gui_hbox();
-    gtk_box_set_spacing(GTK_BOX(toolbar_row1), DT_PIXEL_APPLY_DPI(3));
+    // no spacing: the shape icons inside masks_shapes_box are flush with each
+    // other (dt_gui_hbox is spacing 0), so any spacing here would show up as a
+    // gap at the cluster's seams -- between the last shape and parametric, and
+    // between parametric and raster -- making three peers look like two
+    // groups. The stretches on either side do all the separating.
+    gtk_box_set_spacing(GTK_BOX(toolbar_row1), 0);
     gtk_widget_show(toolbar_row1);
     bd->masks_toolbar_row1 = toolbar_row1;
     gtk_box_pack_start(GTK_BOX(toolbar), toolbar_row1, FALSE, FALSE, 0);
@@ -14695,12 +14748,10 @@ void dt_iop_gui_init_masks(GtkWidget *blendw, dt_iop_module_t *module)
     // _masks_toolbar_place_shapes_box reorders shapes_box in between.
     _toolbar_pack_stretch(toolbar_row1);
 
-    // reserves row 1's position right after shapes_box (which does not exist
-    // as a toolbar child yet -- it starts out in masks_shapes_row, classic
-    // default -- and only moves here once flexi mode is entered; see
-    // _masks_toolbar_place_shapes_box). this stretch ends up on shapes_box's
-    // *right*.
-    _toolbar_pack_stretch(toolbar_row1);
+    // the trailing stretch, separating the add-element cluster from import.
+    // Repositioned below, once parametric and raster are packed, so it sits
+    // after the whole cluster rather than immediately after shapes_box.
+    GtkWidget *row1_tail_stretch = _toolbar_pack_stretch(toolbar_row1);
 
     // "reset mask": clears every shape and restores the scaffold. Far right.
     bd->masks_reset_mask_btn = dtgtk_button_new(dtgtk_cairo_paint_reset, 0, NULL);
@@ -14857,14 +14908,41 @@ void dt_iop_gui_init_masks(GtkWidget *blendw, dt_iop_module_t *module)
     gtk_box_pack_start(GTK_BOX(bd->masks_param_channels_box),
                        bd->masks_param_channels_inner, FALSE, FALSE, 0);
     gtk_widget_show(bd->masks_param_channels_inner);
-    gtk_box_pack_start(GTK_BOX(toolbar_row2), bd->masks_param_channels_box, FALSE, FALSE, 0);
+    // one row: every button here adds one element, and each element type gets
+    // exactly one button. The parametric control is a single peer of the shape
+    // icons now (see _rebuild_param_channel_buttons), so the second row it used
+    // to need is gone -- and with it the toolbar changing height with the
+    // colorspace.
+    //
+    // The three add-element controls -- drawn shapes, parametric, raster --
+    // sit together as one uninterrupted cluster, centred between the
+    // add-group button on the left and import on the right. They are the same
+    // kind of thing, so nothing separates them; the stretches sit outside the
+    // cluster, not inside it.
+    // masks_shapes_box is not in this row yet -- it is re-homed later, into
+    // slot 2 (see _masks_toolbar_place_shapes_box). So the order set up here
+    // deliberately leaves that slot empty:
+    //
+    //   add-group(0) stretch(1) parametric(2) raster(3) stretch(4) import(5)
+    //
+    // and once the shapes box lands at 2 everything after it shifts by one,
+    // giving the intended layout:
+    //
+    //   add-group stretch [shapes parametric raster] stretch import
+    //
+    // Getting this wrong is what put a stretch *inside* the cluster, opening a
+    // gap between the last shape and the parametric button.
+    gtk_box_pack_start(GTK_BOX(toolbar_row1), bd->masks_param_channels_box,
+                       FALSE, FALSE, 0);
+    gtk_box_reorder_child(GTK_BOX(toolbar_row1), bd->masks_param_channels_box, 2);
+    gtk_box_reorder_child(GTK_BOX(toolbar_row1), bd->masks_raster_add_btn, 3);
+    gtk_box_reorder_child(GTK_BOX(toolbar_row1), row1_tail_stretch, 4);
 
-    _toolbar_pack_stretch(toolbar_row2);
-
-    // "import/reuse shape": row 2, rightmost (see masks_import_btn's own
-    // construction, earlier in this function, for the button itself).
     gtk_widget_show(bd->masks_import_btn);
-    gtk_box_pack_start(GTK_BOX(toolbar_row2), bd->masks_import_btn, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(toolbar_row1), bd->masks_import_btn, FALSE, FALSE, 0);
+
+    gtk_widget_set_no_show_all(toolbar_row2, TRUE);
+    gtk_widget_set_visible(toolbar_row2, FALSE);
 
     // ---- shapes row (classic two-row toolbar): "show & edit elements" leftmost,
     // then the shapes box. The initial (classic) home; _masks_apply_layout re-homes
