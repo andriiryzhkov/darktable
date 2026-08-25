@@ -156,6 +156,17 @@ static gboolean _expander_scroll(GtkWidget *widget, GdkFrameClock *frame_clock, 
   GtkWidget *sw = gtk_widget_get_ancestor(widget, GTK_TYPE_SCROLLED_WINDOW);
   if(!sw) return G_SOURCE_REMOVE;
 
+  // a collapsible section nested inside a module (dt_gui_new_collapsible_section,
+  // named "collapse-block") must not reposition the panel: the user is folding
+  // one group of controls, not navigating to a module, and scrolling the whole
+  // panel out from under the pointer is disorienting. Only module expanders
+  // ("iop-expander") and the unnamed lib expanders drive the scroll.
+  if(!g_strcmp0("collapse-block", gtk_widget_get_name(widget)))
+  {
+    _scroll_widget = NULL;
+    return G_SOURCE_REMOVE;
+  }
+
   GtkAllocation allocation, available;
   gtk_widget_get_allocation(widget, &allocation);
   gtk_widget_get_allocation(sw, &available);
