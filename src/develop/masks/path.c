@@ -3051,7 +3051,7 @@ static int _path_events_mouse_scrolled(dt_iop_module_t *module,
            0.5f);
 
         dt_conf_set_float(DT_MASKS_CONF(form->type, path, border), masks_border);
-        dt_toast_log(_("feather size: %3.2f%%"),
+        dt_toast_log(_("fade-out border: %3.2f%%"),
                      feather_size * 50.0f / g_list_length(form->points));
       }
       else if(dt_modifier_is(state, GDK_CONTROL_MASK | GDK_SHIFT_MASK) &&
@@ -5373,7 +5373,7 @@ static GSList *_path_setup_mouse_actions(const dt_masks_form_t *const form)
   lm = dt_mouse_action_create_simple(
     lm, DT_MOUSE_ACTION_SCROLL, GDK_CONTROL_MASK | GDK_SHIFT_MASK, _("[PATH] resize"));
   lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_SCROLL,
-                                     GDK_SHIFT_MASK, _("[PATH] change feather size"));
+                                     GDK_SHIFT_MASK, _("[PATH] change fade-out border"));
   lm = dt_mouse_action_create_simple(lm, DT_MOUSE_ACTION_SCROLL,
                                      GDK_CONTROL_MASK, _("[PATH] change opacity"));
   return lm;
@@ -5432,7 +5432,7 @@ static void _path_set_hint_message(const dt_masks_form_gui_t *const gui,
     g_snprintf(msgbuf,
                msgbuf_len,
                _("<b>grow/shrink</b>: scroll, <b>resize</b>: ctrl+shift+scroll\n"
-                 "<b>feather size</b>: shift+scroll, <b>opacity</b>: ctrl+scroll (%d%%), "
+                 "<b>fade-out border</b>: shift+scroll, <b>opacity</b>: ctrl+scroll (%d%%), "
                  "<b>rotate</b>: ctrl+drag"),
                opacity);
     // joint rotation of both shapes only makes sense when there is a source
