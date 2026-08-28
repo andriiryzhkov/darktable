@@ -170,43 +170,27 @@ static void test_boost_slider_follows_the_channel(void **state)
   assert_false(_model_param_row_visibility(FALSE, TRUE, TRUE, TRUE).boost);
 }
 
-// a collapsed row adapts: an untouched channel shows only the input slider,
-// rather than a second slider that says nothing
-static void test_collapsed_untouched_row_shows_input_only(void **state)
+// a collapsed row shows nothing at all, whichever sub-ranges have been touched
+static void test_collapsed_row_shows_nothing(void **state)
 {
-  const dt_masks_param_vis_t v = _model_param_row_visibility(FALSE, FALSE, FALSE, FALSE);
-  assert_true(v.input);
-  assert_false(v.output);
-}
-
-static void test_collapsed_row_with_only_output_used(void **state)
-{
-  const dt_masks_param_vis_t v = _model_param_row_visibility(FALSE, FALSE, TRUE, FALSE);
-  assert_false(v.input);
-  assert_true(v.output);
-}
-
-static void test_collapsed_row_with_both_used_shows_both(void **state)
-{
-  const dt_masks_param_vis_t v = _model_param_row_visibility(FALSE, TRUE, TRUE, FALSE);
-  assert_true(v.input);
-  assert_true(v.output);
-}
-
-static void test_collapsed_row_with_only_input_used(void **state)
-{
-  const dt_masks_param_vis_t v = _model_param_row_visibility(FALSE, TRUE, FALSE, FALSE);
-  assert_true(v.input);
-  assert_false(v.output);
+  for(int in_used = 0; in_used < 2; in_used++)
+    for(int out_used = 0; out_used < 2; out_used++)
+    {
+      const dt_masks_param_vis_t v =
+        _model_param_row_visibility(FALSE, in_used, out_used, TRUE);
+      assert_false(v.input);
+      assert_false(v.output);
+      assert_false(v.boost);
+      assert_false(v.bypass);
+    }
 }
 
 // the per-sub-range bypass toggles only mean something when both are in play
 static void test_bypass_shown_only_when_both_ranges_used(void **state)
 {
-  assert_true(_model_param_row_visibility(FALSE, TRUE, TRUE, FALSE).bypass);
-  assert_false(_model_param_row_visibility(FALSE, TRUE, FALSE, FALSE).bypass);
-  assert_false(_model_param_row_visibility(FALSE, FALSE, TRUE, FALSE).bypass);
+  assert_true(_model_param_row_visibility(TRUE, TRUE, TRUE, FALSE).bypass);
   assert_false(_model_param_row_visibility(TRUE, TRUE, FALSE, FALSE).bypass);
+  assert_false(_model_param_row_visibility(TRUE, FALSE, TRUE, FALSE).bypass);
 }
 
 // the "is this sub-range used" predicate the rule above consumes
@@ -321,10 +305,7 @@ int main(void)
     cmocka_unit_test_teardown(test_a_shape_is_never_a_noop, _teardown),
     cmocka_unit_test_teardown(test_expanded_row_shows_both_ranges, _teardown),
     cmocka_unit_test_teardown(test_boost_slider_follows_the_channel, _teardown),
-    cmocka_unit_test_teardown(test_collapsed_untouched_row_shows_input_only, _teardown),
-    cmocka_unit_test_teardown(test_collapsed_row_with_only_output_used, _teardown),
-    cmocka_unit_test_teardown(test_collapsed_row_with_both_used_shows_both, _teardown),
-    cmocka_unit_test_teardown(test_collapsed_row_with_only_input_used, _teardown),
+    cmocka_unit_test_teardown(test_collapsed_row_shows_nothing, _teardown),
     cmocka_unit_test_teardown(test_bypass_shown_only_when_both_ranges_used, _teardown),
     cmocka_unit_test_teardown(test_channel_used_detects_a_touched_range, _teardown),
     cmocka_unit_test_teardown(test_channel_used_honours_the_active_bit, _teardown),

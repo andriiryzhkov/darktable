@@ -145,6 +145,17 @@ Why that? Just because it's a developer choice and most classes use underscore i
 @define-color bauhaus_fg @fg_color;       /* needed to correctly display color pickers in all states, even if they inherit @fg_color by default */
 @define-color bauhaus_border shade(@plugin_bg_color, 0.5);
 @define-color bauhaus_indicator_border @grey_20;
+/* masks panel: the row/rail state scale. Two ramps, each going resting ->
+   hover -> selected, so a theme can retune the panel from here instead of
+   hunting the individual rules. */
+@define-color mask_row_hover alpha(@grey_100, 0.12);
+@define-color mask_row_selected alpha(@grey_100, 0.22);
+@define-color mask_row_drop alpha(@grey_100, 0.20);
+@define-color mask_group_header_bg alpha(@grey_100, 0.08);
+@define-color mask_rail alpha(@grey_100, 0.22);
+@define-color mask_rail_nested alpha(@grey_100, 0.14);
+@define-color mask_rail_hover alpha(@grey_100, 0.34);
+@define-color mask_rail_selected alpha(@grey_100, 0.52);
 @define-color bauhaus_bg_hover @grey_60;
 @define-color bauhaus_fg_hover @grey_90;
 @define-color bauhaus_fg_selected @grey_80;
@@ -753,7 +764,6 @@ dialog .sidebar row:selected:hover label,
    canvas-clicked shape is mirrored into the list (dt_iop_gui_masks_select_form). */
 .mask-list-row-selected
 {
-  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.10));
   border-radius: 3px;
 }
 
@@ -770,14 +780,12 @@ dialog .sidebar row:selected:hover label,
 }
 
 /* disposable placeholder row for a shape still being drawn on canvas, not yet
-   committed (see _make_pending_shape_row in blend_gui.c) -- dashed instead of
-   solid so it visually reads as "not real yet", reusing the same 2px border
-   .mask-panel-row already reserves so nothing shifts once it turns solid on
-   commit. */
-.mask-panel-row.mask-row-pending
+   committed (see _make_pending_shape_row in blend_gui.c). Marked on its own
+   properties rail, so the row keeps the same two rails as any other and only
+   one border-style differs: nothing moves when it turns real. */
+.mask-row-pending .mask-props-row-editor
 {
-  border-style: dashed;
-  border-color: rgba(255, 255, 255, 0.32);
+  border-left-style: dashed;
 }
 
 .mask-group-block.mask-list-row-selected
@@ -787,13 +795,35 @@ dialog .sidebar row:selected:hover label,
      the border outright would collapse it and shift the list by 4px every time
      a group is selected. */
   border-color: transparent;
+  /* the wash belongs to the header alone (rule below), not the group's body,
+     and this class lands on the whole block */
   background-image: none;
+  background-color: transparent;
 }
 
 .mask-group-block.mask-list-row-selected .mask-group-header
 {
-  background-color: rgba(255, 255, 255, 0.18);
-  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.14));
+  background-color: @mask_row_selected;
+  background-image: none;
+  /* the border stays transparent: the fill paints the whole border-box, so a
+     border of the same rgba composites over it and reads as a lighter ring */
+  border-color: transparent;
+}
+
+/* an element row's own selection. The state class is on the row's outer box,
+   which also holds the expanded editor, so the wash goes on the header child --
+   the same box every other kind washes. */
+#mask-shape-row.mask-list-row-selected > *:first-child
+{
+  background-color: @mask_row_selected;
+}
+
+/* every kind washes a borderless box nested inside .mask-panel-row's border --
+   an element row's row_evbox, a header's content box -- so all of them take the
+   same corner, one step in from the row's own 3px. */
+.mask-panel-row > *:first-child
+{
+  border-radius: 1px;
 }
 
 /* transient hover wash (canvas <-> list sync): a soft neutral fill, distinct
@@ -802,9 +832,9 @@ dialog .sidebar row:selected:hover label,
    or over the docked parametric editor's own controls
    (_parametric_wrap_crossing), so hovering the panel reads exactly like
    hovering the matching shape on the canvas. */
-.mask-panel-row.mask-list-row-hover
+.mask-panel-row.mask-list-row-hover > *:first-child
 {
-  background-color: rgba(255, 255, 255, 0.14);
+  background-color: @mask_row_hover;
 }
 
 /* persistent solo / solo-edit wash: same look as the transient hover above, but
@@ -812,16 +842,16 @@ dialog .sidebar row:selected:hover label,
    than the pointer, so it survives hovering elsewhere in the panel or canvas
    (see _update_shape_row_state / _sync_solo_canvas_highlight). A separate class
    from mask-list-row-hover so _clear_hover_classes does not wipe it. */
-.mask-panel-row.mask-list-row-solo
+.mask-panel-row.mask-list-row-solo > *:first-child
 {
-  background-color: rgba(255, 255, 255, 0.14);
+  background-color: @mask_row_hover;
 }
 
 /* drag-and-drop drop target: while an element (or group) is dragged over a group
    header, lighten its frame so the destination group is obvious */
-.mask-panel-row.mask-list-row-drop
+.mask-panel-row.mask-list-row-drop > *:first-child
 {
-  background-color: rgba(255, 255, 255, 0.20);
+  background-color: @mask_row_drop;
 }
 
 /* group reorder DnD: a bright insertion line on the edge where the dragged group
@@ -873,33 +903,52 @@ dialog .sidebar row:selected:hover label,
 
 .mask-group-block.mask-list-row-drop
 {
-  background-color: rgba(255, 255, 255, 0.20);
+  background-color: @mask_row_drop;
 }
 
 /* a group's element rows sit under their header with a subtle left rail conveying hierarchy */
 .mask-group-elements
 {
-  border-left: 2px solid rgba(255, 255, 255, 0.22);
+  border-left: 2px solid @mask_rail;
   margin-left: 6px;
   padding-left: 6px;
+  /* the rail is this box's left border and runs its full height: stop it short
+     of the next group, which is only 2px of transparent border away */
+  margin-bottom: 4px;
 }
 
-.mask-group-block.mask-list-row-selected .mask-group-elements
+.mask-group-block.mask-group-has-hover .mask-group-elements
 {
-  border-left-color: rgba(255, 255, 255, 0.42);
+  border-left-color: @mask_rail_hover;
+}
+
+/* selection outranks hover: listed after it, at equal specificity */
+.mask-group-block.mask-list-row-selected .mask-group-elements,
+.mask-group-block.mask-group-has-selected .mask-group-elements
+{
+  border-left-color: @mask_rail_selected;
 }
 
 /* an expanded cluster's own member rows nested with a subtle left rail */
 .mask-cluster-elements
 {
-  border-left: 2px solid rgba(255, 255, 255, 0.22);
+  border-left: 2px solid @mask_rail;
   margin-left: 6px;
   padding-left: 6px;
+  /* see .mask-group-elements: keeps the rail off whatever follows it */
+  margin-bottom: 4px;
 }
 
-.mask-group-block.mask-list-row-selected .mask-cluster-elements
+.mask-group-block.mask-group-has-hover .mask-cluster-elements
 {
-  border-left-color: rgba(255, 255, 255, 0.42);
+  border-left-color: @mask_rail_hover;
+}
+
+/* selection outranks hover: listed after it, at equal specificity */
+.mask-group-block.mask-list-row-selected .mask-cluster-elements,
+.mask-group-block.mask-group-has-selected .mask-cluster-elements
+{
+  border-left-color: @mask_rail_selected;
 }
 
 /* while any element/group is soloed, dim same-kind cluster headers: the cluster
@@ -923,13 +972,21 @@ dialog .sidebar row:selected:hover label,
   opacity: 1.0;
 }
 
-/* group headers (#mask-group-header-row and #mask-empty-header-row alike)
-   get a subtle resting background distinct from plain element rows, so "this
-   is a group heading" reads clearly even when nothing is selected/hovered --
-   grayscale only, no accent colour, one step lighter than the panel itself. */
-.mask-panel-row.mask-group-header
+/* keep a row's leading icon and trailing chevron off its edges. On the box
+   holding the controls, not the row: the contents inset while the row's
+   background still spans its full width, so every kind keeps one outer edge. */
+.mask-row-content
 {
-  background-color: rgba(255, 255, 255, 0.08);
+  padding-left: 3px;
+  padding-right: 3px;
+}
+
+/* the wash box inside every group header (real and empty alike) gets a subtle
+   resting background distinct from plain element rows, so "this is a group
+   heading" reads even when nothing is selected or hovered. */
+.mask-group-header
+{
+  background-color: @mask_group_header_bg;
 }
 
 /* an empty group's own header doubles as its drag-drop highlight frame (see
@@ -938,25 +995,36 @@ dialog .sidebar row:selected:hover label,
    wash needing to outrank the resting background above) is empty-group-only.
    Targeted by #mask-empty-header-row's own unique id (specificity always
    beats a class-only selector, however many classes), rather than another
-   same-specificity class combo that would again depend on declaration order. */
-#mask-empty-header-row.mask-list-row-drop
+   same-specificity class combo that would again depend on declaration order.
+   On the wash box, not the header itself: the header's own background sits on
+   that child and would otherwise cover this. */
+#mask-empty-header-row.mask-list-row-drop .mask-group-header
 {
-  background-color: rgba(255, 255, 255, 0.20);
+  background-color: @mask_row_drop;
 }
 
 /* each parametric mask row's own permanently-visible editor with a subtle left rail */
 .mask-param-row-editor
 {
-  border-left: 2px solid rgba(255, 255, 255, 0.22);
+  /* a step weaker than a group's rail (.mask-group-elements): this one sits
+     inside it, and two rails of the same weight read as one flat nesting */
+  border-left: 2px solid @mask_rail_nested;
   margin-top: 3px;
   margin-bottom: 3px;
   margin-left: 8px;
   padding-left: 6px;
 }
 
-.mask-list-row-selected .mask-param-row-editor
+/* keyed off the row itself (#mask-shape-row), not any ancestor: a selected
+   group must not light the rails of every mask inside it */
+#mask-shape-row.mask-list-row-hover .mask-param-row-editor
 {
-  border-left-color: rgba(255, 255, 255, 0.42);
+  border-left-color: @mask_rail_hover;
+}
+
+#mask-shape-row.mask-list-row-selected .mask-param-row-editor
+{
+  border-left-color: @mask_rail_selected;
 }
 
 /* boost factor slider: just spacing on the wrapper -- it should blend into the
@@ -978,7 +1046,8 @@ dialog .sidebar row:selected:hover label,
 /* every row/group's own inline "properties" expander with a subtle left rail */
 .mask-props-row-editor
 {
-  border-left: 2px solid rgba(255, 255, 255, 0.22);
+  /* see .mask-props-row-editor: a step weaker than the group rail it sits in */
+  border-left: 2px solid @mask_rail_nested;
   margin-top: 3px;
   margin-bottom: 3px;
   margin-left: 8px;
@@ -986,9 +1055,15 @@ dialog .sidebar row:selected:hover label,
   padding-left: 6px;
 }
 
-.mask-list-row-selected .mask-props-row-editor
+/* see above: keyed off the row, not an ancestor */
+#mask-shape-row.mask-list-row-hover .mask-props-row-editor
 {
-  border-left-color: rgba(255, 255, 255, 0.42);
+  border-left-color: @mask_rail_hover;
+}
+
+#mask-shape-row.mask-list-row-selected .mask-props-row-editor
+{
+  border-left-color: @mask_rail_selected;
 }
 
 /* refinement section header label styling */

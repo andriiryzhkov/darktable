@@ -942,6 +942,9 @@ typedef struct dt_masks_param_row_editor_t
   // slider is currently docked there -- see _update_param_row_header_dock.
   // Never reparented itself, unlike the input/opacity sliders.
   GtkWidget *header_picker;
+  // the editor's outer box: hidden with its contents, or a collapsed row keeps
+  // the margins and rail it carries (see _update_param_row_visibility)
+  GtkWidget *wrap;
   GtkWidget *sliders_grid;
   GtkWidget *input_lbl;
   GtkWidget *input_slot;
@@ -4749,6 +4752,28 @@ void _normalize_group_operators(dt_masks_form_t *grp)
   }
 }
 
+// GTK CSS has no parent selector, so a group cannot restyle itself from an
+// element selected or hovered inside it: tag the enclosing block instead
+static GtkWidget *_enclosing_group_block(GtkWidget *w)
+{
+  for(GtkWidget *p = w ? gtk_widget_get_parent(w) : NULL; p; p = gtk_widget_get_parent(p))
+  {
+    const char *name = gtk_widget_get_name(p);
+    if(name && !strcmp(name, "mask-group-block")) return p;
+  }
+  return NULL;
+}
+
+static void _clear_class_recursive(GtkWidget *w, const char *cls)
+{
+  if(!GTK_IS_WIDGET(w)) return;
+  dt_gui_remove_class(w, cls);
+  if(!GTK_IS_CONTAINER(w)) return;
+  GList *kids = gtk_container_get_children(GTK_CONTAINER(w));
+  for(GList *c = kids; c; c = g_list_next(c)) _clear_class_recursive(c->data, cls);
+  g_list_free(kids);
+}
+
 // install (once) the CSS that draws a border around the selected mask-list row.
 // Done at runtime so it works regardless of the active theme; registered just
 // above darktable's own theme provider (USER+1) so the border is not overridden.
@@ -5619,6 +5644,11 @@ static void _update_row_selection(dt_iop_gui_blend_data_t *bd)
   if(!bd || !bd->masks_list_box) return;
   // every group's element rows are nested inside masks_list_box (under their header)
   _apply_row_selection(GTK_WIDGET(bd->masks_list_box), bd->panel_selected_formid);
+  // light the enclosing group's rail along with the selected element's own
+  _clear_class_recursive(GTK_WIDGET(bd->masks_list_box), "mask-group-has-selected");
+  GtkWidget *sel_block =
+    _enclosing_group_block(_masks_row_widget(bd, bd->panel_selected_formid));
+  if(sel_block) dt_gui_add_class(sel_block, "mask-group-has-selected");
   _apply_group_selection(GTK_WIDGET(bd->masks_list_box), bd->panel_selected_group_cid);
   _apply_empty_selection(GTK_WIDGET(bd->masks_list_box), bd->selected_empty);
   if(darktable.develop && darktable.develop->form_gui)
@@ -5633,6 +5663,7 @@ static void _clear_hover_classes(GtkWidget *w)
 {
   if(!GTK_IS_WIDGET(w)) return;
   dt_gui_remove_class(w, "mask-list-row-hover");
+  dt_gui_remove_class(w, "mask-group-has-hover");
   if(!GTK_IS_CONTAINER(w)) return;
   GList *kids = gtk_container_get_children(GTK_CONTAINER(w));
   for(GList *c = kids; c; c = g_list_next(c)) _clear_hover_classes(c->data);
@@ -5724,6 +5755,8 @@ void dt_iop_gui_masks_hover_form(dt_iop_module_t *module, const dt_mask_id_t for
   GtkWidget *target = _masks_row_widget(bd, formid);
   if(!target) target = _find_collapsed_cluster_header(box, formid);
   if(target) dt_gui_add_class(target, "mask-list-row-hover");
+  GtkWidget *block = _enclosing_group_block(target);
+  if(block) dt_gui_add_class(block, "mask-group-has-hover");
 }
 
 // icon for the parametric mask's "show output" toggle: a chevron pointing down
@@ -10819,10 +10852,15 @@ static GtkWidget *_make_pending_shape_row(dt_iop_module_t *module, dt_masks_form
                    _make_badge_stack(_make_lowop_badge(), _make_solo_status_badge()),
                    NULL, NULL);
 
+  dt_gui_add_class(row, "mask-row-content");
+
   GtkWidget *row_vbox = dt_gui_vbox(row);
   gtk_widget_set_name(row_vbox, "mask-shape-row");
   dt_gui_add_class(row_vbox, "mask-panel-row");
   dt_gui_add_class(row_vbox, "mask-row-pending");
+  // the shape being drawn is what the user is working on. No "formid" here, so
+  // _apply_row_selection walks past the row and never clears this
+  dt_gui_add_class(row_vbox, "mask-list-row-selected");
 
   // every property slider below docks into this box instead of row_vbox
   // directly, and it is named/classed exactly like _build_props_row_editor's
@@ -11198,10 +11236,13 @@ static void _pack_empty_group_header(dt_iop_module_t *module,
   // shared class every row/header kind keeps for their common base styling.
   gtk_widget_set_name(hdr, "mask-empty-header-row");
   dt_gui_add_class(hdr, "mask-panel-row");
-  // a subtle resting background distinct from plain element rows, so this
-  // reads as a group heading even when nothing is selected (see
-  // .mask-group-header in darktable.css)
-  dt_gui_add_class(hdr, "mask-group-header");
+
+  // see the real group header: the background goes on a borderless child, so
+  // it lands where an element row's wash does
+  GtkWidget *hdr_content = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  dt_gui_add_class(hdr_content, "mask-row-content");
+  dt_gui_add_class(hdr_content, "mask-group-header");
+  gtk_box_pack_start(GTK_BOX(hdr), hdr_content, TRUE, TRUE, 0);
   // NB: "mask-list-row-selected" is applied to `block` (below, once it exists),
   // not to `hdr` here -- same split a real group's header uses (group_block
   // vs hdr, see its own "header-widget"/"group-header-widget" tags): applying
@@ -11275,7 +11316,7 @@ static void _pack_empty_group_header(dt_iop_module_t *module,
   gtk_widget_set_halign(val_widget, GTK_ALIGN_END);
   gtk_widget_set_valign(opacity_inner, GTK_ALIGN_CENTER);
 
-  _pack_row_header(hdr, ehandle, labevt, opacity_inner,
+  _pack_row_header(hdr_content, ehandle, labevt, opacity_inner,
                    _make_badge_stack(_make_lowop_badge(), _make_solo_status_badge()),
                    within_sel, NULL);
 
@@ -11786,51 +11827,24 @@ gboolean _param_channel_is_used(const dt_masks_point_parametric_t *p,
   return !is_default_range || bit_active;
 }
 
-// show/hide this row's input slider, output slider and boost-factor slider:
-// - expanded (p->in_out != 0): show both input and output sliders + boost slider
-// - collapsed (p->in_out == 0):
-//     * both input & output used: show both input and output sliders (hide boost factor
-//     only)
-//     * only output used: show only output slider
-//     * only input used (or no-op / default): show only input slider
-// Which of a parametric row's controls are shown, from the channel's own state.
-// A collapsed row adapts to which sub-ranges the user has actually touched, so
-// an untouched channel does not show a slider that says nothing; an expanded
-// row always shows both. Split from the widget update below so the rule can be
-// tested without a row -- see test_flexi_panel.c.
+// Which of a parametric row's controls are shown. An expanded row shows both
+// sub-range sliders and, where the channel has one, the boost factor; a
+// collapsed row is its header alone. Split from the widget update below so the
+// rule can be tested without a row -- see test_flexi_panel.c.
 dt_masks_param_vis_t _model_param_row_visibility(const gboolean expanded,
                                                  const gboolean in_used,
                                                  const gboolean out_used,
                                                  const gboolean boost_enabled)
 {
-  dt_masks_param_vis_t v = { TRUE, FALSE, FALSE, FALSE };
+  if(!expanded)
+    return (dt_masks_param_vis_t){ FALSE, FALSE, FALSE, FALSE };
 
-  if(expanded)
-  {
-    v.input = TRUE;
-    v.output = TRUE;
-    v.boost = boost_enabled;
-  }
-  else if(in_used && out_used)
-  {
-    v.input = TRUE;
-    v.output = TRUE;
-  }
-  else if(!in_used && out_used)
-  {
-    v.input = FALSE;
-    v.output = TRUE;
-  }
-  else
-  {
-    // only input used, or neither used (no-op default state)
-    v.input = TRUE;
-    v.output = FALSE;
-  }
-
-  // the per-sub-range bypass toggles only mean something when both are in play
-  v.bypass = in_used && out_used;
-  return v;
+  return (dt_masks_param_vis_t){ .input = TRUE,
+                                 .output = TRUE,
+                                 .boost = boost_enabled,
+                                 // the per-sub-range bypass toggles only mean
+                                 // something when both are in play
+                                 .bypass = in_used && out_used };
 }
 
 static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
@@ -11868,9 +11882,12 @@ static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
     gtk_widget_set_sensitive(ed->output_bypass_btn, show_bypass);
   }
 
+  // a collapsed row shows none of these, and an empty grid or wrap would still
+  // claim the margins and rail they carry
+  const gboolean any_control = show_input || show_output;
   if(ed->sliders_grid)
   {
-    gtk_widget_set_visible(ed->sliders_grid, TRUE);
+    gtk_widget_set_visible(ed->sliders_grid, any_control);
     gtk_widget_queue_resize(ed->sliders_grid);
   }
   if(ed->boost_box)
@@ -11879,6 +11896,7 @@ static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
     gtk_widget_queue_resize(ed->boost_box);
   }
   if(ed->opacity_box) gtk_widget_set_visible(ed->opacity_box, FALSE);
+  if(ed->wrap) gtk_widget_set_visible(ed->wrap, any_control);
 }
 
 // refresh this row's own slider markers/values/labels/boost-slider display from
@@ -13354,10 +13372,12 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module,
   gtk_widget_set_name(wrap, "mask-param-row-editor");
   dt_gui_add_class(wrap, "mask-param-row-editor");
 
+  ed->wrap = wrap;
   _update_param_row_display(ed);
   g_object_set_data_full(G_OBJECT(wrap), "param-editor", ed, g_free);
 
   gtk_widget_show_all(wrap);
+  gtk_widget_set_no_show_all(wrap, TRUE);
   gtk_widget_set_no_show_all(ed->input_lbl, TRUE);
   gtk_widget_set_no_show_all(ed->input_slot, TRUE);
   gtk_widget_set_no_show_all(ed->input_bypass_btn, TRUE);
@@ -13777,6 +13797,7 @@ static GtkWidget *_make_shape_row(dt_iop_module_t *module,
   // cleared at the top of _build_masks_list, so entries never outlive their widget.
   if(bd->masks_row_map)
     g_hash_table_insert(bd->masks_row_map, GINT_TO_POINTER(fid), row_vbox);
+  dt_gui_add_class(row, "mask-row-content");
   // tag the row's own interactive widgets so _update_shape_row_state can refresh
   // them in place (toggle states, opacity) without a full list rebuild.
   g_object_set_data(G_OBJECT(row_vbox), "row-hbox", row);
@@ -14568,11 +14589,16 @@ _masks_panel_pack(dt_iop_module_t *module, dt_masks_form_t *grp, const gboolean 
     // shared base styling class every row/header kind in the panel keeps
     gtk_widget_set_name(hdr, "mask-group-header-row");
     dt_gui_add_class(hdr, "mask-panel-row");
-    // a subtle resting background distinct from plain element rows, so this
-    // reads as a group heading even when nothing is selected (see
-    // .mask-group-header in darktable.css)
-    dt_gui_add_class(hdr, "mask-group-header");
     if(group_solo) dt_gui_add_class(hdr, "mask-list-row-solo");
+
+    // the box that paints the header's background, nested inside hdr's border
+    // exactly as an element row's own wash box sits inside row_vbox's (see
+    // row_evbox in _make_shape_row). Both then wash a borderless child, so one
+    // rule and one radius cover the two.
+    GtkWidget *hdr_content = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    dt_gui_add_class(hdr_content, "mask-row-content");
+    dt_gui_add_class(hdr_content, "mask-group-header");
+    gtk_box_pack_start(GTK_BOX(hdr), hdr_content, TRUE, TRUE, 0);
 
     GtkWidget *group_val_widget =
       _make_inline_opacity_value_widget(group_opacity_slider, module);
@@ -14610,7 +14636,7 @@ _masks_panel_pack(dt_iop_module_t *module, dt_masks_form_t *grp, const gboolean 
     g_signal_connect(G_OBJECT(group_expand_toggle), "toggled",
                      G_CALLBACK(_group_expand_toggled), module);
 
-    _pack_row_header(hdr, ghandle, labevt, group_opacity_inner,
+    _pack_row_header(hdr_content, ghandle, labevt, group_opacity_inner,
                      _make_badge_stack(group_lowop_badge, group_solo_badge), within_sel,
                      group_expand_toggle);
     // dimmed when the group contributes nothing: every element hidden, or the
@@ -15156,8 +15182,12 @@ static void _pack_group_elements(dt_iop_module_t *module,
     // shared base styling class every row/header kind in the panel keeps
     gtk_widget_set_name(chdr, "mask-cluster-header-row");
     dt_gui_add_class(chdr, "mask-panel-row");
-    gtk_box_pack_start(GTK_BOX(chdr), kicon, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(chdr), lblbox, TRUE, TRUE, 0);
+    // see the real group header
+    GtkWidget *chdr_content = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    dt_gui_add_class(chdr_content, "mask-row-content");
+    gtk_box_pack_start(GTK_BOX(chdr), chdr_content, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(chdr_content), kicon, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(chdr_content), lblbox, TRUE, TRUE, 0);
     GtkWidget *hdr_evbox = gtk_event_box_new();
     gtk_event_box_set_visible_window(GTK_EVENT_BOX(hdr_evbox), TRUE);
     gtk_container_add(GTK_CONTAINER(hdr_evbox), chdr);
