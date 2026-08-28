@@ -11852,6 +11852,8 @@ static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
   const gboolean show_bypass = vis.bypass;
 
   if(ed->input_lbl) gtk_widget_set_visible(ed->input_lbl, show_input);
+  if(ed->filter[0].values_box)
+    gtk_widget_set_visible(ed->filter[0].values_box, show_input);
   if(ed->input_slot) gtk_widget_set_visible(ed->input_slot, show_input);
   if(ed->input_bypass_btn)
   {
@@ -11860,6 +11862,8 @@ static void _update_param_row_visibility(dt_masks_param_row_editor_t *ed)
     gtk_widget_set_sensitive(ed->input_bypass_btn, show_bypass);
   }
   if(ed->output_lbl) gtk_widget_set_visible(ed->output_lbl, show_output);
+  if(ed->filter[1].values_box)
+    gtk_widget_set_visible(ed->filter[1].values_box, show_output);
   if(ed->output_slot) gtk_widget_set_visible(ed->output_slot, show_output);
   if(ed->output_bypass_btn)
   {
@@ -11947,19 +11951,6 @@ static void _update_param_row_display(dt_masks_param_row_editor_t *ed)
                            sizeof(range_text[k]));
       gtk_label_set_text(sl->label[k], range_text[k]);
     }
-
-    // compact mode hides these numeric labels entirely (see
-    // _apply_param_row_filter_layout) -- surface the same range values on the
-    // slider's own tooltip so hovering it in compact mode loses no information.
-    gchar *full_tip =
-      g_strdup_printf("%s: %s  %s  %s  %s\n\n%s", in_out ? _("output") : _("input"),
-                      range_text[0], range_text[1], range_text[2], range_text[3],
-                      _("double-click to reset.\n"
-                        "press 'a' to toggle available slider modes.\n"
-                        "press 'c' to toggle view of channel data.\n"
-                        "press 'm' to toggle mask view."));
-    gtk_widget_set_tooltip_text(GTK_WIDGET(sl->slider), full_tip);
-    g_free(full_tip);
 
     dtgtk_gradient_slider_multivalue_clear_stops(sl->slider);
     for(int k = 0; k < channel->numberstops; k++)
@@ -12078,18 +12069,6 @@ static void _param_row_slider_callback(GtkDarktableGradientSlider *slider,
                          sizeof(range_text[k]));
     gtk_label_set_text(ed->filter[in_out].label[k], range_text[k]);
   }
-
-  // keep the compact-mode tooltip (see _update_param_row_display) in sync with
-  // a live drag too, not just the initial build
-  gchar *full_tip =
-    g_strdup_printf("%s: %s  %s  %s  %s\n\n%s", in_out ? _("output") : _("input"),
-                    range_text[0], range_text[1], range_text[2], range_text[3],
-                    _("double-click to reset.\n"
-                      "press 'a' to toggle available slider modes.\n"
-                      "press 'c' to toggle view of channel data.\n"
-                      "press 'm' to toggle mask view."));
-  gtk_widget_set_tooltip_text(GTK_WIDGET(slider), full_tip);
-  g_free(full_tip);
 
   if(parameters[1] == 0.0f && parameters[2] == 1.0f)
     p->blendif &= ~(1 << ch);
@@ -13072,6 +13051,23 @@ static gboolean _param_row_picker_apply(dt_iop_module_t *module,
   return FALSE;
 }
 
+// a bauhaus slider draws its own label, so it shifts colour with the widget for
+// free. Here the label is the slider's sibling and GTK's :hover never reaches
+// it, so mirror the state across by hand
+static void _param_slider_label_enter(GtkEventControllerMotion *controller,
+                                      double x,
+                                      double y,
+                                      GtkWidget *label)
+{
+  gtk_widget_set_state_flags(label, GTK_STATE_FLAG_PRELIGHT, FALSE);
+}
+
+static void _param_slider_label_leave(GtkEventControllerMotion *controller,
+                                      GtkWidget *label)
+{
+  gtk_widget_unset_state_flags(label, GTK_STATE_FLAG_PRELIGHT);
+}
+
 // build one input-or-output slider bundle -- mirrors the shared editor's
 // construction in dt_iop_gui_init_blendif, minus the per-slider polarity
 // button (single-channel forms replace it with the row's own ctrl+click invert).
@@ -13084,15 +13080,9 @@ static void _build_param_row_filter(dt_iop_gui_blendif_filter_t *sl, const int i
   dt_gui_add_class(GTK_WIDGET(sl->slider), "mask-param-slider");
   sl->polarity = NULL;
 
-  GtkWidget *label_box = gtk_grid_new();
-  gtk_grid_set_column_homogeneous(GTK_GRID(label_box), TRUE);
-  sl->label_box = label_box;
-
-  sl->head = GTK_LABEL(dt_ui_label_new(in_out ? _("output") : _("input")));
-  gtk_grid_attach(GTK_GRID(label_box), GTK_WIDGET(sl->head), 0, 0, 1, 1);
-
+  // left unparented here: the per-row editor attaches it into its own grid,
+  // see _build_param_row_editor
   GtkWidget *overlay = gtk_overlay_new();
-  gtk_grid_attach(GTK_GRID(label_box), overlay, 1, 0, 3, 1);
   sl->values_box = overlay;
 
   sl->picker_label = GTK_LABEL(gtk_label_new(""));
@@ -13101,21 +13091,32 @@ static void _build_param_row_filter(dt_iop_gui_blendif_filter_t *sl, const int i
   gtk_label_set_yalign(sl->picker_label, 1.0);
   gtk_container_add(GTK_CONTAINER(overlay), GTK_WIDGET(sl->picker_label));
 
+  // one homogeneous cell per value, rather than four xalign anchors sharing a
+  // single allocation: an anchor places its label by the label's own width, so
+  // unequal texts ("6.3" against "42.3") land at unequal spacings
+  GtkWidget *values_grid = gtk_grid_new();
+  gtk_grid_set_column_homogeneous(GTK_GRID(values_grid), TRUE);
+  gtk_grid_set_column_spacing(GTK_GRID(values_grid), DT_PIXEL_APPLY_DPI(6));
   for(int k = 0; k < 4; k++)
   {
     sl->label[k] = GTK_LABEL(gtk_label_new(NULL));
     gtk_widget_set_name(GTK_WIDGET(sl->label[k]), "blend-data");
-    gtk_label_set_xalign(sl->label[k], .35 + k * .65 / 3);
-    gtk_label_set_yalign(sl->label[k], k % 2);
-    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), GTK_WIDGET(sl->label[k]));
+    gtk_label_set_xalign(sl->label[k], 0.5);
+    gtk_label_set_yalign(sl->label[k], 0.5);
+    gtk_grid_attach(GTK_GRID(values_grid), GTK_WIDGET(sl->label[k]), k, 0, 1, 1);
   }
+  // natural width, pinned to the right: filling the row would space the four
+  // values as far apart as it is wide. Homogeneous cells keep the pitch even,
+  // and the cluster ends flush against the panel's right edge
+  gtk_widget_set_halign(values_grid, GTK_ALIGN_END);
+  gtk_widget_set_hexpand(values_grid, FALSE);
+  gtk_overlay_add_overlay(GTK_OVERLAY(overlay), values_grid);
 
   gtk_widget_set_tooltip_text(GTK_WIDGET(sl->slider),
                               _("double-click to reset.\n"
                                 "press 'a' to toggle available slider modes.\n"
                                 "press 'c' to toggle view of channel data.\n"
                                 "press 'm' to toggle mask view."));
-  gtk_widget_set_tooltip_text(GTK_WIDGET(sl->head), _(slider_tooltip[in_out]));
 
   sl->head_compact = GTK_LABEL(dt_ui_label_new(in_out ? _("output") : _("input")));
   gtk_widget_set_tooltip_text(GTK_WIDGET(sl->head_compact), _(slider_tooltip[in_out]));
@@ -13294,20 +13295,35 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module,
   GtkWidget *sliders_grid = gtk_grid_new();
   gtk_grid_set_column_homogeneous(GTK_GRID(sliders_grid), FALSE);
   gtk_grid_set_column_spacing(GTK_GRID(sliders_grid), DT_PIXEL_APPLY_DPI(4));
-  gtk_grid_set_row_spacing(GTK_GRID(sliders_grid), DT_PIXEL_APPLY_DPI(2));
+  // no uniform row gap: a label sits directly on its own slider, and the space
+  // that separates the two channels goes on the second channel's label instead
+  gtk_grid_set_row_spacing(GTK_GRID(sliders_grid), 0);
 
   GtkWidget *input_lbl = dt_ui_label_new(_("input"));
   gtk_label_set_xalign(GTK_LABEL(input_lbl), 0.0f);
+  gtk_widget_set_tooltip_text(input_lbl, _(slider_tooltip[0]));
   dt_gui_add_class(input_lbl, "mask-param-channel-label");
   gtk_grid_attach(GTK_GRID(sliders_grid), input_lbl, 0, 0, 1, 1);
   ed->input_lbl = input_lbl;
 
-  GtkWidget *input_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  // the four range values, built in _build_param_row_filter and packed here
+  gtk_widget_set_hexpand(ed->filter[0].values_box, TRUE);
+  gtk_grid_attach(GTK_GRID(sliders_grid), ed->filter[0].values_box, 1, 0, 1, 1);
+
+  // the eye rides in this box, not a grid column of its own: a third column
+  // would have to be spanned by the values row above to reach the panel edge,
+  // and a spanning child with hexpand makes that column grow and narrows the
+  // bar. Box spacing plus the eye's 18px (button.mask-refine-bypass-btn) come
+  // to the 22px .mask-boost-factor-box reserves, so the bar still ends level
+  // with the boost trough
+  GtkWidget *input_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, DT_PIXEL_APPLY_DPI(4));
   gtk_widget_set_hexpand(input_slot, TRUE);
   gtk_widget_set_valign(GTK_WIDGET(ed->filter[0].slider), GTK_ALIGN_CENTER);
   gtk_box_pack_start(GTK_BOX(input_slot), GTK_WIDGET(ed->filter[0].slider), TRUE, TRUE,
                      0);
-  gtk_grid_attach(GTK_GRID(sliders_grid), input_slot, 1, 0, 1, 1);
+  // the bar gets its own row under the label and runs the full width, the
+  // way a bauhaus slider puts its label above the trough rather than beside it
+  gtk_grid_attach(GTK_GRID(sliders_grid), input_slot, 0, 1, 2, 1);
   ed->input_slot = input_slot;
 
   GtkWidget *input_bypass_btn =
@@ -13318,21 +13334,29 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module,
                               _("temporarily disable this input channel"));
   g_signal_connect(G_OBJECT(input_bypass_btn), "toggled",
                    G_CALLBACK(_param_channel_bypass_toggled), ed);
-  gtk_grid_attach(GTK_GRID(sliders_grid), input_bypass_btn, 2, 0, 1, 1);
+  gtk_box_pack_end(GTK_BOX(input_slot), input_bypass_btn, FALSE, FALSE, 0);
   ed->input_bypass_btn = input_bypass_btn;
+  dt_gui_connect_motion(GTK_WIDGET(ed->filter[0].slider), NULL,
+                        _param_slider_label_enter, _param_slider_label_leave, input_lbl);
 
   GtkWidget *output_lbl = dt_ui_label_new(_("output"));
   gtk_label_set_xalign(GTK_LABEL(output_lbl), 0.0f);
+  gtk_widget_set_tooltip_text(output_lbl, _(slider_tooltip[1]));
   dt_gui_add_class(output_lbl, "mask-param-channel-label");
-  gtk_grid_attach(GTK_GRID(sliders_grid), output_lbl, 0, 1, 1, 1);
+  gtk_widget_set_margin_top(output_lbl, DT_PIXEL_APPLY_DPI(4));
+  gtk_grid_attach(GTK_GRID(sliders_grid), output_lbl, 0, 2, 1, 1);
   ed->output_lbl = output_lbl;
 
-  GtkWidget *output_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_widget_set_hexpand(ed->filter[1].values_box, TRUE);
+  gtk_widget_set_margin_top(ed->filter[1].values_box, DT_PIXEL_APPLY_DPI(4));
+  gtk_grid_attach(GTK_GRID(sliders_grid), ed->filter[1].values_box, 1, 2, 1, 1);
+
+  GtkWidget *output_slot = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, DT_PIXEL_APPLY_DPI(4));
   gtk_widget_set_hexpand(output_slot, TRUE);
   gtk_widget_set_valign(GTK_WIDGET(ed->filter[1].slider), GTK_ALIGN_CENTER);
   gtk_box_pack_start(GTK_BOX(output_slot), GTK_WIDGET(ed->filter[1].slider), TRUE, TRUE,
                      0);
-  gtk_grid_attach(GTK_GRID(sliders_grid), output_slot, 1, 1, 1, 1);
+  gtk_grid_attach(GTK_GRID(sliders_grid), output_slot, 0, 3, 2, 1);
   ed->output_slot = output_slot;
 
   GtkWidget *output_bypass_btn =
@@ -13343,8 +13367,10 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module,
                               _("temporarily disable this output channel"));
   g_signal_connect(G_OBJECT(output_bypass_btn), "toggled",
                    G_CALLBACK(_param_channel_bypass_toggled), ed);
-  gtk_grid_attach(GTK_GRID(sliders_grid), output_bypass_btn, 2, 1, 1, 1);
+  gtk_box_pack_end(GTK_BOX(output_slot), output_bypass_btn, FALSE, FALSE, 0);
   ed->output_bypass_btn = output_bypass_btn;
+  dt_gui_connect_motion(GTK_WIDGET(ed->filter[1].slider), NULL,
+                        _param_slider_label_enter, _param_slider_label_leave, output_lbl);
 
   ed->sliders_grid = sliders_grid;
 
@@ -13358,6 +13384,8 @@ static GtkWidget *_build_param_row_editor(dt_iop_module_t *module,
   g_object_set_data_full(G_OBJECT(wrap), "param-editor", ed, g_free);
 
   gtk_widget_show_all(wrap);
+  gtk_widget_set_no_show_all(ed->filter[0].values_box, TRUE);
+  gtk_widget_set_no_show_all(ed->filter[1].values_box, TRUE);
   gtk_widget_set_no_show_all(ed->input_lbl, TRUE);
   gtk_widget_set_no_show_all(ed->input_slot, TRUE);
   gtk_widget_set_no_show_all(ed->input_bypass_btn, TRUE);

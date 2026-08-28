@@ -2332,6 +2332,42 @@ static void _draw_indicator_shape(cairo_t *cr, float radius)
   cairo_close_path(cr);
 }
 
+void dt_bauhaus_draw_marker(cairo_t *cr,
+                            const double x,
+                            const double y,
+                            const double size,
+                            const gboolean up,
+                            const gboolean filled,
+                            const GdkRGBA fill_color,
+                            const GdkRGBA border_color)
+{
+  const double bw = darktable.bauhaus->border_width;
+
+  cairo_save(cr);
+  cairo_translate(cr, x, y);
+  // the shape is built apex-down, so an upward marker is the flipped one
+  cairo_scale(cr, 1.0, up ? -1.0 : 1.0);
+  cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+
+  _draw_indicator_shape(cr, size);
+  cairo_set_line_width(cr, bw);
+  set_color(cr, border_color);
+  cairo_stroke(cr);
+
+  _draw_indicator_shape(cr, size - bw);
+  cairo_clip(cr);
+
+  _draw_indicator_shape(cr, size - bw);
+  set_color(cr, fill_color);
+  cairo_set_line_width(cr, bw);
+  if(filled)
+    cairo_fill(cr);
+  else
+    cairo_stroke(cr);
+
+  cairo_restore(cr);
+}
+
 static void _draw_indicator(dt_bauhaus_widget_t *w,
                             const float pos,
                             cairo_t *cr,
@@ -2362,12 +2398,6 @@ static void _draw_indicator(dt_bauhaus_widget_t *w,
     ? (content_height - htM) / 2.0f
     : bh->line_height + INNER_PADDING;
 
-  cairo_save(cr);
-  if(wd)
-    cairo_translate(cr, pos * wd, htm + htM / 2.0f);
-  cairo_scale(cr, 1.0f, -1.0f);
-  cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
-
   // checker_gradient sliders' own track runs from a dark checkerboard to a
   // near-white fade (see _draw_baseline), so the theme's usual fg/border
   // pairing -- close in value to each other, meant for a plain flat baseline
@@ -2381,32 +2411,16 @@ static void _draw_indicator(dt_bauhaus_widget_t *w,
   const GdkRGBA indicator_fill = w->slider.checker_gradient
     ? (GdkRGBA){0.25, 0.25, 0.25, 1.0} : fg_color;
 
-  // draw the outer marker
-  _draw_indicator_shape(cr, size);
-  cairo_set_line_width(cr, border_width);
-  set_color(cr, indicator_border);
-  cairo_stroke(cr);
-
-  _draw_indicator_shape(cr, size - border_width);
-  cairo_clip(cr);
-
-  // draw the inner marker
-  _draw_indicator_shape(cr, size - border_width);
-  set_color(cr, indicator_fill);
-  cairo_set_line_width(cr, border_width);
-
   // checker_gradient sliders (see dt_bauhaus_slider_set_checker_gradient) want
   // a solid indicator regardless of fill_feedback -- they turn fill_feedback
   // off for a different reason (the track already fades to white on its own,
   // see _style_opacity_gradient in blend_gui.c), but a hollow indicator meant
   // to show a colour through it (grad_col sliders) reads as barely-there
   // against their own white-fading track, especially near the high end.
-  if(w->slider.fill_feedback || w->slider.checker_gradient || !wd)
-    cairo_fill(cr); // Plain indicator (regular sliders)
-  else
-    cairo_stroke(cr);  // Hollow indicator to see a color through it (gradient sliders)
-
-  cairo_restore(cr);
+  const gboolean filled =
+    w->slider.fill_feedback || w->slider.checker_gradient || !wd;
+  dt_bauhaus_draw_marker(cr, wd ? pos * wd : 0.0, wd ? htm + htM / 2.0f : 0.0,
+                         size, TRUE, filled, indicator_fill, indicator_border);
 }
 
 static void _draw_quad(dt_bauhaus_widget_t *w,

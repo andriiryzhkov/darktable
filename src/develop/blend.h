@@ -365,16 +365,11 @@ typedef struct dt_iop_gui_blendif_filter_t
   GtkLabel *picker_label;
   GtkWidget *polarity;
   GtkBox *box;
-  // compact-mode extras, used only by the per-row parametric editor (see
-  // _build_param_row_filter / _apply_param_row_filter_layout in blend_gui.c);
-  // the classic shared editor leaves these NULL. values_box is the numeric
-  // values overlay (hidden in compact mode); label_box is the grid pairing
-  // head + values_box for the normal layout (hidden in compact mode, when
-  // the slider moves into compact_row instead); head_compact is a second
-  // label instance (same text as head) shown beside the slider in compact
-  // mode; compact_row holds head_compact and (when compact) the slider.
+  // used only by the per-row parametric editor (see _build_param_row_filter in
+  // blend_gui.c); the classic shared editor leaves these NULL. values_box is
+  // the overlay holding the four numeric range values, packed into the
+  // editor's own grid above the slider.
   GtkWidget *values_box;
-  GtkWidget *label_box;
   GtkLabel *head_compact;
   GtkBox *compact_row;
 } dt_iop_gui_blendif_filter_t;

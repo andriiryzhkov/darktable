@@ -170,6 +170,18 @@ void dt_bauhaus_cleanup();
 // load theme colors, fonts, etc
 void dt_bauhaus_load_theme();
 
+// draw a slider marker of radius `size` centered on (x, y), in the shape the
+// user's bauhaus/marker_shape preference selects. `up` points it upward, as a
+// slider's own indicator is; `filled` draws it solid rather than hollow
+void dt_bauhaus_draw_marker(cairo_t *cr,
+                            const double x,
+                            const double y,
+                            const double size,
+                            const gboolean up,
+                            const gboolean filled,
+                            const GdkRGBA fill_color,
+                            const GdkRGBA border_color);
+
 // common functions:
 dt_bauhaus_type_t dt_bauhaus_widget_get_type(GtkWidget *widget);
 // set the label text:

@@ -145,6 +145,11 @@ Why that? Just because it's a developer choice and most classes use underscore i
 @define-color bauhaus_fg @fg_color;       /* needed to correctly display color pickers in all states, even if they inherit @fg_color by default */
 @define-color bauhaus_border shade(@plugin_bg_color, 0.5);
 @define-color bauhaus_indicator_border @grey_20;
+/* outline around a parametric slider's fully-selected zone. Transparent, so
+   nothing is drawn: the wedges already show the feather ramps, and the two
+   filled markers already sit on the zone's edges. Give it a colour to get an
+   explicit boundary between the selected zone and the unselected ends. */
+@define-color gslider_zone_border rgba(0, 0, 0, 0);
 @define-color bauhaus_bg_hover @grey_60;
 @define-color bauhaus_fg_hover @grey_90;
 @define-color bauhaus_fg_selected @grey_80;
@@ -964,14 +969,18 @@ dialog .sidebar row:selected:hover label,
    boxed either), not read as a separate card */
 .mask-boost-factor-box
 {
-  margin-top: 0.14em;
+  /* 1.5 * bauhaus border_width, which is all a bauhaus slider leaves below its
+     trough and so the whole gap between two stacked ones (they pack with
+     spacing 0, see _widget_get_preferred_height). The parametric slider's own
+     lower margin is filled by its bottom markers, so this is the visible gap */
+  margin-top: 3px;
   margin-right: 22px;
 }
 
 /* the input/output gradient sliders inside a parametric row's own editor. */
 .mask-param-slider
 {
-  min-height: 1.2em;
+  min-height: 1.9em;
   padding: 0;
 }
 
@@ -1012,6 +1021,22 @@ dialog .sidebar row:selected:hover label,
 {
   min-width: 3.2em;
   padding-right: 4px;
+}
+
+/* set by hand from the slider's own enter/leave, since the label is its
+   sibling rather than its child -- see _param_slider_label_enter */
+.mask-param-channel-label:hover
+{
+  color: @bauhaus_fg_hover;
+}
+
+/* the marker nearest the pointer is drawn with this colour: the slider
+   resolves it by looking the style up with PRELIGHT set, per marker rather
+   than per widget, so the shift comes from the theme and matches the channel
+   label's above */
+.mask-param-slider:hover
+{
+  color: @bauhaus_fg_hover;
 }
 
 button.mask-refine-bypass-btn

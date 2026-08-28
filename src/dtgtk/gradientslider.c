@@ -30,6 +30,9 @@
 #define DTGTK_GRADIENT_SLIDER_VALUE_CHANGED_DELAY_MAX 50
 #define DTGTK_GRADIENT_SLIDER_VALUE_CHANGED_DELAY_MIN 10
 #define DTGTK_GRADIENT_SLIDER_DEFAULT_INCREMENT 0.01
+// share of the row's height given to the bar; the rest is split between the
+// two margins the markers are drawn in
+#define DTGTK_GRADIENT_SLIDER_BAR_FRACTION 0.45f
 
 // define GTypes
 G_DEFINE_TYPE(GtkDarktableGradientSlider, _gradient_slider, GTK_TYPE_DRAWING_AREA);
@@ -606,17 +609,8 @@ static void _gradient_slider_get_preferred_width(GtkWidget *widget,
   gtk_style_context_get_padding(context, state, &padding);
   *min_width = *nat_width = css_min_width + padding.left + padding.right + border.left + border.right + margin.left + margin.right;
 
-  dt_bauhaus_t *bh = darktable.bauhaus;
-  const dt_bauhaus_marker_shape_t shape = bh ? bh->marker_shape : DT_BAUHAUS_MARKER_TRIANGLE;
-  const double base_r = DT_PIXEL_APPLY_DPI(4.0);
-  const double h_radius = (shape == DT_BAUHAUS_MARKER_TRIANGLE) ? (0.866025404 * base_r)
-                        : (shape == DT_BAUHAUS_MARKER_DIAMOND)  ? (0.8 * base_r)
-                        : (shape == DT_BAUHAUS_MARKER_BAR)      ? (0.35 * base_r)
-                        : base_r;
-  const int hpad = ceil(h_radius);
-
-  DTGTK_GRADIENT_SLIDER(widget)->margin_left = padding.left + border.left + margin.left + hpad;
-  DTGTK_GRADIENT_SLIDER(widget)->margin_right = padding.right + border.right + margin.right + hpad;
+  DTGTK_GRADIENT_SLIDER(widget)->margin_left = padding.left + border.left + margin.left;
+  DTGTK_GRADIENT_SLIDER(widget)->margin_right = padding.right + border.right + margin.right;
 }
 
 static void _gradient_slider_dispose(GObject *object)
@@ -638,49 +632,6 @@ static void _gradient_slider_dispose(GObject *object)
   G_OBJECT_CLASS(parent_class)->dispose(object);
 }
 
-static void _draw_gradient_marker_shape(cairo_t *cr,
-                                        const double vx,
-                                        const double cy,
-                                        const double r,
-                                        const gboolean is_upper,
-                                        const dt_bauhaus_marker_shape_t shape)
-{
-  if(shape == DT_BAUHAUS_MARKER_CIRCLE)
-  {
-    cairo_arc(cr, vx, cy, r, 0, 2.0 * M_PI);
-  }
-  else if(shape == DT_BAUHAUS_MARKER_DIAMOND)
-  {
-    cairo_move_to(cr, vx, cy - r);
-    cairo_line_to(cr, vx - r * 0.8, cy);
-    cairo_line_to(cr, vx, cy + r);
-    cairo_line_to(cr, vx + r * 0.8, cy);
-  }
-  else if(shape == DT_BAUHAUS_MARKER_BAR)
-  {
-    cairo_rectangle(cr, vx - r * 0.35, cy - r, r * 0.7, 2.0 * r);
-  }
-  else
-  {
-    // DT_BAUHAUS_MARKER_TRIANGLE (default)
-    const double sin_r = 0.866025404 * r;
-    const double cos_r = 0.5 * r;
-    if(is_upper)
-    {
-      cairo_move_to(cr, vx, cy + r);
-      cairo_line_to(cr, vx - sin_r, cy - cos_r);
-      cairo_line_to(cr, vx + sin_r, cy - cos_r);
-    }
-    else
-    {
-      cairo_move_to(cr, vx, cy - r);
-      cairo_line_to(cr, vx - sin_r, cy + cos_r);
-      cairo_line_to(cr, vx + sin_r, cy + cos_r);
-    }
-  }
-  cairo_close_path(cr);
-}
-
 static gboolean _gradient_slider_draw(GtkWidget *widget,
                                       cairo_t *cr)
 {
@@ -694,6 +645,26 @@ static gboolean _gradient_slider_draw(GtkWidget *widget,
 
   GdkRGBA color;
   gtk_style_context_get_color(context, state, &color);
+
+  // marker colours, resolved the way bauhaus resolves its indicator's: fill
+  // from the foreground, outline from the background. `state` already carries
+  // PRELIGHT while the pointer is over the widget, so the resting colour needs
+  // it cleared, or every marker lights up on entry instead of just the one a
+  // click would act on
+  GdkRGBA color_normal, color_prelight;
+  gtk_style_context_get_color(context, state & ~GTK_STATE_FLAG_PRELIGHT, &color_normal);
+  gtk_style_context_get_color(context, state | GTK_STATE_FLAG_PRELIGHT, &color_prelight);
+
+  GdkRGBA *bg_alloc = NULL;
+  gtk_style_context_get(context, state, "background-color", &bg_alloc, NULL);
+  const GdkRGBA bg_color = bg_alloc ? *bg_alloc : (GdkRGBA){0.0, 0.0, 0.0, 0.0};
+  if(bg_alloc) gdk_rgba_free(bg_alloc);
+
+  // optional outline around the fully-selected zone, drawn only if a theme
+  // gives @gslider_zone_border a colour
+  GdkRGBA zone_border;
+  if(!gtk_style_context_lookup_color(context, "gslider_zone_border", &zone_border))
+    zone_border = (GdkRGBA){0.0, 0.0, 0.0, 0.0};
 
   GtkAllocation allocation;
   GtkBorder margin, border, padding;
@@ -718,21 +689,29 @@ static gboolean _gradient_slider_draw(GtkWidget *widget,
   cheight -= padding.top + padding.bottom + border.top + border.bottom;
 
   dt_bauhaus_t *bh = darktable.bauhaus;
-  const dt_bauhaus_marker_shape_t shape = bh ? bh->marker_shape : DT_BAUHAUS_MARKER_TRIANGLE;
-  const double base_r = DT_PIXEL_APPLY_DPI(4.0);
-  const double h_radius = (shape == DT_BAUHAUS_MARKER_TRIANGLE) ? (0.866025404 * base_r)
-                        : (shape == DT_BAUHAUS_MARKER_DIAMOND)  ? (0.8 * base_r)
-                        : (shape == DT_BAUHAUS_MARKER_BAR)      ? (0.35 * base_r)
-                        : base_r;
-  const int hpad = ceil(h_radius);
+  gslider->margin_left = padding.left + border.left + margin.left;
+  gslider->margin_right = padding.right + border.right + margin.right;
 
-  gslider->margin_left = padding.left + border.left + margin.left + hpad;
-  gslider->margin_right = padding.right + border.right + margin.right + hpad;
+  // the bar runs the full content width so its ends line up with a bauhaus
+  // slider's trough above or below it; an end marker overhangs by its own
+  // half-width, the way it does on the classic sliders
+  const int gx = startx;
+  const int gw = cwidth;
+  // the outer ring is stroked in the background colour, so mfill is what shows
+  const double msize = bh ? bh->marker_size : DT_PIXEL_APPLY_DPI(6.0);
+  const double mfill = msize - (bh ? bh->border_width : DT_PIXEL_APPLY_DPI(2.0));
+  const double dip = DT_PIXEL_APPLY_DPI(1);
+  // a triangle is 1.5r tall and points, so it sits above the bar with its apex
+  // dipping onto the edge; the symmetric shapes are 2r and overlap by a quarter
+  // of that, which leaves them the same 1.5r above the bar
+  const gboolean pointed = !bh || bh->marker_shape == DT_BAUHAUS_MARKER_TRIANGLE;
+  const double reach = 1.5 * mfill;
 
-  const int gx = startx + hpad;
-  const int gw = cwidth - 2 * hpad;
-  const int y1 = DT_PIXEL_APPLY_DPI(1);
-  const int gheight = cheight - 2 * y1;
+  // the bar takes the rest of the row, but never less margin than the markers
+  // need above and below it
+  const int y1 = MAX((int)round(0.5f * (1.0f - DTGTK_GRADIENT_SLIDER_BAR_FRACTION) * cheight),
+                     (int)ceil(reach));
+  const int gheight = MAX(cheight - 2 * y1, DT_PIXEL_APPLY_DPI(2));
 
   // First build the cairo gradient and then fill the gradient
   if(gslider->colors)
@@ -785,9 +764,10 @@ static gboolean _gradient_slider_draw(GtkWidget *widget,
   // A 4-point open/filled/filled/open marker set is the "range + feather"
   // convention (parametric blendif channels): paint the feather zones
   // directly on the gradient bar, white and fading from the open (feather)
-  // point to full opacity at the neighbouring filled (range) point, plus a
-  // plain outline around the flat, fully-selected zone between the two
-  // filled points. The open marker's own up/down bit decides which edge
+  // point to full opacity at the neighbouring filled (range) point. The flat,
+  // fully-selected zone between the two filled points is left unpainted, and a
+  // theme may outline it via @gslider_zone_border (transparent by default, so
+  // nothing is drawn). The open marker's own up/down bit decides which edge
   // (top or bottom) each wedge's point sits on, so this follows polarity
   // (the "invert" toggle swaps that bit, see _blendop_blendif_polarity_callback)
   // instead of assuming a fixed orientation.
@@ -819,26 +799,33 @@ static gboolean _gradient_slider_draw(GtkWidget *widget,
     cairo_close_path(cr);
     cairo_fill(cr);
 
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.8);
-    cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
-    // apex0's own up/down bit already tells us the polarity (see the wedge
-    // comment above): inverted means the selected zone is everything OUTSIDE
-    // [x1, x2], so the outline belongs on the two exterior bands instead of
-    // the interior one. marker[0] sits on the UPPER edge (bit set, hollow
-    // marker above the filled one) for an inverted/excluded range, and on
-    // the LOWER edge (bit clear, hollow below filled) for the normal,
-    // non-inverted/included range -- same bit apex0 above already keys off.
-    if(gslider->marker[0] & 0x04)
+    if(zone_border.alpha > 0.0)
     {
-      cairo_rectangle(cr, gx + 0.5, top + 0.5, fmax(x1 - gx - 1, 0), fmax(bottom - top - 1, 0));
-      cairo_stroke(cr);
-      cairo_rectangle(cr, x2 + 0.5, top + 0.5, fmax(gx + gw - x2 - 1, 0), fmax(bottom - top - 1, 0));
-      cairo_stroke(cr);
-    }
-    else
-    {
-      cairo_rectangle(cr, x1 + 0.5, top + 0.5, fmax(x2 - x1 - 1, 0), fmax(bottom - top - 1, 0));
-      cairo_stroke(cr);
+      cairo_set_source_rgba(cr, zone_border.red, zone_border.green, zone_border.blue,
+                            zone_border.alpha);
+      cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
+      // apex0's own up/down bit already tells us the polarity (see the wedge
+      // comment above): inverted means the selected zone is everything OUTSIDE
+      // [x1, x2], so the outline belongs on the two exterior bands instead of
+      // the interior one. marker[0] sits on the UPPER edge (bit set, hollow
+      // marker above the filled one) for an inverted/excluded range, and on
+      // the LOWER edge (bit clear, hollow below filled) for the normal,
+      // non-inverted/included range -- same bit apex0 above already keys off.
+      if(gslider->marker[0] & 0x04)
+      {
+        cairo_rectangle(cr, gx + 0.5, top + 0.5,
+                        fmax(x1 - gx - 1, 0), fmax(bottom - top - 1, 0));
+        cairo_stroke(cr);
+        cairo_rectangle(cr, x2 + 0.5, top + 0.5,
+                        fmax(gx + gw - x2 - 1, 0), fmax(bottom - top - 1, 0));
+        cairo_stroke(cr);
+      }
+      else
+      {
+        cairo_rectangle(cr, x1 + 0.5, top + 0.5,
+                        fmax(x2 - x1 - 1, 0), fmax(bottom - top - 1, 0));
+        cairo_stroke(cr);
+      }
     }
   }
 
@@ -859,67 +846,22 @@ static gboolean _gradient_slider_draw(GtkWidget *widget,
     const int vx = _scale_to_screen(widget, gslider->position[k]);
     const int mk = gslider->marker[k];
     const gboolean hovered = (k == hovered_marker);
-    const double r = DT_PIXEL_APPLY_DPI(hovered ? 5.2 : 4.0);
+    const GdkRGBA mc = hovered ? color_prelight : color_normal;
 
     cairo_set_antialias(cr, CAIRO_ANTIALIAS_DEFAULT);
 
-    if(mk & 0x04) /* upper handle, sits on the bar's top edge */
-    {
-      const double cy = (starty + y1) + ((shape == DT_BAUHAUS_MARKER_TRIANGLE) ? (r * 0.5) : r);
-      _draw_gradient_marker_shape(cr, vx, cy, r, TRUE, shape);
-      if(mk & 0x01)
-      {
-        if(hovered)
-          cairo_set_source_rgba(cr, color.red, color.green, color.blue, 1.0);
-        else
-          cairo_set_source_rgba(cr, color.red * 0.85, color.green * 0.85, color.blue * 0.85, 1.0);
-        cairo_fill_preserve(cr);
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.7);
-        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
-        cairo_stroke(cr);
-      }
-      else
-      {
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.7);
-        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.5));
-        cairo_stroke_preserve(cr);
-        if(hovered)
-          cairo_set_source_rgba(cr, color.red, color.green, color.blue, 1.0);
-        else
-          cairo_set_source_rgba(cr, color.red * 0.85, color.green * 0.85, color.blue * 0.85, 1.0);
-        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
-        cairo_stroke(cr);
-      }
-    }
+    // 0x01 is the ramp's full end: solid there, hollow at the feather ends
+    const gboolean filled = (mk & 0x01) != 0;
 
-    if(mk & 0x02) /* lower handle, sits on the bar's bottom edge */
-    {
-      const double cy = (starty + cheight - y1) - ((shape == DT_BAUHAUS_MARKER_TRIANGLE) ? (r * 0.5) : r);
-      _draw_gradient_marker_shape(cr, vx, cy, r, FALSE, shape);
-      if(mk & 0x01)
-      {
-        if(hovered)
-          cairo_set_source_rgba(cr, color.red, color.green, color.blue, 1.0);
-        else
-          cairo_set_source_rgba(cr, color.red * 0.85, color.green * 0.85, color.blue * 0.85, 1.0);
-        cairo_fill_preserve(cr);
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.7);
-        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
-        cairo_stroke(cr);
-      }
-      else
-      {
-        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.7);
-        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(2.5));
-        cairo_stroke_preserve(cr);
-        if(hovered)
-          cairo_set_source_rgba(cr, color.red, color.green, color.blue, 1.0);
-        else
-          cairo_set_source_rgba(cr, color.red * 0.85, color.green * 0.85, color.blue * 0.85, 1.0);
-        cairo_set_line_width(cr, DT_PIXEL_APPLY_DPI(1.0));
-        cairo_stroke(cr);
-      }
-    }
+    if(mk & 0x04) /* upper handle */
+      dt_bauhaus_draw_marker(cr, vx, pointed ? (starty + y1) + dip - mfill
+                                              : (starty + y1) - 0.5 * mfill,
+                             msize, FALSE, filled, mc, bg_color);
+
+    if(mk & 0x02) /* lower handle */
+      dt_bauhaus_draw_marker(cr, vx, pointed ? (starty + cheight - y1) - dip + mfill
+                                              : (starty + cheight - y1) + 0.5 * mfill,
+                             msize, TRUE, filled, mc, bg_color);
   }
 
   return FALSE;
