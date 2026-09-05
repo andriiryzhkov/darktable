@@ -42,6 +42,9 @@
 #include "lua/call.h"
 #include "lua/image.h"
 #endif
+#ifdef HAVE_AI
+#include "common/ai/embedding.h"
+#endif
 #include "libs/lib_api.h"
 
 DT_MODULE(1)
@@ -56,6 +59,10 @@ typedef struct dt_lib_image_t
   GtkWidget *copy_metadata_button, *paste_metadata_button, *clear_metadata_button;
   GtkWidget *rating_flag, *colors_flag, *metadata_flag, *geotags_flag, *tags_flag;
   GtkWidget *page1; // saved here for lua extensions
+#ifdef HAVE_AI
+  GtkWidget *add_index_button;
+  GtkWidget *remove_index_button;
+#endif
   dt_imgid_t imageid;
 } dt_lib_image_t;
 
@@ -155,6 +162,57 @@ static void _duplicate_virgin(dt_action_t *action)
   dt_control_duplicate_images(TRUE);
 }
 
+#ifdef HAVE_AI
+static void _add_index_button_clicked(GtkWidget *widget,
+                                      gpointer user_data)
+{
+  GList *images = dt_act_on_get_images(FALSE, TRUE, FALSE);
+  if(!images) return;
+
+  // collect already-indexed images so they get re-computed (drop the
+  // existing entries first, then queue everything for fresh inference)
+  GList *already_indexed = NULL;
+  for(GList *l = images; l; l = g_list_next(l))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(l->data);
+    if(dt_ai_embedding_has(imgid))
+      already_indexed = g_list_prepend(already_indexed,
+                                       GINT_TO_POINTER(imgid));
+  }
+  if(already_indexed)
+  {
+    dt_ai_embedding_remove(already_indexed);
+    g_list_free(already_indexed);
+  }
+
+  dt_ai_embedding_batch(images);
+  g_list_free(images);
+}
+
+static void _remove_index_button_clicked(GtkWidget *widget,
+                                         gpointer user_data)
+{
+  GList *images = dt_act_on_get_images(FALSE, TRUE, FALSE);
+  if(!images) return;
+
+  // filter to only currently-indexed images so the count is accurate
+  GList *to_remove = NULL;
+  for(GList *l = images; l; l = g_list_next(l))
+  {
+    const dt_imgid_t imgid = GPOINTER_TO_INT(l->data);
+    if(dt_ai_embedding_has(imgid))
+      to_remove = g_list_prepend(to_remove,
+                                 GINT_TO_POINTER(imgid));
+  }
+  g_list_free(images);
+
+  if(!to_remove) return;
+
+  dt_ai_embedding_remove(to_remove);
+  g_list_free(to_remove);
+}
+#endif
+
 static void button_clicked(GtkWidget *widget, gpointer user_data)
 {
   const int i = GPOINTER_TO_INT(user_data);
@@ -217,6 +275,24 @@ void gui_update(dt_lib_module_t *self)
 
   gtk_widget_set_sensitive(GTK_WIDGET(d->cache_button), act_on_any);
   gtk_widget_set_sensitive(GTK_WIDGET(d->uncache_button), act_on_any);
+
+#ifdef HAVE_AI
+  // add index always available when something is selected (re-indexes
+  // anything already in the index). remove index only available when at
+  // least one selected image is currently indexed
+  gboolean any_indexed = FALSE;
+  if(act_on_any)
+  {
+    // gui_update runs on every mouse-over and selection change, so this
+    // must be one query regardless of how large the selection is
+    GList *sel = dt_act_on_get_images(FALSE, FALSE, FALSE);
+    any_indexed = dt_ai_embedding_has_any(sel);
+    g_list_free(sel);
+  }
+  gtk_widget_set_sensitive(GTK_WIDGET(d->add_index_button), act_on_any);
+  gtk_widget_set_sensitive(GTK_WIDGET(d->remove_index_button),
+                           act_on_any && any_indexed);
+#endif
 
   gtk_widget_set_sensitive(GTK_WIDGET(d->group_button), selected_cnt > 1);
 
@@ -597,6 +673,19 @@ void gui_init(dt_lib_module_t *self)
                                            _("remove selected images from the group"),
                                            GDK_KEY_g, GDK_CONTROL_MASK | GDK_SHIFT_MASK);
   gtk_grid_attach(grid, d->ungroup_button, 2, line++, 2, 1);
+
+#ifdef HAVE_AI
+  // last built-in row: lua's register_selection appends below it
+  d->add_index_button = dt_action_button_new
+    (self, N_("add to index"), _add_index_button_clicked, NULL,
+     _("compute AI embeddings for selected images"), 0, 0);
+  gtk_grid_attach(grid, d->add_index_button, 0, line, 2, 1);
+
+  d->remove_index_button = dt_action_button_new
+    (self, N_("remove from index"), _remove_index_button_clicked, NULL,
+     _("remove AI embeddings of selected images from the index"), 0, 0);
+  gtk_grid_attach(grid, d->remove_index_button, 2, line++, 2, 1);
+#endif
 
   // metadata operations
   grid = GTK_GRID(gtk_grid_new());

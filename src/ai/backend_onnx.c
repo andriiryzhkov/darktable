@@ -2902,6 +2902,13 @@ int dt_ai_run(
         || (outputs[i].type == DT_AI_FLOAT && ctx->output_types[i] == DT_AI_FLOAT16);
       if(!ort_allocated || !output_tensors[i]) continue;
 
+      // the shape array is overwritten with ORT's real dimensions below,
+      // so the capacity the caller actually reserved has to be read now.
+      // afterwards it describes ORT's tensor, not the caller's buffer
+      const gboolean caller_allocated = outputs[i].data != NULL;
+      const int64_t caller_capacity
+        = _safe_element_count(outputs[i].shape, outputs[i].ndim);
+
       void *raw_data = NULL;
       status = g_ort.api->GetTensorMutableData(output_tensors[i], &raw_data);
       if(status)
@@ -2954,9 +2961,7 @@ int dt_ai_run(
         break;
       }
 
-      const int64_t caller_count
-        = _safe_element_count(outputs[i].shape, outputs[i].ndim);
-      if(caller_count < 0)
+      if(caller_allocated && caller_capacity < 0)
       {
         dt_print(DT_DEBUG_AI,
                  "[darktable_ai] invalid shape for output[%d] post-copy", i);
@@ -2964,17 +2969,20 @@ int dt_ai_run(
         break;
       }
 
-      // use the smaller of ORT's actual size and caller's expected size
-      const int64_t element_count = ((int64_t)ort_element_count < caller_count)
-        ? (int64_t)ort_element_count
-        : caller_count;
+      // a caller-provided buffer holds exactly what its original shape
+      // asked for, so that is the hard bound on the copy below. a buffer
+      // allocated here is sized to ORT's count and takes all of it
+      const int64_t element_count
+        = (caller_allocated && caller_capacity < (int64_t)ort_element_count)
+        ? caller_capacity
+        : (int64_t)ort_element_count;
 
-      if(element_count != caller_count)
+      if(caller_allocated && (int64_t)ort_element_count != caller_capacity)
       {
         dt_print(DT_DEBUG_AI,
                  "[darktable_ai] output[%d] shape mismatch: ONNX Runtime has %zu elements, "
-                 "caller expects %" PRId64,
-                 i, ort_element_count, caller_count);
+                 "caller reserved %" PRId64 " - copying %" PRId64,
+                 i, ort_element_count, caller_capacity, element_count);
       }
 
       // allocate caller buffer if NULL (dynamic output, caller
