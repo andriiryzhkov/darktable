@@ -489,6 +489,7 @@ dt_your_task_free(ctx);
 | Raw Denoise (Linear) | `"rawdenoise"` | `src/common/ai/restore_raw_linear.h` | `src/libs/neural_restore.c` |
 | Denoise | `"denoise"` | `src/common/ai/restore_rgb.h` | `src/libs/neural_restore.c` |
 | Upscale | `"upscale"` | `src/common/ai/restore_rgb.h` | `src/libs/neural_restore.c` |
+| Embedding | `"embedding"` | `src/common/ai/embedding.h` | `src/libs/image.c`, see [Embeddings.md](Embeddings.md) |
 
 For model requirements, I/O specifications, tiling strategies, color
 space conventions, ONNX export instructions, and config.json examples

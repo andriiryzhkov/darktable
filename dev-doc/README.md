@@ -29,6 +29,7 @@ This guide covers building Image Operation (IOP) modules for darktable's darkroo
 |------|-------------|
 | **[AI.md](AI.md)** | AI subsystem architecture, backend API, and how to add new AI features |
 | **[AI_Tasks.md](AI_Tasks.md)** | Reference for each AI task: mask, denoise, upscale |
+| **[Embeddings.md](Embeddings.md)** | Image embedding index: sqlite-vec database, indexing pipeline, tag centroids and auto-tagging |
 
 ### Guides
 | File | Description |
