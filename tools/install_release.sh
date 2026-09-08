@@ -9,7 +9,7 @@
 # Or run it straight from GitHub without downloading it first. The "-s --" is
 # what carries the options past bash to the script:
 #
-#   curl -fsSL https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh | bash -s -- --with-ai
+#   curl -fsSL https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh | bash -s -- --enable-ai
 #
 # It still asks before installing packages or replacing an install, because it
 # prompts on /dev/tty rather than stdin, which is the script itself when piped.
@@ -20,10 +20,16 @@
 # work, and everything after -- goes on to cmake. build.sh's --install and
 # --sudo are refused: this script decides when to install and when to use root.
 #
+# That is how you choose features: build.sh takes --enable-X and --disable-X for
+# ai, camera, colord, gmic, graphicsmagick, imagemagick, jxl, kwallet, libsecret,
+# lua, map, mcp, opencl, opencv, openexr, openmp, unity and webp, and "build.sh
+# --help" lists them. Left alone, cmake enables whatever it autodetects, so a
+# missing dependency quietly drops the feature; asking for it explicitly makes
+# cmake stop instead. --enable-ai is worth passing for that reason.
+#
 #   --user           install under $HOME, needing no root at all
 #   --keep-source    keep the source tree, so building another release later
 #                    only recompiles what changed
-#   --with-ai        build with AI support
 #   --skip-deps      do not touch the package manager
 #   --skip-lensfun   do not update the lensfun lens database
 #   --desktop-only   only refresh the menu entry and icons, build nothing
@@ -125,7 +131,7 @@ CACHE=""    # set in main, once HOME is canonical
 SCRATCH=""
 PREFIX="" LINKDIR="" DATADIR=""
 USER_MODE=0
-WITH_AI=0 SKIP_DEPS=0 SKIP_LENSFUN=0 ASSUME_YES=0 KEEP_SRC=0
+SKIP_DEPS=0 SKIP_LENSFUN=0 ASSUME_YES=0 KEEP_SRC=0
 ACTION=install
 EXPLICIT_TARGET=0
 TAG="" PASSTHROUGH=()
@@ -709,7 +715,6 @@ main() {
       --desktop-only) ACTION=desktop ;;
       --user)         USER_MODE=1; EXPLICIT_TARGET=1 ;;
       --keep-source)  KEEP_SRC=1 ;;
-      --with-ai)      WITH_AI=1 ;;
       --skip-deps)    SKIP_DEPS=1 ;;
       --skip-lensfun) SKIP_LENSFUN=1 ;;
       --yes|-y)       ASSUME_YES=1 ;;
@@ -848,15 +853,10 @@ main() {
   git -C "$SRC" submodule update --init --recursive -- "${subs[@]}"
 
   cd "$SRC"
-  local ai=()
-  # left to autodetection darktable would build without AI if ONNX Runtime is
-  # missing; asked for explicitly, cmake stops instead of quietly omitting it
-  [ "$WITH_AI" = 1 ] && ai=(--enable-ai)
-
   # compile before touching the prefix, so a failed build leaves whatever is
   # already installed there working
   note "compiling"
-  ./build.sh "${ai[@]}" --prefix "$PREFIX" "${PASSTHROUGH[@]}"
+  ./build.sh --prefix "$PREFIX" "${PASSTHROUGH[@]}"
 
   clean_prefix
 
@@ -871,7 +871,7 @@ main() {
   # that is no longer there
   local recover="--uninstall --prefix $PREFIX"
   [ "$USER_MODE" = 0 ] || recover="$recover --user"
-  ./build.sh "${ai[@]}" --prefix "$PREFIX" --install "${elevate[@]}" "${PASSTHROUGH[@]}" ||
+  ./build.sh --prefix "$PREFIX" --install "${elevate[@]}" "${PASSTHROUGH[@]}" ||
     die "the install failed; run '$0 $recover' to clear what the previous one left behind"
 
   [ -x "$PREFIX/bin/darktable" ] ||
