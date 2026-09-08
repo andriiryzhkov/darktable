@@ -6,6 +6,15 @@
 #   ./install_release.sh release-5.6.0    # a specific tag
 #   ./install_release.sh --list           # what releases are available
 #
+# Or run it straight from GitHub without downloading it first. The "-s --" is
+# what carries the options past bash to the script:
+#
+#   curl -fsSL https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh | bash -s -- --with-ai
+#
+# It still asks before installing packages or replacing an install, because it
+# prompts on /dev/tty rather than stdin, which is the script itself when piped.
+# Add --yes for an unattended run.
+#
 # Options may follow the tag, or precede it. Any option below is this script's;
 # every other flag is passed on to build.sh, so --disable-opencl and friends
 # work, and everything after -- goes on to cmake. build.sh's --install and
