@@ -5,6 +5,7 @@
 #   ./install_release.sh                  # latest release into /opt/darktable
 #   ./install_release.sh release-5.6.0    # a specific tag
 #   ./install_release.sh --list           # what releases are available
+#   ./install_release.sh --help           # every option
 #
 # Or run it straight from GitHub without downloading it first. The "-s --" is
 # what carries the options past bash to the script:
@@ -15,42 +16,18 @@
 # prompts on /dev/tty rather than stdin, which is the script itself when piped.
 # Add --yes for an unattended run.
 #
-# Options may follow the tag, or precede it. Any option below is this script's;
-# every other flag is passed on to build.sh, so --disable-opencl and friends
-# work, and everything after -- goes on to cmake. build.sh's --install and
-# --sudo are refused: this script decides when to install and when to use root.
+# BUILD OPTIONS
 #
-# That is how you choose features: build.sh takes --enable-X and --disable-X for
-# ai, camera, colord, gmic, graphicsmagick, imagemagick, jxl, kwallet, libsecret,
-# lua, map, mcp, opencl, opencv, openexr, openmp, unity and webp, and "build.sh
-# --help" lists them. Left alone, cmake enables whatever it autodetects, so a
-# missing dependency quietly drops the feature; asking for it explicitly makes
-# cmake stop instead. --enable-ai is worth passing for that reason.
+# Anything this script does not recognize is handed to build.sh, and everything
+# after -- goes on to cmake, so --enable-ai, --disable-opencl, -j and the rest
+# work; "build.sh --help" lists them. build.sh's own --install and --sudo are
+# refused: this script decides when to install and when to use root.
 #
-#   --user           install under $HOME, needing no root at all
-#   --keep-source    keep the source tree, so building another release later
-#                    only recompiles what changed
-#   --skip-deps      do not touch the package manager
-#   --skip-lensfun   do not update the lensfun lens database
-#   --desktop-only   only refresh the menu entry and icons, build nothing
-#   --clean          remove source trees left behind by failed builds
-#   --uninstall      remove an install made by this script
-#   --list           print the recent releases and stop
-#   --help           print this comment and stop
-#   --prefix DIR     install somewhere other than /opt/darktable. DIR has to be
-#                    an absolute path, a directory of its own, and one that is
-#                    empty or already holds a darktable: a top-level directory,
-#                    anything under /usr except /usr/local, your home and your
-#                    ~/.local are refused, when installing as well as when
-#                    uninstalling
-#   --yes            do not ask before installing packages or replacing an
-#                    install
+# Left alone, cmake enables whatever it autodetects, so a missing dependency
+# quietly drops the feature. Asking for one explicitly makes cmake stop instead,
+# which is why --enable-ai is worth passing if you want AI.
 #
-# DT_SRC names a source tree to keep and reuse, DT_LINKDIR where the symlinks
-# go (default /usr/local/bin, or ~/.local/bin under --user).
-#
-# git, curl, cmake and realpath have to be there already; everything else the
-# build needs is installed for you unless --skip-deps.
+# WHY BUILD FROM SOURCE
 #
 # Most people do not need this: an AppImage, a flatpak or your distribution's
 # package gives you a working darktable with no toolchain. Build from source
@@ -81,6 +58,9 @@
 #
 # DEPENDENCIES
 #
+# git, curl, cmake and realpath have to be there already. Everything the build
+# itself needs is installed for you, unless --skip-deps.
+#
 # The Debian and Ubuntu list is the one darktable's own CI installs, from
 # .github/workflows/ci.yml, plus liblensfun-bin for the lens database update.
 # The Fedora and Arch lists are a best-effort mapping and are NOT covered by CI:
@@ -95,19 +75,19 @@
 # ~/.local/darktable, unless --user or --prefix names one. It also works when
 # the prefix is already gone, clearing the symlinks a failed install left
 # pointing at nothing - that case has no prefix to find, so it needs --prefix,
-# and a failed run prints the exact command. Note that --prefix
-# on its own only moves the prefix: the symlinks and the desktop entry still go
-# to the system-wide locations unless --user comes with it.
+# and a failed run prints the exact command. Note that --prefix on its own only
+# moves the prefix: the symlinks and the desktop entry still go to the
+# system-wide locations unless --user comes with it.
 #
-# A prefix that is neither empty nor a darktable is refused rather than removed,
-# as is any of the directories --prefix above will not accept. That stops the
-# accidents worth stopping, not a determined one: an empty directory meeting
-# those rules is still removed, so --prefix is not a safe thing to point at
-# something you want kept. Only symlinks that resolve into the prefix are
-# removed, and a file or symlink moved aside as .bak at install time is put
-# back, unless something has since put a real file back in its place - a
-# distribution package upgrade does that, and the newer file wins. Your
-# settings and library in ~/.config/darktable are never touched.
+# It refuses a prefix that is neither empty nor a darktable, and any directory
+# --prefix itself rejects. An empty one that passes those rules is still
+# removed, so --prefix is not a safe place to point at something you want kept.
+#
+# Only symlinks that resolve into the prefix are removed. A file or symlink
+# moved aside as .bak at install time is put back, unless something has since
+# put a real file there - a distribution package upgrade does - in which case
+# the newer file wins. Your settings and library in ~/.config/darktable are
+# never touched.
 
 set -euo pipefail
 
@@ -122,9 +102,6 @@ esac
 
 REPO="https://github.com/darktable-org/darktable.git"
 API="https://api.github.com/repos/darktable-org/darktable/releases"
-# where --help re-reads itself from when there is no file to read: piped from
-# curl the script is stdin, and stdin is already spent by the time it runs
-RAW="https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh"
 # DT_SRC names a tree to keep and reuse. with neither it nor --keep-source the
 # source is fetched into a scratch directory and removed once installed.
 # under $HOME rather than /tmp: a clone and build want ~800M, and /tmp is
@@ -686,32 +663,51 @@ clean_prefix() {
   sudo_ rm -rf -- "$PREFIX"
 }
 
-# the header comment is the long help, but piped from curl $0 is "bash" and
-# there is no file to read it out of, so fall back to a synopsis
+# a here-doc rather than the header comment: piped from curl $0 is "bash" and
+# stdin is spent, so there is nothing to read the options back out of
 usage() {
-  # piped from curl $0 is "bash", with no file to read the header out of
-  if [ -r "$0" ]; then
-    # the range stops at the first line that is not a comment rather than at a
-    # hardcoded number, which inserting a header line would silently truncate
-    sed -n '2,${/^#/!q; s/^# \?//; p;}' -- "$0"
-    return 0
-  fi
-  # fetch the same file the pipe came from rather than keeping a second copy
-  # of the options here, which would drift out of step with the header
-  local src
-  if src="$(curl -fsSL "$RAW" 2>/dev/null)" && [ -n "$src" ]; then
-    printf '%s\n' "$src" | sed -n '2,${/^#/!q; s/^# \?//; p;}'
-    return 0
-  fi
-  # capitalized to match the header comment this stands in for
   cat <<EOF
-Build and install an official darktable release on Linux.
+install_release.sh [tag] [options] [-- [additional cmake configuration options...]]
 
-Usage: install_release.sh [tag] [options]      (default: the latest release)
+Build and install an official darktable release. With no tag, the latest one.
 
-Piped from curl, and $RAW
-could not be reached to read the options out of. Save the script and run
-"./install_release.sh --help".
+Options:
+Installation:
+   --prefix         <string>  Install directory prefix, absolute, and either
+                              empty or already a darktable
+                              (default: /opt/darktable)
+   --user                     Install under \$HOME, needing no root
+                              (prefix: ~/.local/darktable)
+   --yes                      Do not ask before installing packages or
+                              replacing an install
+
+Build:
+   --skip-deps                Do not touch the package manager
+   --skip-lensfun             Do not update the lensfun lens database
+   --keep-source              Keep the source tree and reuse it next time
+                              (default: ~/src/darktable-release)
+
+Actual actions:
+   --list                     Print the recent releases and exit
+   --desktop-only             Only refresh the menu entry and icons
+   --uninstall                Remove an install made by this script
+   --clean                    Remove source trees left by failed builds
+
+Additional build.sh and cmake options:
+Anything not listed above is passed to build.sh, so --enable-ai,
+--disable-opencl and -j work; "build.sh --help" lists them. build.sh's
+--install and --sudo are refused.
+
+Environment:
+   DT_SRC                     Source tree to keep and reuse
+   DT_LINKDIR                 Where the symlinks go
+                              (default: /usr/local/bin, ~/.local/bin with --user)
+
+Extra:
+-h --help                     Print help message
+
+The comment at the top of this script has the rest: build options, why build
+from source, where it installs, the source tree, dependencies, and removing it.
 EOF
 }
 
