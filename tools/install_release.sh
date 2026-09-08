@@ -122,6 +122,9 @@ esac
 
 REPO="https://github.com/darktable-org/darktable.git"
 API="https://api.github.com/repos/darktable-org/darktable/releases"
+# where --help re-reads itself from when there is no file to read: piped from
+# curl the script is stdin, and stdin is already spent by the time it runs
+RAW="https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh"
 # DT_SRC names a tree to keep and reuse. with neither it nor --keep-source the
 # source is fetched into a scratch directory and removed once installed.
 # under $HOME rather than /tmp: a clone and build want ~800M, and /tmp is
@@ -693,15 +696,22 @@ usage() {
     sed -n '2,${/^#/!q; s/^# \?//; p;}' -- "$0"
     return 0
   fi
+  # fetch the same file the pipe came from rather than keeping a second copy
+  # of the options here, which would drift out of step with the header
+  local src
+  if src="$(curl -fsSL "$RAW" 2>/dev/null)" && [ -n "$src" ]; then
+    printf '%s\n' "$src" | sed -n '2,${/^#/!q; s/^# \?//; p;}'
+    return 0
+  fi
   # capitalized to match the header comment this stands in for
-  cat <<'EOF'
+  cat <<EOF
 Build and install an official darktable release on Linux.
 
 Usage: install_release.sh [tag] [options]      (default: the latest release)
 
-Piped from curl there is no file to read the help out of. Save the script and
-run "./install_release.sh --help", or read the comment at the top of
-https://github.com/darktable-org/darktable/blob/master/tools/install_release.sh
+Piped from curl, and $RAW
+could not be reached to read the options out of. Save the script and run
+"./install_release.sh --help".
 EOF
 }
 
