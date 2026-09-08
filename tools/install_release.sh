@@ -826,7 +826,17 @@ main() {
     die "no such tag: $TAG (try --list)"
   git -C "$SRC" checkout --quiet --detach "$TAG"
   note "submodules"
-  git -C "$SRC" submodule update --init --recursive
+  # src/tests/integration is the reference images for the integration test
+  # suite: 1.2G, dwarfing darktable itself, and nothing the build reads. take
+  # every other submodule by name rather than excluding it after the fact, so
+  # one the build gains later is still picked up
+  local subs=() sub
+  while IFS= read -r sub; do
+    [ "$sub" = src/tests/integration ] || subs+=("$sub")
+  done < <(git -C "$SRC" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
+             cut -d' ' -f2-)
+  [ "${#subs[@]}" -gt 0 ] || die "no submodules listed in .gitmodules"
+  git -C "$SRC" submodule update --init --recursive -- "${subs[@]}"
 
   cd "$SRC"
   local ai=()
