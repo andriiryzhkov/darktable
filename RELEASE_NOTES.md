@@ -192,6 +192,10 @@ changes (where available).
 
 ## Bug Fixes
 
+- Fixed a crash on the first AI model compile on AMD GPUs the installed
+  ROCm has no kernels for, such as the Cezanne and Renoir integrated
+  graphics. The GPU is skipped with a message and AI runs on the CPU.
+
 - Fixed a trashing error dialog when deleting a virgin duplicate of an
   image while sidecar creation is set to "after edit".
 

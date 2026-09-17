@@ -102,6 +102,7 @@ static struct {
 };
 
 static int _device_id_from_conf(const char *conf_key, const char *env_var);
+static gchar *_run_capture(const char *cmd);
 static gchar *_lookup_device_name(const dt_ai_provider_t provider,
                                   const int device_id);
 static gchar *_backend_cache_fingerprint(dt_ai_provider_t provider,
@@ -215,6 +216,133 @@ static gboolean _check_rocm_runtime(void)
     }
   }
   g_module_close(mod);
+  return cached == 1;
+}
+
+// GPU agents as rocminfo lists them, in the order MIGraphX numbers them.
+// each agent block carries "Name: gfxNNNN", "Marketing Name: ..." and
+// "Device Type: GPU"; "Vendor Name:" also contains "Name:", hence the
+// anchoring on the start of the stripped line
+typedef struct _rocm_gpu_t
+{
+  gchar *marketing;
+  gchar *gfx;
+} _rocm_gpu_t;
+
+// parsed once and kept for the process: rocminfo is a spawn and its
+// answer does not change
+G_LOCK_DEFINE_STATIC(rocm_gpus);
+static GList *_rocminfo_gpus(void)
+{
+  static GList *cached = NULL;
+  static gboolean done = FALSE;
+  G_LOCK(rocm_gpus);
+  if(!done)
+  {
+    done = TRUE;
+    gchar *out = _run_capture("rocminfo");
+    gchar **lines = out ? g_strsplit(out, "\n", -1) : NULL;
+    gchar *marketing = NULL, *gfx = NULL;
+    for(gchar **lp = lines; lp && *lp; lp++)
+    {
+      const gchar *t = g_strstrip(*lp);
+      if(g_str_has_prefix(t, "Marketing Name:"))
+      {
+        g_free(marketing);
+        marketing = g_strdup(g_strstrip((gchar *)t + strlen("Marketing Name:")));
+      }
+      else if(g_str_has_prefix(t, "Name:"))
+      {
+        g_free(gfx);
+        const gchar *v = g_strstrip((gchar *)t + strlen("Name:"));
+        gfx = g_str_has_prefix(v, "gfx") ? g_strdup(v) : NULL;
+      }
+      else if(g_str_has_prefix(t, "Device Type:") && strstr(t, "GPU") && marketing)
+      {
+        _rocm_gpu_t *g = g_new0(_rocm_gpu_t, 1);
+        g->marketing = marketing;
+        g->gfx = gfx;
+        marketing = gfx = NULL;
+        cached = g_list_append(cached, g);
+      }
+    }
+    g_free(marketing);
+    g_free(gfx);
+    g_strfreev(lines);
+    g_free(out);
+  }
+  G_UNLOCK(rocm_gpus);
+  return cached;
+}
+
+// rocBLAS keeps one TensileLibrary*_<gfx>.dat per supported architecture
+// beside itself and abort()s when the GPU's is missing. the directories
+// are tried in the loader's order: a rocBLAS bundled with the ONNX
+// Runtime wheel, then the ROCm install, then distro locations.
+// -1 when no library directory is found, 0 or 1 otherwise
+static int _rocblas_has_gfx(const char *gfx)
+{
+  GPtrArray *dirs = g_ptr_array_new_with_free_func(g_free);
+  if(g_conf_snapshot.ort_path && *g_conf_snapshot.ort_path)
+  {
+    gchar *ort_dir = g_path_get_dirname(g_conf_snapshot.ort_path);
+    g_ptr_array_add(dirs, g_build_filename(ort_dir, "rocblas", "library", NULL));
+    g_ptr_array_add(dirs, g_build_filename(ort_dir, "onnxruntime.libs", "rocblas", "library", NULL));
+    g_free(ort_dir);
+  }
+  const char *root = g_getenv("ROCM_PATH");
+  g_ptr_array_add(dirs, g_build_filename(root && *root ? root : "/opt/rocm", "lib", "rocblas", "library", NULL));
+  g_ptr_array_add(dirs, g_strdup("/usr/lib/x86_64-linux-gnu/rocblas/library"));
+  g_ptr_array_add(dirs, g_strdup("/usr/lib64/rocblas/library"));
+  g_ptr_array_add(dirs, g_strdup("/usr/lib/rocblas/library"));
+
+  int found = -1;
+  gchar *suffix = g_strdup_printf("_%s.dat", gfx);
+  for(guint i = 0; i < dirs->len && found < 0; i++)
+  {
+    GDir *d = g_dir_open(g_ptr_array_index(dirs, i), 0, NULL);
+    if(!d) continue;
+    found = 0;
+    const char *name;
+    while(!found && (name = g_dir_read_name(d)))
+      found = g_str_has_prefix(name, "TensileLibrary") && g_str_has_suffix(name, suffix);
+    g_dir_close(d);
+  }
+  g_free(suffix);
+  g_ptr_array_unref(dirs);
+  return found;
+}
+
+// refuse MIGraphX for a GPU whose architecture the installed rocBLAS has
+// no kernels for: it abort()s the process at the first model compile,
+// which the device count check above cannot predict. checked once per
+// device
+static gboolean _check_rocm_arch(const int device_id)
+{
+  static int cached_dev = -1, cached = 1;
+  if(cached_dev == device_id) return cached == 1;
+  cached_dev = device_id;
+  cached = 1;
+
+  // the override makes the runtime report another architecture; trust it
+  if(g_getenv("HSA_OVERRIDE_GFX_VERSION")) return TRUE;
+
+  const _rocm_gpu_t *g = g_list_nth_data(_rocminfo_gpus(), device_id);
+  if(!g || !g->gfx) return TRUE;
+
+  const int has = _rocblas_has_gfx(g->gfx);
+  if(has == 0)
+  {
+    dt_print(DT_DEBUG_ALWAYS,
+             "[darktable_ai] ROCm: the installed rocBLAS has no kernels for %s (%s) - "
+             "disabling MIGraphX to prevent crash (HSA_OVERRIDE_GFX_VERSION may help)",
+             g->gfx, g->marketing);
+    dt_control_log(_("AMD GPU %s is not supported by the installed ROCm, AI runs on the CPU"), g->gfx);
+    cached = 0;
+  }
+  else
+    dt_print(DT_DEBUG_AI, "[darktable_ai] ROCm: GPU %d is %s, rocBLAS kernels %s",
+             device_id, g->gfx, has < 0 ? "not checked" : "present");
   return cached == 1;
 }
 #endif  // __linux__
@@ -617,49 +745,23 @@ static GList *_enum_cuda_devices(void)
   return result;
 }
 
-// MIGraphX device enumeration via rocminfo. filter by Device Type=GPU
-// to skip the CPU and Ryzen-AI NPU agents. Marketing Name appears
-// before Device Type within each agent block, so we hold the most
-// recent name and emit it when we hit a GPU agent. id is the ordinal
-// index of GPU agents (0, 1, ...) — matches MIGraphX's device_id
+// MIGraphX device enumeration from rocminfo's GPU agents; id is their
+// ordinal index (0, 1, ...), which matches MIGraphX's device_id
 static GList *_enum_migraphx_devices(void)
 {
 #ifndef __linux__
   return NULL;  // ROCm is Linux-only
 #else
-  gchar *out = _run_capture("rocminfo");
-  if(!out) return NULL;
-
   GList *result = NULL;
-  gchar **lines = g_strsplit(out, "\n", -1);
-  gchar *pending_name = NULL;
   int gpu_index = 0;
-  for(gchar **lp = lines; *lp; lp++)
+  for(const GList *l = _rocminfo_gpus(); l; l = g_list_next(l))
   {
-    gchar *line = *lp;
-    const char *mn = strstr(line, "Marketing Name:");
-    if(mn)
-    {
-      const char *colon = strchr(mn, ':');
-      if(colon)
-      {
-        g_free(pending_name);
-        pending_name = g_strdup(g_strstrip((gchar *)colon + 1));
-      }
-      continue;
-    }
-    if(strstr(line, "Device Type:") && strstr(line, "GPU") && pending_name)
-    {
-      dt_ai_device_t *d = g_new0(dt_ai_device_t, 1);
-      d->id = gpu_index++;
-      d->name = pending_name;
-      pending_name = NULL;
-      result = g_list_append(result, d);
-    }
+    const _rocm_gpu_t *g = l->data;
+    dt_ai_device_t *d = g_new0(dt_ai_device_t, 1);
+    d->id = gpu_index++;
+    d->name = g_strdup(g->marketing);
+    result = g_list_append(result, d);
   }
-  g_free(pending_name);
-  g_strfreev(lines);
-  g_free(out);
   return result;
 #endif
 }
@@ -1753,7 +1855,7 @@ static gboolean _try_provider(OrtSessionOptions *session_opts,
   // same guard for MIGraphX/ROCm: kernel HSA mismatch or missing GPU
   // agent causes ORT to abort() during provider load
   if((strstr(symbol_name, "MIGraphX") || strstr(symbol_name, "ROCM"))
-     && !_check_rocm_runtime())
+     && (!_check_rocm_runtime() || !_check_rocm_arch((int)flags)))
     return FALSE;
 #endif
   GModule *mod = g_module_open(NULL, 0);
