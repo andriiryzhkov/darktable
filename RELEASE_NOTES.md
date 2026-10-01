@@ -190,6 +190,15 @@ changes (where available).
   a folder keep working, and the folder chooser remains available when
   sidecar writing is set to "never".
 
+- AI object masks are now stored as pixels in the image's `.dtdata`
+  sidecar, exactly as selected, instead of being traced into paths.
+  This replaces the PNG export for the external raster masks module,
+  which is removed. Click an object's icon to refine it. "apply as
+  paths" in the mask manager keeps the traced output; it is always on
+  when sidecar writing is "never". An object whose stored mask is
+  missing is left out and reported, and clicking its icon regenerates
+  it.
+
 - Added a new collection filter for the original image dimensions.
 
 - Support for Canon's Highlight Tone Priority.
