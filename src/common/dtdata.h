@@ -48,8 +48,8 @@ typedef enum dt_dtdata_origin_t
   DT_DTDATA_ORIGIN_AUTHORITATIVE = 1,  // a person made it, cannot be recomputed
 } dt_dtdata_origin_t;
 
-/* serialized as-is inside module params and mask blobs: fixed layout,
-   no pointers, no padding */
+/* stored as-is in rasterfile's params and as an object mask's first point:
+   no pointers or padding, and a layout change needs a version bump in both */
 typedef struct dt_dtdata_ref_t
 {
   char entry[DT_DTDATA_ENTRY_LEN];  // "<kind>-<sha1>.png", empty = no reference

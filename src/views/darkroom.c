@@ -2671,6 +2671,14 @@ static void _brush_size_down_callback(dt_action_t *action)
     dt_masks_events_mouse_scrolled(dev->gui_module, 0, 0, 0, 0);
 }
 
+#ifdef HAVE_AI
+static void _cancel_object_edit_callback(dt_action_t *action)
+{
+  (void)action;
+  dt_masks_object_cancel_edit();
+}
+#endif
+
 static void _brush_hardness_up_callback(dt_action_t *action)
 {
   dt_develop_t *dev = dt_action_view(action)->data;
@@ -3807,6 +3815,13 @@ void gui_init(dt_view_t *self)
   dt_action_register(DT_ACTION(self), N_("decrease brush size"),
                      _brush_size_down_callback, 0, 0);
 
+#ifdef HAVE_AI
+  // an action rather than a key handler on the image, so it works wherever
+  // the focus is. text fields and popups still see escape first
+  dt_action_register(DT_ACTION(self), N_("cancel AI object editing"),
+                     _cancel_object_edit_callback, GDK_KEY_Escape, 0);
+#endif
+
   // brush hardness +/-
   dt_action_register(DT_ACTION(self), N_("increase brush hardness"),
                      _brush_hardness_up_callback, GDK_KEY_braceright, 0);
@@ -4461,6 +4476,8 @@ void mouse_moved(dt_view_t *self,
                  const int which)
 {
   dt_develop_t *dev = self->data;
+  // no enter is delivered when the view opens under the pointer
+  dev->darkroom_mouse_in_center_area = TRUE;
 
   // if we are not hovering over a thumbnail in the filmstrip -> show
   // metadata of opened image.

@@ -1157,6 +1157,52 @@ void dt_seg_reset_prev_mask(dt_seg_context_t *ctx)
            (size_t)ctx->prev_mask_dim * ctx->prev_mask_dim * sizeof(float));
 }
 
+void dt_seg_set_prev_mask(dt_seg_context_t *ctx,
+                          const float *mask,
+                          const int width,
+                          const int height)
+{
+  if(!ctx || !ctx->image_encoded || !ctx->prev_mask || !mask
+     || width <= 0 || height <= 0 || ctx->scale <= 0.0f)
+    return;
+
+  const gboolean is_sam = ctx->model_type == DT_SEG_MODEL_SAM;
+  const int pm_dim = ctx->prev_mask_dim;
+  // prev_mask spans the padded model input, with the encoded image in its
+  // top-left corner at ctx->scale model pixels per image pixel
+  const float to_image = (float)ctx->input_size / (float)pm_dim / ctx->scale;
+
+  for(int y = 0; y < pm_dim; y++)
+    for(int x = 0; x < pm_dim; x++)
+    {
+      const float ix = (x + 0.5f) * to_image - 0.5f;
+      const float iy = (y + 0.5f) * to_image - 0.5f;
+      float p = 0.0f;
+      if(ix > -0.5f && iy > -0.5f && ix < width - 0.5f && iy < height - 0.5f)
+      {
+        const float cx = CLAMP(ix, 0.0f, width - 1.0f);
+        const float cy = CLAMP(iy, 0.0f, height - 1.0f);
+        const int x0 = (int)cx, y0 = (int)cy;
+        const int x1 = MIN(x0 + 1, width - 1), y1 = MIN(y0 + 1, height - 1);
+        const float fx = cx - x0, fy = cy - y0;
+        p = (mask[(size_t)y0 * width + x0] * (1.0f - fx) + mask[(size_t)y0 * width + x1] * fx)
+              * (1.0f - fy)
+            + (mask[(size_t)y1 * width + x0] * (1.0f - fx) + mask[(size_t)y1 * width + x1] * fx)
+              * fy;
+      }
+      // SAM feeds back low-res logits, SegNext its probabilities. the clamp
+      // keeps the logits within what the decoder itself produces
+      float v = p;
+      if(is_sam)
+      {
+        const float q = CLAMP(p, 1e-4f, 1.0f - 1e-4f);
+        v = logf(q / (1.0f - q));
+      }
+      ctx->prev_mask[(size_t)y * pm_dim + x] = v;
+    }
+  ctx->has_prev_mask = TRUE;
+}
+
 void dt_seg_reset_encoding(dt_seg_context_t *ctx)
 {
   if(!ctx)

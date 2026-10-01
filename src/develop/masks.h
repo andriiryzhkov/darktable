@@ -19,6 +19,7 @@
 #pragma once
 
 #include "common/darktable.h"
+#include "common/dtdata.h"
 #include "common/opencl.h"
 #include "develop/pixelpipe.h"
 #include "dtgtk/button.h"
@@ -27,7 +28,7 @@
 
 #include <assert.h>
 
-#define DEVELOP_MASKS_VERSION (6)
+#define DEVELOP_MASKS_VERSION (7)
 
 G_BEGIN_DECLS
 
@@ -43,9 +44,9 @@ typedef enum dt_masks_type_t
   DT_MASKS_ELLIPSE = 1 << 5,
   DT_MASKS_BRUSH = 1 << 6,
   DT_MASKS_NON_CLONE = 1 << 7,
-#ifdef HAVE_AI
+  // defined in every build: an object made with AI is stored as pixels and
+  // has to render where AI is not compiled in
   DT_MASKS_OBJECT = 1 << 8,
-#endif
 } dt_masks_type_t;
 
 /**masts states */
@@ -67,9 +68,14 @@ typedef enum dt_masks_state_t
                     | DT_MASKS_STATE_EXCLUSION
 } dt_masks_state_t;
 
+// the mask manager lists properties in this order. a switch comes before
+// the settings it shows, so turning it on does not move it from under the
+// pointer
 typedef enum dt_masks_property_t
 {
   DT_MASKS_PROPERTY_OPACITY,
+  DT_MASKS_PROPERTY_REFINE,
+  DT_MASKS_PROPERTY_VECTORIZE,
   DT_MASKS_PROPERTY_SIZE,
   DT_MASKS_PROPERTY_HARDNESS,
   DT_MASKS_PROPERTY_FEATHER,
@@ -78,7 +84,6 @@ typedef enum dt_masks_property_t
   DT_MASKS_PROPERTY_COMPRESSION,
   DT_MASKS_PROPERTY_CLEANUP,
   DT_MASKS_PROPERTY_SMOOTHING,
-  DT_MASKS_PROPERTY_REFINE,
   DT_MASKS_PROPERTY_LAST
 } dt_masks_property_t;
 
@@ -160,14 +165,23 @@ typedef struct dt_masks_point_ellipse_t
   dt_masks_ellipse_flags_t flags;
 } dt_masks_point_ellipse_t;
 
-#ifdef HAVE_AI
-/** structure used to store 1 point for an object (AI segmentation) form */
+/** structure used to store 1 point for an object (AI segmentation) form.
+    the first point is the stored mask, a reference to its .dtdata entry,
+    and must stay first: the sidecar sweep reads it at the start of the
+    points blob. every following point is one prompt the mask was made
+    from, in click order, kept so the mask can be regenerated */
 typedef struct dt_masks_point_object_t
 {
-  float anchor[2]; // click position (normalized image coords)
-  int label;       // 1 = foreground, 0 = background
+  union
+  {
+    dt_dtdata_ref_t ref;
+    struct
+    {
+      float pos[2]; // input-image normalized
+      float label;  // 1 foreground, 0 background
+    } prompt;
+  };
 } dt_masks_point_object_t;
-#endif
 
 /** structure used to store 1 point for a path form */
 typedef struct dt_masks_point_path_t
@@ -482,10 +496,14 @@ extern const dt_masks_functions_t dt_masks_functions_brush;
 extern const dt_masks_functions_t dt_masks_functions_path;
 extern const dt_masks_functions_t dt_masks_functions_gradient;
 extern const dt_masks_functions_t dt_masks_functions_group;
-#ifdef HAVE_AI
 extern const dt_masks_functions_t dt_masks_functions_object;
+void dt_masks_object_cache_cleanup(void);
+#ifdef HAVE_AI
 /** check if AI object mask model is downloaded and AI is enabled */
 gboolean dt_masks_object_available(void);
+/** leave the edit of a saved AI object without storing anything, so it
+    stays as it was. does nothing unless one is being edited */
+void dt_masks_object_cancel_edit(void);
 #endif
 
 /** init dt_masks_form_gui_t struct with default values */

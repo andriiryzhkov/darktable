@@ -3826,11 +3826,11 @@
     <longdescription>keep the AI segmentation model loaded in memory between mask creation sessions within the same darkroom view. reduces latency when creating multiple masks but uses more memory</longdescription>
   </dtconfig>
   <dtconfig>
-    <name>plugins/darkroom/masks/object/path_preview</name>
+    <name>plugins/darkroom/masks/object/vectorize</name>
     <type>bool</type>
-    <default>TRUE</default>
-    <shortdescription>show AI mask path preview overlay</shortdescription>
-    <longdescription>display the vectorized path (with anchor points) on top of the AI mask while creating it. useful for previewing the final shape before committing</longdescription>
+    <default>false</default>
+    <shortdescription>apply AI object masks as paths</shortdescription>
+    <longdescription>trace the AI object mask into paths when it is applied, with a live preview of the outline while selecting. otherwise the mask is stored as pixels in the image's sidecar</longdescription>
   </dtconfig>
   <dtconfig>
     <name>plugins/darkroom/masks/object/refine_boundary</name>

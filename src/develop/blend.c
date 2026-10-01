@@ -520,6 +520,13 @@ static gboolean _render_drawn_mask_cached(dt_iop_module_t *self,
     return TRUE;
   }
 
+  // a group writes only the members it can render, combining each into what
+  // the buffer already holds, so it has to start at 0.0f: the identity for
+  // union and sum, and what the group clears its own per-shape buffer to
+  // (see _group_get_mask_roi). the cache hit above overwrites the whole
+  // buffer, so this belongs here rather than at the call sites
+  dt_iop_image_fill(mask, 0.0f, owidth, oheight, 1);
+
   const gboolean form_ok = dt_masks_group_render_roi(self, piece, form, roi_out, mask);
   if(form_ok)
   {
@@ -689,6 +696,12 @@ void dt_develop_blend_process(dt_iop_module_t *self,
     {
       form_ok = _render_drawn_mask_cached(self, piece, form, roi_in, roi_out,
                                          DT_DEVICE_CPU, mask);
+
+      // nothing rendered at all, an object mask whose pixels are not in the
+      // sidecar for instance. fill as the "no form" case below does, 1.0f
+      // here because the invert turns that into the 0.0f it uses
+      if(!form_ok)
+        dt_iop_image_fill(mask, 1.0f, owidth, oheight, 1);
 
       if(inverted)
       {
@@ -1194,6 +1207,9 @@ gboolean dt_develop_blend_process_cl(dt_iop_module_t *self,
       // function is what keeps the two paths from producing different masks
       form_ok = _render_drawn_mask_cached(self, piece, form, roi_in, roi_out,
                                          devid, mask);
+
+      if(!form_ok)
+        dt_iop_image_fill(mask, 1.0f, owidth, oheight, 1);
 
       if(inverted)
       {

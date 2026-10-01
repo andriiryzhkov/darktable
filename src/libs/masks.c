@@ -208,7 +208,9 @@ typedef enum dt_masks_tree_cols_t
   TREE_COUNT
 } dt_masks_tree_cols_t;
 
-// boolean = TRUE renders as a checkbox; min/max/relative are unused
+// boolean = TRUE renders as a checkbox and relative is unused. min/max stay
+// 0 and 1 unless a form's value is fixed: it then collapses the range it is
+// handed in modify_property (max <= min), which greys the checkbox out
 const struct
 {
   gchar *name;
@@ -216,8 +218,15 @@ const struct
   float min, max;
   gboolean relative;
   gboolean boolean;
+  gchar *tooltip;
 } _masks_properties[DT_MASKS_PROPERTY_LAST]
   = { [ DT_MASKS_PROPERTY_OPACITY] = {N_("opacity"), "%", 0, 1, FALSE, FALSE },
+      [ DT_MASKS_PROPERTY_REFINE] = { N_("refine mask boundary"), "", 0, 1, FALSE, TRUE },
+      [ DT_MASKS_PROPERTY_VECTORIZE] = { N_("apply as paths"), "", 0, 1, FALSE, TRUE,
+                                         N_("trace the object into paths that can be edited"
+                                            " node by node, instead of storing it as pixels"
+                                            " in the image's sidecar.\nalways on when sidecar"
+                                            " writing is set to \"never\"") },
       [ DT_MASKS_PROPERTY_SIZE] = { N_("size"), "%", 0.0001, 1, TRUE, FALSE },
       [ DT_MASKS_PROPERTY_HARDNESS] = { N_("hardness"), "%", 0.0001, 1, TRUE, FALSE },
       [ DT_MASKS_PROPERTY_FEATHER] = { N_("feather"), "%", 0.0001, 1, TRUE, FALSE },
@@ -226,7 +235,6 @@ const struct
       [ DT_MASKS_PROPERTY_COMPRESSION] = { N_("compression"), "%", 0.0001, 1, TRUE, FALSE },
       [ DT_MASKS_PROPERTY_CLEANUP] = { N_("cleanup"), "", 0, 100, FALSE, FALSE },
       [ DT_MASKS_PROPERTY_SMOOTHING] = { N_("smoothing"), "", 0, 1.3, FALSE, FALSE },
-      [ DT_MASKS_PROPERTY_REFINE] = { N_("refine mask boundary"), "", 0, 1, FALSE, TRUE },
 };
 
 gboolean _timeout_show_all_feathers(gpointer userdata)
@@ -351,6 +359,8 @@ static void _property_changed(GtkWidget *widget, dt_masks_property_t prop)
 
     if(is_bool)
     {
+      // every time, so the checkbox comes back once the value is free again
+      gtk_widget_set_sensitive(widget, max > min);
       gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget),
                                    (sum / count) > 0.5f);
       d->last_value[prop] =
@@ -2435,6 +2445,8 @@ void gui_init(dt_lib_module_t *self)
       g_signal_connect(G_OBJECT(w), "value-changed",
                        G_CALLBACK(_property_changed), GINT_TO_POINTER(i));
     }
+    if(_masks_properties[i].tooltip)
+      gtk_widget_set_tooltip_text(w, _(_masks_properties[i].tooltip));
     d->property[i] = w;
     dt_gui_box_add(d->cs.container, w);
   }

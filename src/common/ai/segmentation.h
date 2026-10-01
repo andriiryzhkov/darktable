@@ -134,6 +134,22 @@ void dt_seg_reset_encoding(dt_seg_context_t *ctx);
  */
 void dt_seg_reset_prev_mask(dt_seg_context_t *ctx);
 
+/**
+ * @brief Seed the iterative refinement with an existing mask, as if it
+ *        were the result of the previous dt_seg_compute_mask() call, so
+ *        the next click refines that mask rather than starting over.
+ *        Must call dt_seg_encode_image() first.
+ * @param ctx Segmentation context (NULL-safe).
+ * @param mask Probabilities in [0,1] over the encoded image, laid out as
+ *        dt_seg_compute_mask() returns them.
+ * @param width Mask width, the encoded image width.
+ * @param height Mask height, the encoded image height.
+ */
+void dt_seg_set_prev_mask(dt_seg_context_t *ctx,
+                          const float *mask,
+                          const int width,
+                          const int height);
+
 /* --- disk cache for encoder embeddings --- */
 
 /**

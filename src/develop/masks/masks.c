@@ -842,6 +842,26 @@ static int _masks_legacy_params_v5_to_v6(dt_develop_t *dev, void *params)
   return 0;
 }
 
+static int _masks_legacy_params_v6_to_v7(dt_develop_t *dev, void *params)
+{
+  /*
+   * difference affecting object
+   * up to v6: a point was one prompt, and the form was never written: an
+   *           object committed to paths instead
+   * after v7: the first point is a reference to the stored mask pixels
+   *
+   * so there is nothing to convert. the version only tells a build that
+   * cannot read the new point apart from one that can, which is what
+   * dtdata.h asks of a layout change
+   */
+
+  dt_masks_form_t *m = (dt_masks_form_t *)params;
+
+  m->version = 7;
+
+  return 0;
+}
+
 
 int dt_masks_legacy_params(dt_develop_t *dev,
                            void *params,
@@ -856,35 +876,44 @@ int dt_masks_legacy_params(dt_develop_t *dev,
   }
 #endif
 
-  if(old_version == 1 && new_version == 6)
+  if(old_version == 1 && new_version == 7)
   {
     res = _masks_legacy_params_v1_to_v2(dev, params);
     if(!res) res = _masks_legacy_params_v2_to_v3(dev, params);
     if(!res) res = _masks_legacy_params_v3_to_v4(dev, params);
     if(!res) res = _masks_legacy_params_v4_to_v5(dev, params);
     if(!res) res = _masks_legacy_params_v5_to_v6(dev, params);
+    if(!res) res = _masks_legacy_params_v6_to_v7(dev, params);
   }
-  else if(old_version == 2 && new_version == 6)
+  else if(old_version == 2 && new_version == 7)
   {
     res = _masks_legacy_params_v2_to_v3(dev, params);
     if(!res) res = _masks_legacy_params_v3_to_v4(dev, params);
     if(!res) res = _masks_legacy_params_v4_to_v5(dev, params);
     if(!res) res = _masks_legacy_params_v5_to_v6(dev, params);
+    if(!res) res = _masks_legacy_params_v6_to_v7(dev, params);
   }
-  else if(old_version == 3 && new_version == 6)
+  else if(old_version == 3 && new_version == 7)
   {
     res = _masks_legacy_params_v3_to_v4(dev, params);
     if(!res) res = _masks_legacy_params_v4_to_v5(dev, params);
     if(!res) res = _masks_legacy_params_v5_to_v6(dev, params);
+    if(!res) res = _masks_legacy_params_v6_to_v7(dev, params);
   }
-  else if(old_version == 4 && new_version == 6)
+  else if(old_version == 4 && new_version == 7)
   {
     res = _masks_legacy_params_v4_to_v5(dev, params);
     if(!res) res = _masks_legacy_params_v5_to_v6(dev, params);
+    if(!res) res = _masks_legacy_params_v6_to_v7(dev, params);
   }
-  else if(old_version == 5 && new_version == 6)
+  else if(old_version == 5 && new_version == 7)
   {
     res = _masks_legacy_params_v5_to_v6(dev, params);
+    if(!res) res = _masks_legacy_params_v6_to_v7(dev, params);
+  }
+  else if(old_version == 6 && new_version == 7)
+  {
+    res = _masks_legacy_params_v6_to_v7(dev, params);
   }
 
   return res;
@@ -913,10 +942,8 @@ dt_masks_form_t *dt_masks_create(const dt_masks_type_t type)
     form->functions = &dt_masks_functions_gradient;
   else if(type & DT_MASKS_GROUP)
     form->functions = &dt_masks_functions_group;
-#ifdef HAVE_AI
   else if(type & DT_MASKS_OBJECT)
     form->functions = &dt_masks_functions_object;
-#endif
 
   if(form->functions && form->functions->sanitize_config)
     form->functions->sanitize_config(type);
@@ -968,6 +995,54 @@ dt_masks_form_t *dt_masks_get_from_id(const dt_develop_t *dev, const dt_mask_id_
 static inline gboolean _sane_val(const float val)
 {
   return !dt_isnan(val) && val >= 0.0f;
+}
+
+/* the point structs as they were before the mask versions that added a
+   field to them, so a history written then can be read at its own size.
+   only these two ever changed size: see _masks_legacy_params_v3_to_v4
+   (ellipse flags), _masks_legacy_params_v4_to_v5 (gradient curvature) and
+   _masks_legacy_params_v5_to_v6 (gradient state) */
+typedef struct _masks_point_ellipse_v3_t
+{
+  float center[2];
+  float radius[2];
+  float rotation;
+  float border;
+} _masks_point_ellipse_v3_t;
+
+typedef struct _masks_point_gradient_v4_t
+{
+  float anchor[2];
+  float rotation;
+  float compression;
+  float steepness;
+} _masks_point_gradient_v4_t;
+
+typedef struct _masks_point_gradient_v5_t
+{
+  float anchor[2];
+  float rotation;
+  float compression;
+  float steepness;
+  float curvature;
+} _masks_point_gradient_v5_t;
+
+/* how many bytes one of this form's points occupies in its blob, which is
+   the current struct size for every type and version but the two above */
+static size_t _point_size_at_version(const dt_masks_form_t *form)
+{
+  const size_t current = form->functions->point_struct_size;
+
+  if(form->type & DT_MASKS_ELLIPSE)
+    return form->version < 4 ? sizeof(_masks_point_ellipse_v3_t) : current;
+
+  if(form->type & DT_MASKS_GRADIENT)
+  {
+    if(form->version < 5) return sizeof(_masks_point_gradient_v4_t);
+    if(form->version == 5) return sizeof(_masks_point_gradient_v5_t);
+  }
+
+  return current;
 }
 
 void dt_masks_read_masks_history(dt_develop_t *dev, const dt_imgid_t imgid)
@@ -1048,10 +1123,30 @@ void dt_masks_read_masks_history(dt_develop_t *dev, const dt_imgid_t imgid)
     {
       const char *const ptbuf = (char *)sqlite3_column_blob(stmt, 5);
       const size_t point_size = form->functions->point_struct_size;
+      const size_t stored_size = _point_size_at_version(form);
+      const size_t blob_size = sqlite3_column_bytes(stmt, 5);
+      /* the blob has to hold exactly nb_points points of the size the mask
+         version it was written at used. anything else was written by a build
+         whose layout we do not know, or is corrupt, and copying our own size
+         out of it would read past its end: the form is dropped, and a group
+         leaves it out like any form it cannot find */
+      if(nb_points < 0 || blob_size != (size_t)nb_points * stored_size)
+      {
+        dt_print(DT_DEBUG_ALWAYS,
+                 "[_dev_read_masks_history] mask %s(%i) of image %i has %zu bytes"
+                 " of points, expected %d of %zu at mask version %d, dropped",
+                 form->name, formid, imgid, blob_size, nb_points, stored_size,
+                 form->version);
+        dt_masks_free_form(form);
+        continue;
+      }
       for(int i = 0; i < nb_points; i++)
       {
-        char *point = malloc(point_size);
-        memcpy(point, ptbuf + i*point_size, point_size);
+        /* zeroed, as a point stored at an older version is shorter than ours:
+           the fields added since start out at zero and dt_masks_legacy_params
+           below gives them their defaults */
+        char *point = calloc(1, point_size);
+        memcpy(point, ptbuf + i*stored_size, stored_size);
         form->points = g_list_append(form->points, point);
       }
     }

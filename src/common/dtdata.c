@@ -23,6 +23,7 @@
 #include "common/image.h"
 #include "common/image_cache.h"
 #include "common/math.h"
+#include "develop/masks.h"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -808,6 +809,26 @@ void dt_dtdata_sweep(const dt_imgid_t imgid)
       keep = g_list_prepend(keep, g_strdup(entry));
     else if(res < 0)
       readable = FALSE;
+  }
+  sqlite3_finalize(stmt);
+
+  // mask forms are core code, not plugins, so their reference is read
+  // here rather than through a registered scanner. an object form keeps
+  // its dt_dtdata_ref_t as the first point
+  // clang-format off
+  DT_DEBUG_SQLITE3_PREPARE_V2(dt_database_get(darktable.db),
+                              "SELECT points"
+                              " FROM main.masks_history"
+                              " WHERE imgid = ?1 AND form = ?2",
+                              -1, &stmt, NULL);
+  // clang-format on
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 1, imgid);
+  DT_DEBUG_SQLITE3_BIND_INT(stmt, 2, DT_MASKS_OBJECT);
+  while(sqlite3_step(stmt) == SQLITE_ROW)
+  {
+    const dt_dtdata_ref_t *ref = sqlite3_column_blob(stmt, 0);
+    if(ref && sqlite3_column_bytes(stmt, 0) >= (int)sizeof(*ref) && ref->entry[0])
+      keep = g_list_prepend(keep, g_strndup(ref->entry, sizeof(ref->entry)));
   }
   sqlite3_finalize(stmt);
 
