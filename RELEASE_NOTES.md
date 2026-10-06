@@ -483,6 +483,9 @@ changes (where available).
   applied from embedded metadata when the file only carries chromatic
   aberration correction data.
 
+- Fixed a snapshot not refreshing after zooming when the darkroom was
+  opened with the pointer already over the image.
+
 ## Lua
 
 ### API Version
