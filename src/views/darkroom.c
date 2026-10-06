@@ -4461,6 +4461,8 @@ void mouse_moved(dt_view_t *self,
                  const int which)
 {
   dt_develop_t *dev = self->data;
+  // no enter is delivered when the view opens under the pointer
+  dev->darkroom_mouse_in_center_area = TRUE;
 
   // if we are not hovering over a thumbnail in the filmstrip -> show
   // metadata of opened image.
