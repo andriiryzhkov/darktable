@@ -682,6 +682,44 @@ void dtgtk_cairo_paint_masks_object(cairo_t *cr, const gint x, const gint y, con
   FINISH
 }
 
+void dtgtk_cairo_paint_masks_ai(cairo_t *cr, const gint x, const gint y, const gint w, const gint h, gint flags, void *data)
+{
+  PREAMBLE(1.15, 1, 0, 0)
+
+  // "Ai" as strokes, as tall as the object icon's sparkle beside it
+  const double top = 0.12, base = 0.88;
+
+  // A: two legs meeting at an apex rounded by a curve rather than the line
+  // join, which would be lost at icon sizes. the legs start their turn
+  // at 92% of the way up
+  const double lx = 0.16, ax = 0.39, rx = 0.62;
+  const double t = 0.92;
+  cairo_move_to(cr, lx, base);
+  cairo_line_to(cr, lx + t * (ax - lx), base + t * (top - base));
+  cairo_curve_to(cr, ax, top, ax, top, rx + t * (ax - rx), base + t * (top - base));
+  cairo_line_to(cr, rx, base);
+  cairo_stroke(cr);
+
+  // the crossbar, from leg to leg
+  const double by = 0.63;
+  const double f = (base - by) / (base - top);
+  cairo_move_to(cr, lx + f * (ax - lx), by);
+  cairo_line_to(cr, rx + f * (ax - rx), by);
+  cairo_stroke(cr);
+
+  // i: as tall as the A, its dot topping out at the apex and two strokes
+  // wide, its stem starting well clear of the dot at any size
+  const double ix = 0.80;
+  const double r = cairo_get_line_width(cr);
+  cairo_move_to(cr, ix, top + 2.0 * r + 0.12);
+  cairo_line_to(cr, ix, base);
+  cairo_stroke(cr);
+  cairo_arc(cr, ix, top + r, r, 0, 2.0 * M_PI);
+  cairo_fill(cr);
+
+  FINISH
+}
+
 void dtgtk_cairo_paint_masks_uniform(cairo_t *cr, const gint x, const gint y, const gint w, const gint h, gint flags, void *data)
 {
   PREAMBLE(0.95, 1, 0, 0)

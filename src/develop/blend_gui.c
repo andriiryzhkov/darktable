@@ -1690,6 +1690,25 @@ static void _blendop_masks_add_shape(GtkGestureSingle *gesture,
   dt_control_queue_redraw_center();
 }
 
+#ifdef HAVE_AI
+static void _blendop_masks_add_ai(GtkWidget *button, dt_iop_module_t *self)
+{
+  // as for the shapes: drawn masks on, and the mask goes to the module
+  // with the focus
+  _blendop_masks_modes_toggle(NULL, self, DEVELOP_MASK_MASK);
+  dt_iop_request_focus(self);
+  dt_masks_ai_popup_menu(button, self);
+}
+
+// the AI models or the preferences changed, either of which can make an AI
+// mask possible or not
+static void _blendop_masks_ai_refresh(gpointer instance, dt_iop_module_t *self)
+{
+  const dt_iop_gui_blend_data_t *bd = self->blend_data;
+  if(bd && bd->masks_inited) dt_masks_ai_update_button(bd->masks_ai);
+}
+#endif
+
 static void _blendop_masks_show_and_edit(GtkGestureSingle *gesture,
                                              gint n_press,
                                              gdouble x,
@@ -2836,6 +2855,25 @@ void dt_iop_gui_init_masks(GtkWidget *blendw, dt_iop_module_t *module)
                                              dtgtk_cairo_paint_masks_eye, abox);
 
 #ifdef HAVE_AI
+    // packed from the end, so made first to sit right of the object
+    bd->masks_ai = dtgtk_button_new_full(dtgtk_cairo_paint_masks_ai, 0, NULL,
+      &(dtgtk_button_config_t){
+        .tooltip = _("add AI mask"),
+        .action = DT_ACTION(module),
+        .action_section = "blend`shapes",
+        .action_label = N_("add AI mask"),
+        .action_def = &dt_action_def_button,
+        .clicked_cb = G_CALLBACK(_blendop_masks_add_ai),
+        .clicked_data = module,
+      });
+    dtgtk_button_connect_stale_hover_cleanup(bd->masks_ai);
+    gtk_box_pack_end(GTK_BOX(abox), bd->masks_ai, FALSE, FALSE, 0);
+    dt_masks_ai_update_button(bd->masks_ai);
+    DT_CONTROL_SIGNAL_CONNECT(DT_SIGNAL_AI_MODELS_CHANGED,
+                              _blendop_masks_ai_refresh, module);
+    DT_CONTROL_SIGNAL_CONNECT(DT_SIGNAL_PREFERENCES_CHANGE,
+                              _blendop_masks_ai_refresh, module);
+
     bd->masks_type[5] = DT_MASKS_OBJECT;
     bd->masks_shapes[5] = dt_iop_togglebutton_new(module, "blend`shapes",
                                                   N_("add AI object"),
@@ -3056,6 +3094,12 @@ void dt_iop_gui_cleanup_blending(dt_iop_module_t *module)
 {
   if(!module->blend_data) return;
   dt_iop_gui_blend_data_t *bd = module->blend_data;
+
+#ifdef HAVE_AI
+  // both signals: the handlers are matched by callback and data
+  if(bd->masks_inited)
+    DT_CONTROL_SIGNAL_DISCONNECT(_blendop_masks_ai_refresh, module);
+#endif
 
   dt_pthread_mutex_lock(&bd->lock);
   if(bd->timeout_handle)

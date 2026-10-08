@@ -71,12 +71,27 @@ static const struct
 {
   const char *task;
   const char *label;
+  // an AI mask type alone, for the menu of a button that already says AI
+  const char *type;
 } _task_labels[] = {
   { "denoise",    N_("denoise")     },
   { "rawdenoise", N_("raw denoise") },
   { "upscale",    N_("upscale")     },
   { "mask",       N_("mask")        },
+  { "mask-ai-subject", N_("ai subject"), N_("subject") },
+  { "mask-ai-sky",     N_("ai sky"),     N_("sky")     },
+  { "mask-ai-person",  N_("ai person"),  N_("person")  },
 };
+
+// the tasks of the one-click AI masks, one per type, e.g. "mask-ai-subject".
+// the prefix is reserved for them
+#define TASK_MASK_AI_PREFIX "mask-ai-"
+
+static gboolean _task_is_mask_ai(const char *task)
+{
+  return task && g_str_has_prefix(task, TASK_MASK_AI_PREFIX)
+    && task[strlen(TASK_MASK_AI_PREFIX)];
+}
 
 // compare version strings "X.Y", returns -1 if a<b, 0 if a==b, 1 if a>b
 static int _version_compare(const char *a, const char *b)
@@ -2843,7 +2858,74 @@ const char *dt_ai_task_label(const char *task)
     if(!strcmp(task, _task_labels[i].task))
       return _(_task_labels[i].label);
 
+  // an AI mask type this build has no label for is still offered in the
+  // menu, so it goes by its type, named like the labeled ones. interned:
+  // callers do not free the label, and the set of types is small
+  if(_task_is_mask_ai(task))
+  {
+    // TRANSLATORS: an AI mask type with no translation yet, %s is its
+    // untranslated name, e.g. "hair"
+    gchar *label = g_strdup_printf(_("ai %s"), task + strlen(TASK_MASK_AI_PREFIX));
+    const char *interned = g_intern_string(label);
+    g_free(label);
+    return interned;
+  }
+
   return task;
+}
+
+const char *dt_ai_mask_ai_type_label(const char *task)
+{
+  for(size_t i = 0; i < sizeof(_task_labels) / sizeof(_task_labels[0]); i++)
+    if(_task_labels[i].type && !g_strcmp0(task, _task_labels[i].task))
+      return _(_task_labels[i].type);
+  return _task_is_mask_ai(task) ? task + strlen(TASK_MASK_AI_PREFIX) : dt_ai_task_label(task);
+}
+
+// in the order the menu shows them
+static gint _compare_task_labels(gconstpointer a, gconstpointer b)
+{
+  return g_utf8_collate(dt_ai_mask_ai_type_label(a), dt_ai_mask_ai_type_label(b));
+}
+
+GList *dt_ai_models_get_mask_ai_tasks(void)
+{
+  dt_ai_registry_t *registry = darktable.ai_registry;
+  if(!registry) return NULL;
+
+  GList *tasks = NULL;
+  g_mutex_lock(&registry->lock);
+  for(GList *l = registry->models; l; l = g_list_next(l))
+  {
+    const dt_ai_model_t *m = l->data;
+    if(_task_is_mask_ai(m->task)
+       && !g_list_find_custom(tasks, m->task, (GCompareFunc)g_strcmp0))
+      tasks = g_list_prepend(tasks, g_strdup(m->task));
+  }
+  g_mutex_unlock(&registry->lock);
+
+  // the active model per task outside the lock, which
+  // dt_ai_models_get_active_for_task takes itself
+  GList *usable = NULL;
+  for(GList *l = tasks; l; l = g_list_next(l))
+  {
+    char *model_id = dt_ai_models_get_active_for_task(l->data);
+    gboolean ok = FALSE;
+    if(model_id)
+    {
+      g_mutex_lock(&registry->lock);
+      const dt_ai_model_t *m = _find_model_unlocked(registry, model_id);
+      // an available update leaves the installed model usable
+      ok = m && m->enabled && !g_strcmp0(m->task, l->data)
+        && (m->status == DT_AI_MODEL_DOWNLOADED
+            || m->status == DT_AI_MODEL_UPDATE_AVAILABLE);
+      g_mutex_unlock(&registry->lock);
+    }
+    g_free(model_id);
+    if(ok) usable = g_list_prepend(usable, g_strdup(l->data));
+  }
+  g_list_free_full(tasks, g_free);
+  return g_list_sort(usable, _compare_task_labels);
 }
 
 char *dt_ai_models_get_active_for_task(const char *task)

@@ -127,6 +127,7 @@ FILE(GLOB SOURCE_FILES
   "develop/imageop_gui.c"
   "develop/imageop_math.c"
   "develop/lightroom.c"
+  "develop/masks/ai.c"
   "develop/masks/brush.c"
   "develop/masks/circle.c"
   "develop/masks/ellipse.c"
@@ -482,6 +483,7 @@ if(USE_AI)
   FILE(GLOB SOURCE_FILES_AI
     "common/ai_models.c"
     "common/ai/segmentation.c"
+    "common/ai/mask_ai.c"
     "common/ai/restore.c"
     "common/ai/restore_rgb.c"
     "common/ai/restore_raw_bayer.c"

@@ -3126,15 +3126,22 @@ dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx, int index)
   return ctx->output_types[index];
 }
 
-int dt_ai_get_output_shape(dt_ai_context_t *ctx, int index,
-                           int64_t *shape, int max_dims)
+// the shape of an input or an output, -1 for a symbolic dimension: the
+// number of dimensions, or -1 on error
+static int _tensor_shape(dt_ai_context_t *ctx,
+                         const gboolean input,
+                         const int index,
+                         int64_t *shape,
+                         const int max_dims)
 {
-  if(!ctx || !ctx->session || index < 0 || (size_t)index >= ctx->output_count
-     || !shape || max_dims <= 0)
+  if(!ctx || !ctx->session || index < 0 || !shape || max_dims <= 0
+     || (size_t)index >= (input ? ctx->input_count : ctx->output_count))
     return -1;
 
   OrtTypeInfo *typeinfo = NULL;
-  OrtStatus *status = g_ort.api->SessionGetOutputTypeInfo(ctx->session, index, &typeinfo);
+  OrtStatus *status = input
+    ? g_ort.api->SessionGetInputTypeInfo(ctx->session, index, &typeinfo)
+    : g_ort.api->SessionGetOutputTypeInfo(ctx->session, index, &typeinfo);
   if(status)
   {
     g_ort.api->ReleaseStatus(status);
@@ -3143,40 +3150,34 @@ int dt_ai_get_output_shape(dt_ai_context_t *ctx, int index,
 
   const OrtTensorTypeAndShapeInfo *tensor_info = NULL;
   status = g_ort.api->CastTypeInfoToTensorInfo(typeinfo, &tensor_info);
-  if(status)
-  {
-    g_ort.api->ReleaseStatus(status);
-    g_ort.api->ReleaseTypeInfo(typeinfo);
-    return -1;
-  }
-
   size_t ndim = 0;
-  status = g_ort.api->GetDimensionsCount(tensor_info, &ndim);
-  if(status)
-  {
-    g_ort.api->ReleaseStatus(status);
-    g_ort.api->ReleaseTypeInfo(typeinfo);
-    return -1;
-  }
-
-  const int dims = (int)ndim < max_dims ? (int)ndim : max_dims;
+  if(!status) status = g_ort.api->GetDimensionsCount(tensor_info, &ndim);
   int64_t full_shape[16];
-  if(ndim > 16)
-  {
-    g_ort.api->ReleaseTypeInfo(typeinfo);
-    return -1;
-  }
-
-  status = g_ort.api->GetDimensions(tensor_info, full_shape, ndim);
+  if(!status && ndim <= 16)
+    status = g_ort.api->GetDimensions(tensor_info, full_shape, ndim);
   g_ort.api->ReleaseTypeInfo(typeinfo);
   if(status)
   {
     g_ort.api->ReleaseStatus(status);
     return -1;
   }
+  if(ndim > 16) return -1;
 
+  const int dims = (int)ndim < max_dims ? (int)ndim : max_dims;
   memcpy(shape, full_shape, dims * sizeof(int64_t));
   return (int)ndim;
+}
+
+int dt_ai_get_output_shape(dt_ai_context_t *ctx, int index,
+                           int64_t *shape, int max_dims)
+{
+  return _tensor_shape(ctx, FALSE, index, shape, max_dims);
+}
+
+int dt_ai_get_input_shape(dt_ai_context_t *ctx, int index,
+                          int64_t *shape, int max_dims)
+{
+  return _tensor_shape(ctx, TRUE, index, shape, max_dims);
 }
 
 void dt_ai_unload_model(dt_ai_context_t *ctx)

@@ -262,6 +262,12 @@ int *dt_ai_model_attribute_int_array(const dt_ai_model_info_t *info,
                                      const char *key,
                                      int *out_count);
 
+/** The same for a JSON array of numbers, read as doubles. Caller frees
+ *  the returned array with g_free(). */
+double *dt_ai_model_attribute_double_array(const dt_ai_model_info_t *info,
+                                           const char *key,
+                                           int *out_count);
+
 /* --- Discovery --- */
 
 /**
@@ -483,6 +489,18 @@ dt_ai_dtype_t dt_ai_get_output_type(dt_ai_context_t *ctx,
  */
 int dt_ai_get_output_shape(dt_ai_context_t *ctx, int index,
                            int64_t *shape, int max_dims);
+
+/**
+ * @brief Get the shape of a model input by index.
+ * @param ctx The AI context.
+ * @param index Input index (0-based).
+ * @param shape Output array to fill with dimension sizes, -1 for a
+ *              symbolic one.
+ * @param max_dims Maximum number of dimensions to write.
+ * @return Number of dimensions, or -1 on error.
+ */
+int dt_ai_get_input_shape(dt_ai_context_t *ctx, int index,
+                          int64_t *shape, int max_dims);
 
 /**
  * @brief Unload a model and free execution context.

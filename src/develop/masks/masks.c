@@ -975,6 +975,8 @@ dt_masks_form_t *dt_masks_create(const dt_masks_type_t type)
     form->functions = &dt_masks_functions_group;
   else if(type & DT_MASKS_OBJECT)
     form->functions = &dt_masks_functions_object;
+  else if(type & DT_MASKS_AI)
+    form->functions = &dt_masks_functions_ai;
 
   if(form->functions && form->functions->sanitize_config)
     form->functions->sanitize_config(type);
@@ -1179,16 +1181,23 @@ void dt_masks_read_masks_history(dt_develop_t *dev, const dt_imgid_t imgid)
         form->points = g_list_append(form->points, point);
       }
 
-      // the entry and producer of a pixel form's ref are read as strings,
-      // but a blob from the database or an xmp need not terminate them:
-      // force it here, the one place they enter the tree. by the functions,
-      // which sized the points, not by the type bits: a crafted type can
-      // carry a pixel form's bit along with another's
-      if(form->functions == &dt_masks_functions_object && form->points)
+      // the entry and producer of a pixel form's ref, and an AI mask's task,
+      // are read as strings, but a blob from the database or an xmp need not
+      // terminate them: force it here, the one place they enter the tree.
+      // by the functions, which sized the points, not by the type bits: a
+      // crafted type can carry a pixel form's bit along with another's
+      const gboolean object = form->functions == &dt_masks_functions_object;
+      const gboolean ai = form->functions == &dt_masks_functions_ai;
+      if((object || ai) && form->points)
       {
         dt_dtdata_ref_t *ref = form->points->data;
         ref->entry[sizeof(ref->entry) - 1] = '\0';
         ref->producer[sizeof(ref->producer) - 1] = '\0';
+        if(ai)
+        {
+          dt_masks_point_ai_t *pt = form->points->data;
+          pt->task[sizeof(pt->task) - 1] = '\0';
+        }
       }
     }
 

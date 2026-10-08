@@ -60,7 +60,7 @@ typedef struct dt_lib_masks_t
   /* vbox with managed history items */
   GtkWidget *bt_circle, *bt_path, *bt_gradient, *bt_ellipse, *bt_brush;
 #ifdef HAVE_AI
-  GtkWidget *bt_object;
+  GtkWidget *bt_object, *bt_ai;
 #endif
   GtkWidget *treeview;
   dt_gui_collapsible_section_t cs;
@@ -672,11 +672,10 @@ static void _lib_masks_inactivate_icons(dt_lib_module_t *self)
 #endif
 }
 
-static void _tree_add_shape(GtkButton *button, gpointer shape)
+// the module a new shape goes to: the one of the first selected row, if any
+static dt_iop_module_t *_tree_selected_module(dt_lib_masks_t *lm)
 {
   dt_iop_module_t *module = NULL;
-
-  dt_lib_masks_t *lm = darktable.develop->proxy.masks.module->data;
   GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(lm->treeview));
   GtkTreeModel *model = NULL;
   GList *selected = gtk_tree_selection_get_selected_rows(selection, &model);
@@ -687,6 +686,13 @@ static void _tree_add_shape(GtkButton *button, gpointer shape)
       _lib_masks_get_values(model, &iter, &module, NULL, NULL);
     g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
   }
+  return module;
+}
+
+static void _tree_add_shape(GtkButton *button, gpointer shape)
+{
+  dt_lib_masks_t *lm = darktable.develop->proxy.masks.module->data;
+  dt_iop_module_t *module = _tree_selected_module(lm);
 
   // we create the new form
   dt_masks_form_t *spot = dt_masks_create(GPOINTER_TO_INT(shape));
@@ -722,6 +728,22 @@ static void _bt_add_shape_cb(GtkGestureSingle *gesture, int n_press, double x, d
     _lib_masks_inactivate_icons(darktable.develop->proxy.masks.module);
   }
 }
+
+#ifdef HAVE_AI
+// not a drawing tool, so no toggle: the menu of mask types, made at once
+static void _bt_add_ai_cb(GtkWidget *button, dt_lib_module_t *self)
+{
+  dt_masks_ai_popup_menu(button, _tree_selected_module(self->data));
+}
+
+// the AI models or the preferences changed, either of which can make an AI
+// mask possible or not
+static void _ai_refresh_callback(gpointer instance, dt_lib_module_t *self)
+{
+  dt_lib_masks_t *lm = self->data;
+  dt_masks_ai_update_button(lm->bt_ai);
+}
+#endif
 
 static void _tree_add_exist(GtkButton *button, dt_masks_form_t *grp)
 {
@@ -2384,6 +2406,19 @@ void gui_init(dt_lib_module_t *self)
                     dt_gui_connect_click(d->bt_object, _bt_add_shape_cb, NULL,
                                          GINT_TO_POINTER(DT_MASKS_OBJECT)));
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(d->bt_object), FALSE);
+
+  d->bt_ai = dtgtk_button_new_full(dtgtk_cairo_paint_masks_ai, 0, NULL,
+    &(dtgtk_button_config_t){
+      .tooltip = _("add AI mask"),
+      .action = DT_ACTION(self),
+      .action_section = N_("shapes"),
+      .action_label = N_("add AI mask"),
+      .action_def = &dt_action_def_button,
+      .clicked_cb = G_CALLBACK(_bt_add_ai_cb),
+      .clicked_data = self,
+    });
+  dtgtk_button_connect_stale_hover_cleanup(d->bt_ai);
+  dt_masks_ai_update_button(d->bt_ai);
 #endif
 
   d->treeview = gtk_tree_view_new();
@@ -2424,7 +2459,7 @@ void gui_init(dt_lib_module_t *self)
     (dt_gui_expand(dt_ui_label_new(_("created shapes"))),
      d->bt_brush, d->bt_circle, d->bt_ellipse, d->bt_path, d->bt_gradient);
 #ifdef HAVE_AI
-  dt_gui_box_add(shape_buttons, d->bt_object);
+  dt_gui_box_add(shape_buttons, d->bt_object, d->bt_ai);
 #endif
 
   self->widget = dt_gui_vbox
@@ -2533,11 +2568,20 @@ void gui_init(dt_lib_module_t *self)
   darktable.develop->proxy.masks.list_update = _lib_masks_update_list;
   darktable.develop->proxy.masks.list_remove = _lib_masks_remove_item;
   darktable.develop->proxy.masks.selection_change = _lib_masks_selection_change;
+
+#ifdef HAVE_AI
+  DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_AI_MODELS_CHANGED, _ai_refresh_callback);
+  DT_CONTROL_SIGNAL_HANDLE(DT_SIGNAL_PREFERENCES_CHANGE, _ai_refresh_callback);
+#endif
 }
 
 void gui_cleanup(dt_lib_module_t *self)
 {
   dt_lib_masks_t *d = self->data;
+#ifdef HAVE_AI
+  // both signals: the handlers are matched by callback and data
+  DT_CONTROL_SIGNAL_DISCONNECT(_ai_refresh_callback, self);
+#endif
   if(d && d->resize_timer)
     g_source_remove(d->resize_timer);
   g_free(self->data);

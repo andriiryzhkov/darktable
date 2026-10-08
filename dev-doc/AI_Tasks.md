@@ -40,8 +40,8 @@ Interactive object masking using SAM/SAM2/SegNext models.
    disabled. an edited object stays pixels, so it gets no switch
 
 The form type exists in every build. Its rendering and canvas display are
-in `pixel_mask.c`, compiled unconditionally and written for any form stored
-as pixels, while `object.c` compiles its creation code only with
+in `pixel_mask.c`, shared with the [AI masks](#ai-masks) and compiled
+unconditionally, while `object.c` compiles its creation code only with
 `HAVE_AI`, so a build without AI still applies a committed object. On the
 canvas a committed object is its icon at the point deepest inside the
 mask. The icon is the object's only handle: hovering it tints the mask
@@ -177,6 +177,117 @@ repository. Requirements for the decoder export:
 - `low_res_masks` at 256x256
 - all spatial dimensions concrete (no symbolic dims like `num_labels`)
 - only `num_points` may be dynamic
+
+---
+
+## AI Masks
+
+One-click masks of a type (subject, sky, person, ...): the model runs once
+on the current view, with no prompts, and its soft mask is stored as
+pixels in the image's `.dtdata` sidecar. The mask cannot be edited.
+
+**Task keys**: one per mask type, `"mask-ai-<type>"`, e.g.
+`"mask-ai-subject"`. The `mask-ai-` prefix is reserved for this feature.
+**API**: `src/common/ai/mask_ai.h`
+**Consumer**: `src/develop/masks/ai.c`
+
+### How It Works
+
+1. "add AI mask" in the mask manager, or in a module's drawn mask
+   toolbar, opens a menu of the types whose active model is installed
+   (`dt_ai_models_get_mask_ai_tasks()`), named by the type alone, since
+   the button already says AI (`dt_ai_mask_ai_type_label()`: "subject",
+   "sky"). everywhere else the task label is used: "ai subject", and
+   "ai <type>" for a type with no label yet
+2. requests run one at a time: the others wait on the GUI thread, so none
+   holds a worker. the running one shows a toast, repeated so it stays up
+   until the mask is done, as the object tool does while it encodes; there
+   is no progress entry to cancel. when its turn comes the history is
+   written, since the job renders from the database, and the distortion of
+   the view is noted. it is refused while a distorting module has focus:
+   crop and perspective then show the image uncropped, which is not the
+   view the job renders
+3. a background job reads the model's attributes (`dt_mask_ai_open()`,
+   which checks them against the contract below), renders the current
+   view with its short side at the model's input size and, when the model
+   refines its edges, its long side at least 2048 pixels
+   (`DT_MASK_AI_GUIDE_SIZE`), never above full size, and only then loads
+   the session, checks its graph, runs it once and unloads it
+   (`dt_mask_ai_run()`), so the render and the session do not hold memory
+   at the same time. the soft output is then upsampled onto the render and
+   passed through darktable's guided filter (`guided_filter.c`) with the
+   render as guide: fitting the mask in each window as a linear function
+   of the colors, it redraws the edges, thin wires and branches included,
+   at the render's resolution, without a threshold. the window spans the
+   blur the upsampling leaves, 1.25 of the model's output pixels: 8 render
+   pixels for a 320 output on 2048, about 2 for a 1024 one
+4. back on the GUI thread, the result is dropped if no pixel passes 0.5
+   ("nothing was found"), if the image or its distortion (crop, rotate,
+   lens...) changed meanwhile, or if a distorting module got focus,
+   silently when the darkroom was left. otherwise it is resampled into
+   input-image space, at the mask's density over the view (the render's
+   when refined, else the model's output), never finer than the image and
+   at most 4096 pixels on the long side, and stored in the sidecar
+5. the new `DT_MASKS_AI` form joins the module's mask group, or is a
+   standalone shape from the mask manager, as one history item, named
+   "ai subject #1", "ai sky #1"... numbered per type, the way an AI
+   object is "ai object #1"
+
+The menu is unavailable without AI, when sidecar writing is "never", or
+with no model installed; in a build without AI the button is absent but a
+stored mask still renders. The form's single point,
+`dt_masks_point_ai_t`, holds the sidecar reference first, where the
+sidecar sweep reads it, and then the task. On the canvas the mask is an
+icon, as for a committed object (`pixel_mask.c`); ctrl+scroll on it
+changes the opacity, and a right-click removes it. When the sidecar entry is missing, a click on the
+icon runs the job again with the task's active model and replaces the
+reference. When it is there, the click says the mask cannot be edited.
+
+### Model Contract
+
+Read from the model's attributes and graph by `mask_ai.c`, which refuses
+a model that does not fit:
+
+| Attribute | Meaning |
+|-----------|---------|
+| `prompts` | `false` or absent |
+| `strategy` | `"resize_whole_image"`: the view is stretched to the square input |
+| `input_sizes` | the input's side S, the largest if several |
+| `input_mean`, `input_std` | 3 values each on RGB in [0,1]; 0 and 1 when absent |
+| `output_logits` | `true` applies a sigmoid, unless the output is already in [0,1] |
+| `edge_refine` | `"guided"` or absent refines the edges on the render; `"none"` keeps the model's output |
+
+| Tensor | Shape | Type | Description |
+|--------|-------|------|-------------|
+| Input 0 | `[1, 3, S, S]` | float32 or float16 | normalized RGB, NCHW; a fixed S must match `input_sizes` |
+| Output 0 | `[1, 1, H, W]` | float32 or float16 | mask over the whole view, H and W fixed |
+
+The view is area-averaged where it shrinks and bilinear where it grows.
+The output is kept soft and never thresholded. The model loads
+on the configured provider, which the backend already falls back from to
+the CPU when no session can be made; a run that fails on an accelerated
+provider is retried on the CPU, unless its output came out at another
+size than the graph declared, which also fails a run that reports
+success.
+
+### config.json Example
+
+```json
+{
+  "id": "mask-ai-subject-birefnet",
+  "name": "mask subject birefnet",
+  "task": "mask-ai-subject",
+  "arch": "birefnet",
+  "attributes": {
+    "input_sizes": [1024],
+    "strategy": "resize_whole_image",
+    "input_mean": [0.485, 0.456, 0.406],
+    "input_std": [0.229, 0.224, 0.225],
+    "output_logits": true,
+    "prompts": false
+  }
+}
+```
 
 ---
 

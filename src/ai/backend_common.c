@@ -691,34 +691,70 @@ char *dt_ai_model_attribute_string(const dt_ai_model_info_t *info,
   return result;
 }
 
+// the attribute's array, with its length capped: the caller converts the
+// elements and frees the parser
+static JsonParser *_attribute_array(const dt_ai_model_info_t *info,
+                                    const char *key,
+                                    JsonArray **arr,
+                                    guint *n)
+{
+  *arr = NULL;
+  *n = 0;
+  JsonNode *v = NULL;
+  JsonParser *p = _attribute_node(info, key, &v);
+  if(v && JSON_NODE_HOLDS_ARRAY(v))
+  {
+    *arr = json_node_get_array(v);
+    *n = json_array_get_length(*arr);
+    // cap manifest-driven allocation: single digits are typical
+    const guint max_n = 256;
+    if(*n > max_n)
+    {
+      dt_print(DT_DEBUG_AI,
+               "[darktable_ai] attribute '%s': %u elements exceeds cap %u, "
+               "truncating", key, *n, max_n);
+      *n = max_n;
+    }
+  }
+  return p;
+}
+
 int *dt_ai_model_attribute_int_array(const dt_ai_model_info_t *info,
                                      const char *key,
                                      int *out_count)
 {
   if(out_count) *out_count = 0;
-  JsonNode *v = NULL;
-  JsonParser *p = _attribute_node(info, key, &v);
+  JsonArray *arr = NULL;
+  guint n = 0;
+  JsonParser *p = _attribute_array(info, key, &arr, &n);
   int *result = NULL;
-  if(v && JSON_NODE_HOLDS_ARRAY(v))
+  if(n > 0)
   {
-    JsonArray *arr = json_node_get_array(v);
-    guint n = json_array_get_length(arr);
-    // cap manifest-driven allocation — single digits are typical
-    const guint max_n = 256;
-    if(n > max_n)
-    {
-      dt_print(DT_DEBUG_AI,
-               "[darktable_ai] attribute '%s': %u elements exceeds cap %u, "
-               "truncating", key, n, max_n);
-      n = max_n;
-    }
-    if(n > 0)
-    {
-      result = g_new(int, n);
-      for(guint i = 0; i < n; i++)
-        result[i] = (int)json_array_get_int_element(arr, i);
-      if(out_count) *out_count = (int)n;
-    }
+    result = g_new(int, n);
+    for(guint i = 0; i < n; i++)
+      result[i] = (int)json_array_get_int_element(arr, i);
+    if(out_count) *out_count = (int)n;
+  }
+  if(p) g_object_unref(p);
+  return result;
+}
+
+double *dt_ai_model_attribute_double_array(const dt_ai_model_info_t *info,
+                                           const char *key,
+                                           int *out_count)
+{
+  if(out_count) *out_count = 0;
+  JsonArray *arr = NULL;
+  guint n = 0;
+  JsonParser *p = _attribute_array(info, key, &arr, &n);
+  double *result = NULL;
+  if(n > 0)
+  {
+    result = g_new(double, n);
+    // an integer element reads as a double too (json_node_get_double)
+    for(guint i = 0; i < n; i++)
+      result[i] = json_array_get_double_element(arr, i);
+    if(out_count) *out_count = (int)n;
   }
   if(p) g_object_unref(p);
   return result;

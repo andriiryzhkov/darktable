@@ -47,12 +47,18 @@ typedef enum dt_masks_type_t
   // defined in every build: an object made with AI is stored as pixels and
   // has to render where AI is not compiled in
   DT_MASKS_OBJECT = 1 << 8,
+  // 1 << 9 and 1 << 10 are reserved for the parametric and raster forms:
+  // types are persisted, so a bit is never reused
+
+  // a one-click AI mask (subject, sky, ...), stored as pixels and defined
+  // in every build like the object, which is AI too but interactive
+  DT_MASKS_AI = 1 << 11,
 } dt_masks_type_t;
 
 // the pixel forms, whose first point starts with a dt_dtdata_ref_t to their
 // pixels in the .dtdata sidecar (masks/pixel_mask.c). a new one goes here
 // too, or the sidecar sweep would delete what it references
-#define DT_MASKS_PIXEL_FORMS (DT_MASKS_OBJECT)
+#define DT_MASKS_PIXEL_FORMS (DT_MASKS_OBJECT | DT_MASKS_AI)
 
 /**masts states */
 typedef enum dt_masks_state_t
@@ -185,6 +191,18 @@ typedef struct dt_masks_point_object_t
     } prompt;
   };
 } dt_masks_point_object_t;
+
+#define DT_MASKS_AI_TASK_LEN 64
+
+/** structure used to store the one point of an AI mask form. ref must stay
+    first: the sidecar sweep reads it at the start of the points blob, and
+    dt_masks_pixel_ref assumes it. task is the AI task that made the mask,
+    e.g. "mask-ai-subject", which also regenerates it */
+typedef struct dt_masks_point_ai_t
+{
+  dt_dtdata_ref_t ref;
+  char task[DT_MASKS_AI_TASK_LEN];
+} dt_masks_point_ai_t;
 
 /** structure used to store 1 point for a path form */
 typedef struct dt_masks_point_path_t
@@ -500,6 +518,7 @@ extern const dt_masks_functions_t dt_masks_functions_path;
 extern const dt_masks_functions_t dt_masks_functions_gradient;
 extern const dt_masks_functions_t dt_masks_functions_group;
 extern const dt_masks_functions_t dt_masks_functions_object;
+extern const dt_masks_functions_t dt_masks_functions_ai;
 #ifdef HAVE_AI
 /** check if AI object mask model is downloaded and AI is enabled */
 gboolean dt_masks_object_available(void);
@@ -507,6 +526,18 @@ gboolean dt_masks_object_available(void);
     doing nothing, when none is being edited, so the darkroom's escape
     handler knows whether the key was its to take */
 gboolean dt_masks_object_cancel_edit(void);
+
+// --- AI masks (masks/ai.c): one click, no prompts, not editable ---
+
+/** why no AI mask can be added now, translated, or NULL when one can */
+const char *dt_masks_ai_unavailable_reason(void);
+/** pop up the menu of AI mask types under button. picking one makes that
+    mask from the current view in the background and adds it to module's
+    mask group when it is done, or as a standalone shape when module is
+    NULL */
+void dt_masks_ai_popup_menu(GtkWidget *button, struct dt_iop_module_t *module);
+/** an "add AI mask" button: sensitive, or not with the reason as tooltip */
+void dt_masks_ai_update_button(GtkWidget *button);
 #endif
 
 // --- pixel forms (masks/pixel_mask.c): the shape is a mask stored in the

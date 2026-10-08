@@ -346,6 +346,10 @@ typedef struct dt_iop_gui_blend_data_t
   GtkWidget *masks_combo;
   GtkWidget *masks_shapes[DEVELOP_MASKS_NB_SHAPES];
   int masks_type[DEVELOP_MASKS_NB_SHAPES];
+#ifdef HAVE_AI
+  // not one of the shapes: it opens a menu and draws nothing
+  GtkWidget *masks_ai;
+#endif
   GtkWidget *masks_edit;
   GtkWidget *masks_polarity;
   int *masks_combo_ids;

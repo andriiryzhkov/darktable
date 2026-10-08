@@ -451,9 +451,28 @@ char *dt_ai_models_get_active_for_task(const char *task);
  *
  * @param task The task type (e.g. "mask", "denoise"), may be NULL
  * @return Translated label, or `task` unchanged when it is not one of the
- *         tasks darktable dispatches on; never NULL. Do not free.
+ *         tasks darktable dispatches on, without its prefix for an AI
+ *         mask task; never NULL. Do not free.
  */
 const char *dt_ai_task_label(const char *task);
+
+/**
+ * @brief The type alone of an AI mask task, e.g. "subject" for
+ *        "mask-ai-subject": for the "add AI mask" menu, whose button
+ *        already says AI. Elsewhere use dt_ai_task_label ("ai subject")
+ * @return Translated type, or the untranslated one for a type with no
+ *         label yet; never NULL. Do not free.
+ */
+const char *dt_ai_mask_ai_type_label(const char *task);
+
+/**
+ * @brief The AI mask types that can be made now: the tasks of the one-click
+ *        AI masks, one per type and named "mask-ai-<type>", whose active
+ *        model is installed and enabled
+ * @return List of newly allocated task strings, sorted by their type label;
+ *         free with g_list_free_full(list, g_free)
+ */
+GList *dt_ai_models_get_mask_ai_tasks(void);
 
 /**
  * @brief Get the version string of a model by ID.
