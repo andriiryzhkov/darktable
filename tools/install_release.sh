@@ -20,10 +20,13 @@
 #
 # BUILD OPTIONS
 #
-# Anything this script does not recognize is handed to build.sh, and everything
-# after -- goes on to cmake, so --enable-ai, --disable-opencl, -j and the rest
-# work; "build.sh --help" lists them. build.sh's own --install and --sudo are
-# refused: this script decides when to install and when to use root.
+# build.sh's --enable-X and --disable-X, --asan, --build-type, --build-dir,
+# --build-generator and -j are handed to it, and everything after -- goes on to
+# cmake; "build.sh --help" lists them. build.sh's own --install, --sudo,
+# --skip-* and --clean-* are refused: this script decides when to build, when
+# to install and when to use root. So is anything else, which build.sh would
+# only warn about and ignore. cmake options go after --, except
+# CMAKE_INSTALL_PREFIX, which is --prefix.
 #
 # Left alone, cmake enables whatever it autodetects, so a missing dependency
 # quietly drops the feature. Asking for one explicitly makes cmake stop instead.
@@ -31,9 +34,11 @@
 # Features in DEFAULT_FEATURES are the exception, for now only AI: cmake
 # leaves it off unless asked, so this script asks, as darktable's CI and its
 # AppImage do. If the configure step then fails, the build is retried once
-# without them and says so; for AI that is when ONNX Runtime or libarchive can
-# be neither found nor fetched. --disable-ai leaves it out from the start, and
-# --enable-ai makes a missing dependency an error instead.
+# without them, in case they are the cause, and says so; for AI that is when
+# ONNX Runtime or libarchive can be neither found nor fetched. --disable-ai
+# leaves it out from the start, and --enable-ai makes a missing dependency an
+# error instead. The build type is Release, as for the AppImage, unless
+# --build-type says otherwise.
 #
 # WHY BUILD FROM SOURCE
 #
@@ -73,8 +78,9 @@
 #
 # DEPENDENCIES
 #
-# curl, tar, xz, sha256sum, cmake and realpath have to be there already.
-# Everything the build itself needs is installed for you, unless --skip-deps.
+# curl, tar, xz, sha256sum and realpath have to be there already. Everything
+# the build itself needs, cmake included, is installed for you, unless
+# --skip-deps.
 #
 # The Debian and Ubuntu list is the one darktable's own CI installs, from
 # .github/workflows/ci.yml, plus liblensfun-bin for the lens database update.
@@ -92,7 +98,7 @@
 # --uninstall offers whichever installs it finds in /opt/darktable and
 # ~/.local/darktable, unless --user or --prefix names one. It also works when
 # the prefix is already gone, clearing the symlinks a failed install left
-# pointing at nothing - that case has no prefix to find, so it needs --prefix,
+# pointing at nothing. A prefix other than the default needs --prefix again,
 # and a failed run prints the exact command. Note that --prefix on its own only
 # moves the prefix: the symlinks and the desktop entry still go to the
 # system-wide locations unless --user comes with it.
@@ -127,6 +133,9 @@ DOWNLOAD="https://github.com/darktable-org/darktable/releases/download"
 SRC="${DT_SRC:-}"
 # in a tree this script unpacked: the release it holds, see fetch_source
 SOURCE_MARK=".install_release"
+# in a prefix this script installs into, written before the install starts, so
+# that one cut short is still recognized as ours and can be removed
+PREFIX_MARK=".install_release.prefix"
 CACHE=""    # set in main, once HOME is canonical
 SCRATCH=""
 PREFIX="" LINKDIR="" DATADIR=""
@@ -136,6 +145,10 @@ ACTION=install
 EXPLICIT_TARGET=0
 TAG="" PASSTHROUGH=()
 BUILD_DIR=""   # build.sh's --build-dir when given, relative to the source
+BUILD_TYPE_GIVEN=0
+CMAKE=""       # absolute: sudo's secure_path need not have it
+REPLACE_OK=0   # asked before building whether an install there may go
+ASSET="" DIGEST=""   # set by lookup_release
 # build.sh features turned on unless the command line decides either way,
 # for what cmake leaves off but darktable's own builds turn on: AI is on in
 # its CI (.ci/ci-script.sh) and its AppImage (tools/appimage-build-script.sh)
@@ -219,6 +232,12 @@ sudo_() {
   if [ "$USER_MODE" = 1 ] || [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi
 }
 
+# the package manager needs root even for a --user install, which sudo_ never
+# elevates
+_as_root() {
+  if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi
+}
+
 # a build that failed left its tree behind on purpose, so it could be looked
 # at. this is how you get rid of them afterwards
 clean_scratch() {
@@ -254,6 +273,16 @@ _canon() {
   realpath -m -- "$1"
 }
 
+# the contents, not the directory, and the mark last: a removal that fails
+# partway must leave a prefix still recognized as darktable's, or neither
+# --uninstall nor the next install would touch it again
+_empty_prefix() {
+  [ -f "$1/$PREFIX_MARK" ] ||
+    printf 'removing\n' | sudo_ tee "$1/$PREFIX_MARK" >/dev/null || return 1
+  sudo_ find "$1" -mindepth 1 -maxdepth 1 ! -name lost+found ! -name "$PREFIX_MARK" \
+    -exec rm -rf -- {} +
+}
+
 # true when $1, canonical and compared against a canonical HOME, is a directory
 # this script may create and destroy
 _is_private_prefix() {
@@ -267,16 +296,26 @@ _is_private_prefix() {
     /usr/local/*) ;;
     /usr|/usr/*)  return 1 ;;
   esac
-  # a home directory itself, and the ~/.local everything on the machine shares
-  case "$1" in "$HOME"|"$HOME/.local") return 1 ;; esac
+  # a home directory itself, and the .local everything in one is shared by.
+  # neither should pass _looks_like_darktable, but darktable keeps its AI
+  # models under ~/.local/share/darktable, so a slip there would cost data
+  case "${1##*/}" in .local) return 1 ;; esac
+  local homes h
+  mapfile -t homes < <({ getent passwd || cat /etc/passwd; } 2>/dev/null | cut -d: -f6)
+  for h in "$HOME" "${homes[@]}"; do
+    [ -z "$h" ] || [ "$(_canon "$h")" != "$1" ] || return 1
+  done
   return 0
 }
 
-# -L as well as -e: a failed install can leave bin/darktable dangling, and the
-# tool that made the mess should still be able to clear it up
+# only files an install has and darktable never writes at runtime:
+# share/darktable alone is also where it keeps AI models, and bin/darktable is
+# what a linkdir holds. the mark covers an install cut short before
+# noiseprofiles.json (data/CMakeLists.txt:151) was written. a build tree has
+# noiseprofiles.json too, copied in at configure time, but never a cache
 _looks_like_darktable() {
-  [ -e "$1/bin/darktable" ] || [ -L "$1/bin/darktable" ] ||
-    [ -d "$1/share/darktable" ]
+  [ ! -f "$1/CMakeCache.txt" ] &&
+    { [ -f "$1/share/darktable/noiseprofiles.json" ] || [ -f "$1/$PREFIX_MARK" ]; }
 }
 
 # why this prefix may not be created or destroyed, on stdout, with a non-zero
@@ -371,8 +410,12 @@ _uninstall_one() {
   fi
   local removed=0
   if [ -d "$prefix" ]; then
-    sudo_ rm -rf -- "$prefix"
+    { _empty_prefix "$prefix" && sudo_ rm -f -- "$prefix/$PREFIX_MARK"; } ||
+      die "could not remove everything in $prefix: see above"
+    # a mount point, or a prefix pre-created in a directory only root may
+    # write to, cannot go itself; empty, it does no harm
     removed=1
+    sudo_ rmdir -- "$prefix" 2>/dev/null || removed=2
   fi
   # the prefix was reached through a symlink: once the tree is gone, so is the
   # only thing that link was for. outside the branch above, because the pass
@@ -383,6 +426,8 @@ _uninstall_one() {
 
   if [ "$removed" = 1 ]; then
     note "removed $prefix and ${#links[@]} symlinks"
+  elif [ "$removed" = 2 ]; then
+    note "emptied $prefix, which could not itself be removed, and cleared ${#links[@]} symlinks"
   else
     note "$prefix was already gone; cleared ${#links[@]} symlinks it left behind"
   fi
@@ -480,28 +525,37 @@ list_releases() {
   printf '%s\n' "$out"
 }
 
-# unpack the release's own source tarball into $SRC, an empty directory,
-# checked against the digest GitHub publishes for it when there is one.
-# SOURCE_MARK says "unpacking" until the last file is out, then names the
-# release, so a run cut short is not mistaken for a tree to reuse
-fetch_source() {
-  local name="darktable-${TAG#release-}.tar.xz" json digest tarball
+# the release's source tarball and its digest, into ASSET and DIGEST. apart
+# from fetch_source so that a tag which does not exist is found out before a
+# kept tree is cleared for it.
+# here-strings rather than pipes: grep -q and awk leave early, and under
+# pipefail the printf feeding them can die of SIGPIPE and fail the lookup
+lookup_release() {
+  local name="darktable-${TAG#release-}.tar.xz" json names
   # curl -f fails alike on a missing release, a rate limit and no network
   json="$(curl -fsSL "$API/tags/$TAG")" ||
     die "could not look up $TAG on GitHub: no such release (try --list), or GitHub is unreachable or rate-limited"
   # the quoted name: the .asc beside it and the download URL contain it too
-  printf '%s\n' "$json" | grep '"name"' | grep -qF "\"$name\"" ||
-    die "release $TAG has no $name to build from"
+  names="$(grep '"name"' <<< "$json" || true)"
+  case "$names" in *"\"$name\""*) ;; *) die "release $TAG has no $name to build from" ;; esac
   # the asset's digest follows its name; its download URL closes it. one
   # uploaded before GitHub kept digests has "digest": null
-  digest="$(printf '%s\n' "$json" | awk -v q="\"$name\"" '
+  DIGEST="$(awk -v q="\"$name\"" '
     /"name"/ && index($0, q) { found = 1 }
     found && /"digest"/ {
       if (match($0, /sha256:[0-9a-f]+/)) print substr($0, RSTART + 7, RLENGTH - 7)
       exit
     }
-    found && /"browser_download_url"/ { exit }')"
+    found && /"browser_download_url"/ { exit }' <<< "$json")"
+  ASSET="$name"
+}
 
+# unpack the release's own source tarball into $SRC, an empty directory,
+# checked against the digest GitHub publishes for it when there is one.
+# SOURCE_MARK says "unpacking" until the last file is out, then names the
+# release, so a run cut short is not mistaken for a tree to reuse
+fetch_source() {
+  local name="$ASSET" digest="$DIGEST" tarball
   # in the scratch tree when there is one, which an interrupted run keeps for
   # --clean anyway. otherwise --clean knows this name
   mkdir -p "$CACHE"
@@ -585,7 +639,7 @@ install_deps() {
   # not `[ x ] || cmd`: the command after the last || is not exempt from set -e,
   # so an unreachable repository would end the run with nothing printed
   if [ "$mgr" = apt ]; then
-    sudo_ apt-get update ||
+    _as_root apt-get update ||
       die "apt-get update failed; fix the repository it named and re-run"
   fi
   # pacman is not synced here on purpose: -Sy followed by installing a few
@@ -594,6 +648,14 @@ install_deps() {
   # like darktable is unpackageable on Arch
   [ "$mgr" != pacman ] || pacman -Sl >/dev/null 2>&1 ||
     die "pacman has no synced package database; run 'sudo pacman -Syu' first"
+
+  # either curl flavor satisfies find_package(CURL), and the two dev packages
+  # conflict: asking for gnutls where openssl is installed would remove it
+  if [ "$mgr" = apt ]; then
+    case "$(dpkg-query -W -f='${Status}' libcurl4-openssl-dev 2>/dev/null || true)" in
+      *" installed") pkgs="${pkgs/libcurl4-gnutls-dev/libcurl4-openssl-dev}" ;;
+    esac
+  fi
 
   # dnf has a flag for this; apt and pacman need the list narrowed by hand
   if [ "$mgr" != dnf ]; then
@@ -609,12 +671,14 @@ install_deps() {
   fi
 
   case "$mgr" in
+    # --no-remove: a conflict would otherwise be settled by removing whatever
+    # is installed, and everything that depends on it
     apt)    # shellcheck disable=SC2086
-            sudo_ apt-get install -y $pkgs ;;
+            _as_root apt-get install -y --no-remove $pkgs ;;
     dnf)    # shellcheck disable=SC2086
-            sudo_ dnf install -y "$(_dnf_skip_flag)" $pkgs ;;
+            _as_root dnf install -y "$(_dnf_skip_flag)" $pkgs ;;
     pacman) # shellcheck disable=SC2086
-            sudo_ pacman -S --needed --noconfirm $pkgs ;;
+            _as_root pacman -S --needed --noconfirm $pkgs ;;
   esac
 }
 
@@ -732,9 +796,13 @@ clean_prefix() {
   # the gate also passes an empty directory, which people pre-create so the
   # install needs no root: nothing to replace there, and nothing to ask about
   _looks_like_darktable "$PREFIX" || return 0
-  ask "replace the existing install in $PREFIX?" || die "nothing done"
+  # main asked before the build; this is for an install that appeared since
+  [ "$REPLACE_OK" = 1 ] ||
+    ask "replace the existing install in $PREFIX?" || die "nothing done"
   note "removing the previous install"
-  sudo_ rm -rf -- "$PREFIX"
+  # the contents, not the directory: a mount point, or a prefix pre-created in
+  # a directory only root may write to, cannot itself be removed
+  _empty_prefix "$PREFIX" || die "could not empty $PREFIX: see above"
 }
 
 # a here-doc rather than the header comment: piped from curl $0 is "bash" and
@@ -752,7 +820,7 @@ Installation:
                               (default: /opt/darktable)
    --user                     Install under \$HOME, needing no root
                               (prefix: ~/.local/darktable)
-   --yes                      Do not ask before installing packages or
+   -y --yes                   Do not ask before installing packages or
                               replacing an install
 
 Build:
@@ -763,16 +831,19 @@ Build:
 
 Actual actions:
    --list                     Print the recent releases and exit
-   --desktop-only             Only refresh the menu entry and icons
+   --desktop-only             Only relink the binaries, menu entry and icons
    --uninstall                Remove an install made by this script
    --clean                    Remove source trees left by failed builds
 
 Additional build.sh and cmake options:
-Anything not listed above is passed to build.sh, so --disable-ai,
---disable-opencl and -j work; "build.sh --help" lists them. AI is built
+build.sh's --enable-X, --disable-X, --asan, --build-type, --build-dir,
+--build-generator and -j are passed to it; "build.sh --help" lists
+them. Any other option is refused. AI is built
 by default, and without it if it cannot be configured; --disable-ai
-leaves it out, --enable-ai makes it required. build.sh's --install
-and --sudo are refused.
+leaves it out, --enable-ai makes it required. The build type is
+Release unless --build-type says otherwise. build.sh's --install,
+--sudo, --skip-* and --clean-* are refused, and cmake options go
+after --, except CMAKE_INSTALL_PREFIX: use --prefix.
 
 Environment:
    DT_SRC                     Source tree to keep and reuse: empty, or
@@ -788,33 +859,62 @@ from source, where it installs, the source tree, dependencies, and removing it.
 EOF
 }
 
+# absolute, so that " ", "." and ".." cannot resolve to the working directory
+# and have it removed
+_take_prefix() {
+  [ -n "$1" ] || die "--prefix needs a directory"
+  case "$1" in /*) ;; *) die "--prefix needs an absolute path, not '$1'" ;; esac
+  PREFIX="$1"; EXPLICIT_TARGET=1
+}
+
 main() {
-  local why
+  # sudo combines its umask with the caller's, so a caller's 077 would leave
+  # the prefix, the links' directories and the system-wide desktop and icon
+  # caches unreadable to everyone else
+  umask 022
+  local why action_flag="" install_flag="" a
   while [ $# -gt 0 ]; do
     case "$1" in
-      --list)         ACTION=list ;;
-      --clean)        ACTION=clean ;;
-      --uninstall)    ACTION=uninstall ;;
-      --desktop-only) ACTION=desktop ;;
+      --list)         ACTION=list;      action_flag="$1" ;;
+      --clean)        ACTION=clean;     action_flag="$1" ;;
+      --uninstall)    ACTION=uninstall; action_flag="$1" ;;
+      --desktop-only) ACTION=desktop;   action_flag="$1" ;;
       --user)         USER_MODE=1; EXPLICIT_TARGET=1 ;;
-      --keep-source)  KEEP_SRC=1 ;;
-      --skip-deps)    SKIP_DEPS=1 ;;
-      --skip-lensfun) SKIP_LENSFUN=1 ;;
+      --keep-source)  KEEP_SRC=1;       install_flag="$1" ;;
+      --skip-deps)    SKIP_DEPS=1;      install_flag="$1" ;;
+      --skip-lensfun) SKIP_LENSFUN=1;   install_flag="$1" ;;
       --yes|-y)       ASSUME_YES=1 ;;
-      --prefix)       [ $# -ge 2 ] && [ -n "$2" ] || die "--prefix needs a directory"
-                      # absolute, so that " ", "." and ".." cannot resolve to
-                      # the working directory and have it removed
-                      case "$2" in /*) ;;
-                        *) die "--prefix needs an absolute path, not '$2'" ;; esac
-                      PREFIX="$2"; EXPLICIT_TARGET=1; shift ;;
+      --prefix)       [ $# -ge 2 ] || die "--prefix needs a directory"
+                      _take_prefix "$2"; shift ;;
+      --prefix=*)     _take_prefix "${1#--prefix=}" ;;
       # build.sh's, but they undo decisions this script makes on purpose:
       # --install would install before clean_prefix has emptied the prefix, and
       # --sudo would make a --user install root-owned and unremovable
       --install|--sudo)
                       die "$1 is build.sh's; this script decides when to install and when to use root" ;;
+      # these too: --skip-* exit 0 without a build, after which the old
+      # install would be replaced with nothing new, and --clean-* remove what
+      # an earlier install from this tree listed, wherever that was, and
+      # prompt on stdin, which is this script when piped
+      --skip-build|--skip-config|--clean-build|--clean-install|--clean-all)
+                      die "$1 is build.sh's; this script decides what to build and what to remove" ;;
       --help|-h)      usage; exit 0 ;;
-      # everything past -- is build.sh's, to hand on to cmake
-      --)             PASSTHROUGH+=("$@"); break ;;
+      # everything past -- is build.sh's, to hand on to cmake. build.sh puts
+      # these after its own -DCMAKE_INSTALL_PREFIX, so one here would win over
+      # the prefix vetted below, and an absolute install directory would put
+      # files where neither the prefix nor --uninstall reaches
+      --)             for a in "$@"; do
+                        case "$a" in
+                          -DCMAKE_INSTALL_PREFIX[:=]*|CMAKE_INSTALL_PREFIX[:=]*|--install-prefix*)
+                            die "the install prefix is set with --prefix, not after --" ;;
+                          -DCMAKE_INSTALL_*DIR=/*|-DCMAKE_INSTALL_*DIR:*=/*)
+                            die "$a would install outside the prefix" ;;
+                        esac
+                      done
+                      PASSTHROUGH+=("$@"); break ;;
+      # build.sh hands cmake only what follows -- (build.sh:124-127) and
+      # ignores an unknown option before it with a warning that scrolls away
+      -D*)            die "$1 is a cmake option; cmake options go after --" ;;
       # build.sh's value-taking options (build.sh:78-95), and only these. the
       # value travels with the flag, so a bare word left over is unambiguously
       # the release tag: guessing from the shape of the word instead both
@@ -822,24 +922,47 @@ main() {
       --build-type|--buildtype|--build-dir|--build-generator|-j|--jobs)
                       # the install step needs to know where the build went
                       [ "$1" != --build-dir ] || BUILD_DIR="${2:-}"
+                      case "$1" in --build-type|--buildtype) BUILD_TYPE_GIVEN=1 ;; esac
                       PASSTHROUGH+=("$1")
                       [ $# -lt 2 ] || { PASSTHROUGH+=("$2"); shift; } ;;
-      -*)             PASSTHROUGH+=("$1") ;;
+      --enable-*|--disable-*|--asan)
+                      PASSTHROUGH+=("$1") ;;
+      # build.sh only takes the value as a separate word, and anything it does
+      # not know it warns about and ignores, in a log too long to notice that
+      --build-type=*|--buildtype=*|--build-dir=*|--build-generator=*|--jobs=*)
+                      die "write '${1%%=*} ${1#*=}': build.sh takes no --option=value" ;;
+      -*)             die "unknown option $1; see --help" ;;
       *)              [ -n "$1" ] || die "empty argument; give a release tag or nothing"
                       [ -z "$TAG" ] || die "more than one release tag given: $TAG and $1"
                       TAG="$1" ;;
     esac
     shift
   done
-  # a default feature is added unless the line already decides it, either way
-  # and wherever: as build.sh's switch or as the cmake option it stands for
-  local feature arg decided defaulted=()
+  # the actions take none of the build's options, and would otherwise ignore
+  # them without a word
+  if [ "$ACTION" != install ]; then
+    [ "${#PASSTHROUGH[@]}" = 0 ] ||
+      die "build options do not apply to $action_flag: ${PASSTHROUGH[*]}"
+    [ -z "$TAG" ] || die "a release tag does not apply to $action_flag"
+    [ -z "$install_flag" ] || die "$install_flag does not apply to $action_flag"
+  fi
+
+  # a default feature is added unless the line already decides it, either way:
+  # as build.sh's switch before --, or as the cmake option it stands for after
+  local feature arg decided past defaulted=()
   for feature in $DEFAULT_FEATURES; do
-    decided=0
+    decided=0 past=0
     for arg in "${PASSTHROUGH[@]}"; do
-      case "$arg" in
-        --enable-"$feature"|--disable-"$feature"|-DUSE_"${feature^^}"=*) decided=1 ;;
-      esac
+      if [ "$past" = 0 ]; then
+        case "$arg" in
+          --) past=1 ;;
+          --enable-"$feature"|--disable-"$feature") decided=1 ;;
+        esac
+      else
+        case "$arg" in
+          -DUSE_"${feature^^}"[:=]*|USE_"${feature^^}"[:=]*) decided=1 ;;
+        esac
+      fi
     done
     [ "$decided" = 1 ] || defaulted+=("$feature")
   done
@@ -857,9 +980,12 @@ main() {
   # trailing slash or a symlinked component (/home -> /export/home is an
   # ordinary layout) would otherwise walk straight past that comparison
   HOME="$(_canon "$HOME")"
-  # after HOME: a relative one would leave SCRATCH relative, and the cleanup
-  # trap cannot find the tree again once the build has cd'd into it
-  CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
+  # absolute, as is DT_SRC: relative, the build log, SCRATCH and the cleanup
+  # trap would all miss once the build has cd'd into the tree
+  CACHE="$(_canon "${XDG_CACHE_HOME:-$HOME/.cache}")"
+  [ -z "$SRC" ] || SRC="$(_canon "$SRC")"
+  [ -z "${DT_LINKDIR:-}" ] || DT_LINKDIR="$(_canon "$DT_LINKDIR")"
+  [ -z "${XDG_DATA_HOME:-}" ] || XDG_DATA_HOME="$(_canon "$XDG_DATA_HOME")"
 
   # a self-contained prefix in both modes: it can be deleted in one go, which
   # merging into /usr/local or ~/.local would not allow
@@ -897,7 +1023,7 @@ main() {
     exit 0
   fi
 
-  for tool in curl tar xz sha256sum cmake; do
+  for tool in curl tar xz sha256sum; do
     command -v "$tool" >/dev/null || die "$tool is not installed"
   done
 
@@ -907,8 +1033,16 @@ main() {
   fi
   note "building $TAG into $PREFIX"
   [ "$USER_MODE" = 1 ] && note "user install: nothing here needs root except the dependencies"
+  # asked now rather than after the build: a long compile is wasted when the
+  # answer is no, and keys pressed while it ran could answer it
+  if _looks_like_darktable "$PREFIX"; then
+    ask "replace the existing install in $PREFIX?" || die "nothing done"
+    REPLACE_OK=1
+  fi
 
   [ "$SKIP_DEPS" = 1 ] || install_deps
+  # after install_deps, which installs it
+  CMAKE="$(command -v cmake)" || die "cmake is not installed"
 
   local version="${TAG#release-}"
   if [ -z "$SRC" ]; then
@@ -930,13 +1064,15 @@ main() {
   [ -f "$SRC/$SOURCE_MARK" ] && mark="$(cat "$SRC/$SOURCE_MARK")"
   if [ "$mark" = "$TAG" ]; then
     note "reusing the $version source in $SRC"
-  elif [ -n "$mark" ]; then
-    note "clearing $SRC ($mark), to unpack $version"
-    find "$SRC" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-    fetch_source
-  elif [ -n "$(ls -A "$SRC" 2>/dev/null)" ]; then
-    die "$SRC holds something other than the $version source; remove it, or give DT_SRC an empty directory"
   else
+    [ -n "$mark" ] || [ -z "$(ls -A "$SRC" 2>/dev/null)" ] ||
+      die "$SRC holds something other than the $version source; remove it, or give DT_SRC an empty directory"
+    # before the tree is cleared: a mistyped tag must not cost a kept one
+    lookup_release
+    if [ -n "$mark" ]; then
+      note "clearing $SRC ($mark), to unpack $version"
+      find "$SRC" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    fi
     fetch_source
   fi
 
@@ -945,8 +1081,11 @@ main() {
   # already installed there working
   note "compiling"
   # the switches go first: PASSTHROUGH may hold a "--", and build.sh hands
-  # whatever follows it to cmake untouched
-  local build_args=() dropped=0
+  # whatever follows it to cmake untouched. Release, as darktable's AppImage
+  # is built, rather than build.sh's default RelWithDebInfo
+  local base_args=() build_args=() dropped=0
+  [ "$BUILD_TYPE_GIVEN" = 1 ] || base_args+=(--build-type Release)
+  build_args=("${base_args[@]}")
   for feature in "${defaulted[@]}"; do build_args+=(--enable-"$feature"); done
   build_args+=("${PASSTHROUGH[@]}")
   # logged to tell a failed configure step from a failed compile: only the
@@ -957,12 +1096,13 @@ main() {
     [ "${#defaulted[@]}" -gt 0 ] &&
       grep -q 'Configuring incomplete, errors occurred' "$log" ||
       die "the build failed: see above"
-    note "warning: configuring failed, see above; building again without ${defaulted[*]}"
-    build_args=()
+    note "warning: configuring failed, see above; retrying without ${defaulted[*]} in case that is the cause"
+    build_args=("${base_args[@]}")
     for feature in "${defaulted[@]}"; do build_args+=(--disable-"$feature"); done
     build_args+=("${PASSTHROUGH[@]}")
     dropped=1
-    ./build.sh --prefix "$PREFIX" "${build_args[@]}"
+    ./build.sh --prefix "$PREFIX" "${build_args[@]}" ||
+      die "the build failed, with and without ${defaulted[*]}: see above"
   fi
 
   clean_prefix
@@ -970,19 +1110,34 @@ main() {
   note "installing"
   # clean_prefix has already emptied the prefix by now, so a failure here
   # leaves the previous install's symlinks pointing at nothing. name the one
-  # command that clears them, since --uninstall alone will not find a prefix
-  # that is no longer there
-  local recover="--uninstall --prefix $PREFIX"
+  # command that clears them: plain --uninstall looks only in the default
+  # places, not in a prefix given with --prefix
+  # piped from curl $0 is the shell, which would make the command useless
+  local self="$0" recover
+  case "${self##*/}" in bash|-bash|sh|-sh|dash|zsh) self="install_release.sh" ;; esac
+  recover="$(printf '%q --uninstall --prefix %q' "$self" "$PREFIX")"
   [ "$USER_MODE" = 0 ] || recover="$recover --user"
+  # removed with the privilege that writes it, before and after the install: a
+  # root-owned one in a kept tree breaks a later --user install from it
+  local manifest="${BUILD_DIR:-build}/install_manifest.txt" rc=0
+  sudo_ rm -f -- "$manifest" || true
   # the install rules alone. build.sh --install would configure and build
   # again first, and a source package rewrites version_gen.c on every build,
   # so everything would be relinked. sudo_ is a no-op for a --user install,
-  # which root would leave root-owned and the next --uninstall unable to remove
-  sudo_ cmake --install "${BUILD_DIR:-build}" ||
-    die "the install failed; run '$0 $recover' to clear what the previous one left behind"
+  # which root would leave root-owned and the next --uninstall unable to remove.
+  # the mode is set because clean_prefix keeps the directory, and with it a
+  # 0700 left by an earlier run. the mark goes in first, so that an install
+  # cut short is still one --uninstall recognizes
+  { sudo_ mkdir -p "$PREFIX" &&
+      sudo_ chmod 755 "$PREFIX" &&
+      printf '%s\n' "$TAG" | sudo_ tee "$PREFIX/$PREFIX_MARK" >/dev/null &&
+      sudo_ "$CMAKE" --install "${BUILD_DIR:-build}"; } || rc=$?
+  sudo_ rm -f -- "$manifest" || true
+  [ "$rc" = 0 ] ||
+    die "the install failed; run '$recover' to clear what the previous one left behind"
 
   [ -x "$PREFIX/bin/darktable" ] ||
-    die "build finished but $PREFIX/bin/darktable is missing; run '$0 $recover' to clean up"
+    die "build finished but $PREFIX/bin/darktable is missing; run '$recover' to clean up"
   local unlinked=0
   link_binaries || unlinked=1
   install_desktop
