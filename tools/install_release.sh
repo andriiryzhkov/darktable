@@ -66,9 +66,10 @@ RPM_PACKAGES="
   gcc gcc-c++ cmake ninja-build git gettext intltool
   desktop-file-utils libappstream-glib perl po4a
   cairo-devel colord-devel colord-gtk-devel cups-devel exiv2-devel
-  gtk3-devel gmic-devel GraphicsMagick-devel LibRaw-devel lcms2-devel
+  glib2-devel gtk3-devel gmic-devel GraphicsMagick-devel Imath-devel
+  iso-codes-devel LibRaw-devel lcms2-devel libicu-devel libjxl-devel
   lensfun lensfun-devel libavif-devel libcurl-devel libgphoto2-devel libheif-devel
-  libjpeg-turbo-devel libomp-devel libpng-devel librsvg2-devel libsecret-devel
+  libjpeg-turbo-devel libpng-devel librsvg2-devel libsecret-devel
   libtiff-devel libwebp-devel libxml2-devel libxslt json-glib-devel
   lua-devel opencv-devel OpenEXR-devel openjpeg2-devel osm-gps-map-devel
   portmidi-devel potrace-devel pugixml-devel SDL2-devel sqlite-devel
