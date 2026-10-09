@@ -634,7 +634,12 @@ install_deps() {
     note "note: the $mgr package list is a best-effort mapping and is not tested by darktable's CI"
   fi
 
-  ask "install build dependencies with $mgr?" || die "cannot build without them (use --skip-deps if they are already installed)"
+  # no is --skip-deps asked late: they may well be installed already, and if
+  # not, configuring names what is missing
+  if ! ask "install build dependencies with $mgr?"; then
+    note "skipping the build dependencies; the build stops if one is missing"
+    return 0
+  fi
 
   # not `[ x ] || cmd`: the command after the last || is not exempt from set -e,
   # so an unreachable repository would end the run with nothing printed
