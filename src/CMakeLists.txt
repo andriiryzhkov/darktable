@@ -1229,15 +1229,12 @@ if(USE_MCP)
   add_subdirectory(mcp)
 endif()
 
-# headless server backend for webview UI (and future web/remote clients)
-if(BUILD_SERVER)
+# nova: webview-based desktop UI host, plus the headless server backend
+# it starts in --server mode (and future web/remote clients)
+if(USE_NOVA)
   add_subdirectory(server)
-endif(BUILD_SERVER)
-
-# nova: webview-based desktop UI host
-if(BUILD_NOVA)
   add_subdirectory(webview)
-endif(BUILD_NOVA)
+endif(USE_NOVA)
 
 # have a command line utility to generate all the thumbnails
 add_subdirectory(generate-cache)

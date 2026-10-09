@@ -102,7 +102,13 @@ git submodule update --init src/external/webview src/external/nativefiledialog-e
 Configure and build darktable with Nova enabled:
 
 ```bash
-cmake -B build -DBUILD_NOVA=ON -DBUILD_SERVER=ON
+./build.sh --enable-nova
+```
+
+or, driving cmake by hand:
+
+```bash
+cmake -B build -DUSE_NOVA=ON
 cmake --build build -j
 ```
 
@@ -110,8 +116,7 @@ This produces `build/bin/darktable-nova` and `build/bin/darktable-server`.
 
 | CMake option | Default | Meaning |
 |--------------|---------|---------|
-| `BUILD_NOVA` | `OFF` | build `darktable-nova` |
-| `BUILD_SERVER` | `OFF` | build the standalone `darktable-server` (only needed for `--server`) |
+| `USE_NOVA` | `OFF` | build `darktable-nova` and `darktable-server` (the backend for `--server` mode) |
 | `BUILD_WEBVIEW_DIRECT` | `ON` | link `libdarktable` into `darktable-nova` for direct mode |
 
 Install the frontend dependencies:
