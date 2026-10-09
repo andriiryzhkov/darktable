@@ -96,7 +96,7 @@ There are two transport modes:
 Fetch the two additional submodules:
 
 ```bash
-git submodule update --init src/external/webview src/external/nativefiledialog-extended
+git submodule update --init --recursive src/external/webview src/external/nativefiledialog-extended
 ```
 
 Configure and build darktable with Nova enabled:
