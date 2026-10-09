@@ -119,10 +119,12 @@ void dt_titlebar_init(webview_t w)
   g_window = (GtkWindow *)webview_get_native_handle(
       w, WEBVIEW_NATIVE_HANDLE_KIND_UI_WINDOW);
 
-  // Remove native decorations — webview extends to top edge.
-  // An idle callback will inject an overlay with window control
-  // buttons once the webview library adds the WebKitWebView.
-  gtk_window_set_decorated(g_window, FALSE);
+  // Replace the native titlebar with one that is never shown, so the
+  // webview extends to the top edge. Unlike gtk_window_set_decorated(FALSE)
+  // this keeps client-side decorations, which carry the resize borders
+  // and the shadow. An idle callback will inject an overlay with window
+  // control buttons once the webview library adds the WebKitWebView.
+  gtk_window_set_titlebar(g_window, gtk_fixed_new());
   g_idle_add(_inject_overlay, NULL);
 }
 
