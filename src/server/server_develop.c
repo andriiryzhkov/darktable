@@ -1261,7 +1261,7 @@ char *dt_server_develop_get_params(dt_server_t *server, const dt_server_request_
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -1686,7 +1686,7 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -1838,7 +1838,7 @@ char *dt_server_develop_set_params(dt_server_t *server, const dt_server_request_
                                : target->default_blendop_params,
                              pipe, piece);
         // Invalidate cache from this module onwards
-        dt_dev_pixelpipe_cache_invalidate_later(pipe, target->iop_order);
+        dt_dev_pixelpipe_cache_invalidate_later(pipe, target->iop_order, "nova: ");
         break;
       }
     }
@@ -2077,7 +2077,7 @@ char *dt_server_develop_commit_params(dt_server_t *server, const dt_server_reque
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -2130,7 +2130,7 @@ char *dt_server_develop_reset_params(dt_server_t *server, const dt_server_reques
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -2524,7 +2524,7 @@ char *dt_server_develop_list_presets(dt_server_t *server, const dt_server_reques
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -2622,7 +2622,7 @@ char *dt_server_develop_apply_preset(dt_server_t *server, const dt_server_reques
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -2670,7 +2670,7 @@ char *dt_server_develop_apply_preset(dt_server_t *server, const dt_server_reques
      && (blendop_version == dt_develop_blend_version())
      && (bl_length == (int)sizeof(dt_develop_blend_params_t)))
   {
-    dt_iop_commit_blend_params(target, blendop_params);
+    dt_iop_commit_blend_params(target, blendop_params, NULL);
   }
   else if(blendop_params
           && dt_develop_blend_legacy_params(target, blendop_params,
@@ -2681,7 +2681,7 @@ char *dt_server_develop_apply_preset(dt_server_t *server, const dt_server_reques
   }
   else
   {
-    dt_iop_commit_blend_params(target, target->default_blendop_params);
+    dt_iop_commit_blend_params(target, target->default_blendop_params, NULL);
   }
 
   sqlite3_finalize(stmt);
@@ -2776,7 +2776,7 @@ char *dt_server_develop_store_preset(dt_server_t *server, const dt_server_reques
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -2884,7 +2884,7 @@ static dt_iop_module_t *_find_module(dt_server_session_t *session, const char *o
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op) && mod->multi_priority == instance)
+    if(dt_iop_module_so_is(mod->so, op) && mod->multi_priority == instance)
       return mod;
   }
   return NULL;
@@ -3004,7 +3004,7 @@ char *dt_server_develop_new_instance(dt_server_t *server, const dt_server_reques
     module->enabled = base->enabled;
     if(module->flags() & IOP_FLAGS_SUPPORTS_BLENDING)
     {
-      dt_iop_commit_blend_params(module, base->blend_params);
+      dt_iop_commit_blend_params(module, base->blend_params, NULL);
       if(dt_is_valid_maskid(base->blend_params->mask_id))
       {
         module->blend_params->mask_id = NO_MASKID;
@@ -3238,7 +3238,7 @@ char *dt_server_develop_set_blend_param(dt_server_t *server, const dt_server_req
   else
     return dt_server_make_error(req->id, DT_SERVER_ERR_PARAMS, "Unknown blend param");
 
-  dt_iop_commit_blend_params(module, bp);
+  dt_iop_commit_blend_params(module, bp, NULL);
   dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
 
   fprintf(stderr, "[server] develop.set_blend_param: op=%s instance=%d param=%s\n",
@@ -3327,7 +3327,7 @@ char *dt_server_develop_get_introspection(dt_server_t *server, const dt_server_r
   for(GList *modules = session->dev.iop; modules; modules = g_list_next(modules))
   {
     dt_iop_module_t *mod = modules->data;
-    if(dt_iop_module_is(mod->so, op))
+    if(dt_iop_module_so_is(mod->so, op))
     {
       target = mod;
       break;
@@ -4723,7 +4723,7 @@ char *dt_server_develop_create_mask(dt_server_t *server, const dt_server_request
       if(!(module->blend_params->mask_mode & DEVELOP_MASK_MASK))
         module->blend_params->mask_mode |= DEVELOP_MASK_MASK;
 
-      dt_iop_commit_blend_params(module, module->blend_params);
+      dt_iop_commit_blend_params(module, module->blend_params, NULL);
       dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
       dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
     }
@@ -5027,7 +5027,7 @@ char *dt_server_develop_assign_mask(dt_server_t *server, const dt_server_request
   if(!(module->blend_params->mask_mode & DEVELOP_MASK_MASK))
     module->blend_params->mask_mode |= DEVELOP_MASK_MASK;
 
-  dt_iop_commit_blend_params(module, module->blend_params);
+  dt_iop_commit_blend_params(module, module->blend_params, NULL);
   dt_dev_add_history_item_ext(&session->dev, module, module->enabled, TRUE);
   dt_dev_add_masks_history_item_ext(&session->dev, NULL, TRUE, FALSE);
   dt_dev_write_history(&session->dev);
