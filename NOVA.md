@@ -250,3 +250,5 @@ As of October 2026:
 - [WEBVIEW_ALTERNATIVES.md](src/webview/docs/WEBVIEW_ALTERNATIVES.md): why
   webview/webview was chosen
 - [NOVA.md](src/webview/docs/NOVA.md): system requirements and memory use
+- [REMOTE.md](src/webview/docs/REMOTE.md): plan for remote control over
+  the local network
