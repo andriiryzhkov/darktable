@@ -56,18 +56,25 @@
 #
 # THE SOURCE TREE
 #
-# By default the source is fetched into a scratch directory under ~/.cache and
-# removed once the install succeeds. A clone and build want around 800 MB, and
-# ~/.cache rather than /tmp because /tmp is often tmpfs. A failed build keeps
-# its tree and prints the path, so you can see what went wrong; --clean removes
-# those afterwards. --keep-source keeps it at ~/src/darktable-release instead
-# and reuses it. The clone is blobless (--filter=blob:none), around 50 MB rather
-# than the gigabytes a full history costs, while still carrying every tag.
+# The source is the release's own tarball, darktable-<version>.tar.xz, the one
+# distributions build from: about 8 MB, with every submodule the build needs and
+# without the integration test images. Its SHA-256 is checked against the digest
+# GitHub publishes for it; releases before 5.2.0 have none, and say so. A tree
+# without .git is also built as a source package (CMakeLists.txt), so a
+# compiler newer than darktable's CI warns rather than stops the build.
+#
+# By default it is unpacked into a scratch directory under ~/.cache and removed
+# once the install succeeds. A build wants around 800 MB, and ~/.cache rather
+# than /tmp because /tmp is often tmpfs. A failed build keeps its tree and
+# prints the path, so you can see what went wrong; --clean removes those
+# afterwards. --keep-source keeps it at ~/src/darktable-<version> instead, and
+# builds the same release again there without unpacking it again, recompiling
+# only what changed. An unpack cut short is noticed and done again.
 #
 # DEPENDENCIES
 #
-# git, curl, cmake and realpath have to be there already. Everything the build
-# itself needs is installed for you, unless --skip-deps.
+# curl, tar, xz, sha256sum, cmake and realpath have to be there already.
+# Everything the build itself needs is installed for you, unless --skip-deps.
 #
 # The Debian and Ubuntu list is the one darktable's own CI installs, from
 # .github/workflows/ci.yml, plus liblensfun-bin for the lens database update.
@@ -111,13 +118,15 @@ case "$(uname -s)" in
   *)      printf 'this script is Linux only (found %s)\n' "$(uname -s)" >&2; exit 1 ;;
 esac
 
-REPO="https://github.com/darktable-org/darktable.git"
 API="https://api.github.com/repos/darktable-org/darktable/releases"
+DOWNLOAD="https://github.com/darktable-org/darktable/releases/download"
 # DT_SRC names a tree to keep and reuse. with neither it nor --keep-source the
-# source is fetched into a scratch directory and removed once installed.
-# under $HOME rather than /tmp: a clone and build want ~800M, and /tmp is
-# frequently tmpfs, so this would otherwise be ~800M of RAM
+# source is unpacked into a scratch directory and removed once installed.
+# under $HOME rather than /tmp: a build wants ~800M, and /tmp is frequently
+# tmpfs, so this would otherwise be ~800M of RAM
 SRC="${DT_SRC:-}"
+# in a tree this script unpacked: the release it holds, see fetch_source
+SOURCE_MARK=".install_release"
 CACHE=""    # set in main, once HOME is canonical
 SCRATCH=""
 PREFIX="" LINKDIR="" DATADIR=""
@@ -213,8 +222,9 @@ sudo_() {
 # at. this is how you get rid of them afterwards
 clean_scratch() {
   local found=0 d
-  for d in "$CACHE"/darktable-install.*; do
-    [ -d "$d" ] || continue          # no match leaves the glob unexpanded
+  # and a download that was interrupted before fetch_source could remove it
+  for d in "$CACHE"/darktable-install.* "$CACHE"/darktable-source.*; do
+    [ -e "$d" ] || continue          # no match leaves the glob unexpanded
     printf '  %s  %s\n' "$(du -sh "$d" 2>/dev/null | cut -f1)" "$d"
     found=$((found + 1))
   done
@@ -222,14 +232,17 @@ clean_scratch() {
   if [ "$found" = 0 ]; then
     note "no leftover source trees in $CACHE"
   else
-    ask "remove these $found source trees?" || die "nothing done"
-    rm -rf -- "$CACHE"/darktable-install.*
+    ask "remove these $found leftovers?" || die "nothing done"
+    rm -rf -- "$CACHE"/darktable-install.* "$CACHE"/darktable-source.*
     note "removed $found"
   fi
 
-  # the kept tree is deliberate, so say it is there rather than delete it
-  [ -d "$HOME/src/darktable-release" ] &&
-    note "note: the --keep-source tree at ~/src/darktable-release ($(du -sh "$HOME/src/darktable-release" 2>/dev/null | cut -f1)) is left alone"
+  # the kept trees are deliberate, so say they are there rather than delete
+  # them. darktable-release is where versions before the tarball kept theirs
+  for d in "$HOME"/src/darktable-[0-9]* "$HOME/src/darktable-release"; do
+    [ -d "$d" ] || continue
+    note "note: the --keep-source tree at $d ($(du -sh "$d" 2>/dev/null | cut -f1)) is left alone"
+  done
   return 0
 }
 
@@ -464,6 +477,50 @@ list_releases() {
     | awk '{ printf "%-18s %s\n", $1, ($2=="true" ? "(prerelease)" : "") }')" || true
   [ -n "$out" ] || die "could not read the release list from the GitHub API"
   printf '%s\n' "$out"
+}
+
+# unpack the release's own source tarball into $SRC, an empty directory,
+# checked against the digest GitHub publishes for it when there is one.
+# SOURCE_MARK says "unpacking" until the last file is out, then names the
+# release, so a run cut short is not mistaken for a tree to reuse
+fetch_source() {
+  local name="darktable-${TAG#release-}.tar.xz" json digest tarball
+  # curl -f fails alike on a missing release, a rate limit and no network
+  json="$(curl -fsSL "$API/tags/$TAG")" ||
+    die "could not look up $TAG on GitHub: no such release (try --list), or GitHub is unreachable or rate-limited"
+  # the quoted name: the .asc beside it and the download URL contain it too
+  printf '%s\n' "$json" | grep '"name"' | grep -qF "\"$name\"" ||
+    die "release $TAG has no $name to build from"
+  # the asset's digest follows its name; its download URL closes it. one
+  # uploaded before GitHub kept digests has "digest": null
+  digest="$(printf '%s\n' "$json" | awk -v q="\"$name\"" '
+    /"name"/ && index($0, q) { found = 1 }
+    found && /"digest"/ {
+      if (match($0, /sha256:[0-9a-f]+/)) print substr($0, RSTART + 7, RLENGTH - 7)
+      exit
+    }
+    found && /"browser_download_url"/ { exit }')"
+
+  # in the scratch tree when there is one, which an interrupted run keeps for
+  # --clean anyway. otherwise --clean knows this name
+  mkdir -p "$CACHE"
+  tarball="$(mktemp "${SCRATCH:-$CACHE}/darktable-source.XXXXXX")"
+  note "downloading $name"
+  curl -fL --progress-bar -o "$tarball" "$DOWNLOAD/$TAG/$name" ||
+    { rm -f "$tarball"; die "could not download $name"; }
+  if [ -n "$digest" ]; then
+    printf '%s  %s\n' "$digest" "$tarball" | sha256sum -c --quiet - ||
+      { rm -f "$tarball"; die "$name does not match the digest GitHub publishes for it"; }
+    note "checksum verified"
+  else
+    note "warning: GitHub publishes no digest for $name, so it is not verified"
+  fi
+  mkdir -p "$SRC"
+  printf 'unpacking %s\n' "$TAG" > "$SRC/$SOURCE_MARK"
+  tar -xJf "$tarball" -C "$SRC" --strip-components=1 ||
+    { rm -f "$tarball"; die "could not unpack $name"; }
+  printf '%s\n' "$TAG" > "$SRC/$SOURCE_MARK"
+  rm -f "$tarball"
 }
 
 # --- dependencies ---------------------------------------------------------
@@ -701,7 +758,7 @@ Build:
    --skip-deps                Do not touch the package manager
    --skip-lensfun             Do not update the lensfun lens database
    --keep-source              Keep the source tree and reuse it next time
-                              (default: ~/src/darktable-release)
+                              (default: ~/src/darktable-<version>)
 
 Actual actions:
    --list                     Print the recent releases and exit
@@ -717,7 +774,8 @@ leaves it out, --enable-ai makes it required. build.sh's --install
 and --sudo are refused.
 
 Environment:
-   DT_SRC                     Source tree to keep and reuse
+   DT_SRC                     Source tree to keep and reuse: empty, or
+                              one this script unpacked
    DT_LINKDIR                 Where the symlinks go
                               (default: /usr/local/bin, ~/.local/bin with --user)
 
@@ -836,7 +894,7 @@ main() {
     exit 0
   fi
 
-  for tool in git curl cmake; do
+  for tool in curl tar xz sha256sum cmake; do
     command -v "$tool" >/dev/null || die "$tool is not installed"
   done
 
@@ -849,9 +907,10 @@ main() {
 
   [ "$SKIP_DEPS" = 1 ] || install_deps
 
+  local version="${TAG#release-}"
   if [ -z "$SRC" ]; then
     if [ "$KEEP_SRC" = 1 ]; then
-      SRC="$HOME/src/darktable-release"
+      SRC="$HOME/src/darktable-$version"
     else
       mkdir -p "$CACHE"
       SCRATCH="$(mktemp -d "$CACHE/darktable-install.XXXXXX")"
@@ -860,33 +919,23 @@ main() {
     fi
   fi
 
-  if [ -d "$SRC/.git" ]; then
-    note "updating $SRC"
-    git -C "$SRC" fetch --tags --prune origin
+  # a tree marked with this release is built again in place. another mark is
+  # still ours, since fetch_source only unpacks into an empty directory: an
+  # unpack cut short, or a kept tree of another release, cleared and redone.
+  # anything unmarked is not ours to overwrite
+  local mark=""
+  [ -f "$SRC/$SOURCE_MARK" ] && mark="$(cat "$SRC/$SOURCE_MARK")"
+  if [ "$mark" = "$TAG" ]; then
+    note "reusing the $version source in $SRC"
+  elif [ -n "$mark" ]; then
+    note "clearing $SRC ($mark), to unpack $version"
+    find "$SRC" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    fetch_source
+  elif [ -n "$(ls -A "$SRC" 2>/dev/null)" ]; then
+    die "$SRC holds something other than the $version source; remove it, or give DT_SRC an empty directory"
   else
-    note "cloning into $SRC"
-    mkdir -p "$(dirname "$SRC")"
-    # blobless: every tag and commit is there, so switching releases later
-    # needs no second clone, but file contents are fetched only for what is
-    # checked out. a full clone of darktable is gigabytes, this is ~50M
-    git clone --filter=blob:none "$REPO" "$SRC"
+    fetch_source
   fi
-
-  git -C "$SRC" rev-parse -q --verify "refs/tags/$TAG" >/dev/null ||
-    die "no such tag: $TAG (try --list)"
-  git -C "$SRC" checkout --quiet --detach "$TAG"
-  note "submodules"
-  # src/tests/integration is the reference images for the integration test
-  # suite: 1.2G, dwarfing darktable itself, and nothing the build reads. take
-  # every other submodule by name rather than excluding it after the fact, so
-  # one the build gains later is still picked up
-  local subs=() sub
-  while IFS= read -r sub; do
-    [ "$sub" = src/tests/integration ] || subs+=("$sub")
-  done < <(git -C "$SRC" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
-             cut -d' ' -f2-)
-  [ "${#subs[@]}" -gt 0 ] || die "no submodules listed in .gitmodules"
-  git -C "$SRC" submodule update --init --recursive -- "${subs[@]}"
 
   cd "$SRC"
   # compile before touching the prefix, so a failed build leaves whatever is
