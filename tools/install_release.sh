@@ -135,6 +135,7 @@ SKIP_DEPS=0 SKIP_LENSFUN=0 ASSUME_YES=0 KEEP_SRC=0
 ACTION=install
 EXPLICIT_TARGET=0
 TAG="" PASSTHROUGH=()
+BUILD_DIR=""   # build.sh's --build-dir when given, relative to the source
 # build.sh features turned on unless the command line decides either way,
 # for what cmake leaves off but darktable's own builds turn on: AI is on in
 # its CI (.ci/ci-script.sh) and its AppImage (tools/appimage-build-script.sh)
@@ -819,6 +820,8 @@ main() {
       # the release tag: guessing from the shape of the word instead both
       # steals --build-dir 5.6 and misses tags like nightly
       --build-type|--buildtype|--build-dir|--build-generator|-j|--jobs)
+                      # the install step needs to know where the build went
+                      [ "$1" != --build-dir ] || BUILD_DIR="${2:-}"
                       PASSTHROUGH+=("$1")
                       [ $# -lt 2 ] || { PASSTHROUGH+=("$2"); shift; } ;;
       -*)             PASSTHROUGH+=("$1") ;;
@@ -965,18 +968,17 @@ main() {
   clean_prefix
 
   note "installing"
-  # --sudo would make a user install root-owned, and the next --uninstall
-  # would then fail to remove it
-  local elevate=(--sudo)
-  [ "$USER_MODE" = 1 ] && elevate=()
   # clean_prefix has already emptied the prefix by now, so a failure here
   # leaves the previous install's symlinks pointing at nothing. name the one
   # command that clears them, since --uninstall alone will not find a prefix
   # that is no longer there
   local recover="--uninstall --prefix $PREFIX"
   [ "$USER_MODE" = 0 ] || recover="$recover --user"
-  # the same switches as the build, or AI would be configured back in
-  ./build.sh --prefix "$PREFIX" --install "${elevate[@]}" "${build_args[@]}" ||
+  # the install rules alone. build.sh --install would configure and build
+  # again first, and a source package rewrites version_gen.c on every build,
+  # so everything would be relinked. sudo_ is a no-op for a --user install,
+  # which root would leave root-owned and the next --uninstall unable to remove
+  sudo_ cmake --install "${BUILD_DIR:-build}" ||
     die "the install failed; run '$0 $recover' to clear what the previous one left behind"
 
   [ -x "$PREFIX/bin/darktable" ] ||
