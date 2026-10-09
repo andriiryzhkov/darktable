@@ -1124,11 +1124,14 @@ char *dt_server_catalog_import(dt_server_t *server, const dt_server_request_t *r
       continue;
     }
 
-    const dt_imgid_t imgid = dt_image_import(filmid, fullpath, FALSE, TRUE);
+    // raise_signals would make the core clear the selection while reading
+    // XMP duplicates, which dereferences the view manager we run without
+    const dt_imgid_t imgid = dt_image_import(filmid, fullpath, FALSE, FALSE);
     dt_film_cleanup(&film);
 
     if(dt_is_valid_imgid(imgid))
     {
+      DT_CONTROL_SIGNAL_RAISE(DT_SIGNAL_IMAGE_IMPORT, imgid);
       imported++;
       last_filmid = filmid;
     }
