@@ -24,6 +24,7 @@ import type { FolderEntry, FileEntry } from "../types/import";
 declare global {
   interface Window {
     ping: () => Promise<unknown>;
+    getVersion: () => Promise<{ version: string }>;
     catalogQuery: (offset: number, limit: number, rules?: CollectionRuleParam[], sort?: string, sortOrder?: string) => Promise<CatalogQueryResult>;
     catalogGetThumbnail: (imgid: number) => Promise<ThumbnailResult>;
     catalogGetThumbnails: (imgids: number[], size?: number) => Promise<BatchThumbnailResult>;
@@ -115,6 +116,8 @@ export interface MetadataClearParams {
 export type PlatformOS = "macos" | "windows" | "linux";
 
 export const ping = () => window.ping();
+
+export const getVersion = () => window.getVersion();
 
 export const catalogQuery = (offset: number, limit: number, rules?: CollectionRuleParam[], sort?: string, sortOrder?: string) =>
   window.catalogQuery(offset, limit, rules, sort, sortOrder);

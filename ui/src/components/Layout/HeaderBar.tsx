@@ -1,5 +1,6 @@
 import { useUIStore } from "../../stores/uiStore";
 import { useCatalogStore } from "../../stores/catalogStore";
+import { useConnectionStore } from "../../stores/connectionStore";
 import { usePlatform } from "../../hooks/usePlatform";
 import { windowStartDrag, windowZoom } from "../../api/commands";
 import logoSvg from "../../assets/idbutton.svg";
@@ -13,6 +14,8 @@ function isInteractive(target: EventTarget | null): boolean {
 export default function HeaderBar() {
   const { activeView, setActiveView } = useUIStore();
   const platform = usePlatform();
+  // drop the commit count and hash of dev builds: 5.7.0+1388~g55e9188 -> 5.7.0
+  const version = useConnectionStore((s) => s.version?.match(/^\d+(\.\d+)*/)?.[0] ?? s.version);
 
   return (
     <div
@@ -28,7 +31,7 @@ export default function HeaderBar() {
       <div className="flex items-center gap-2">
         <img className="headerbar-logo" src={logoSvg} alt="darktable" />
         <img className="headerbar-title-svg" src={titleSvg} alt="darktable" />
-        <span className="headerbar-version">5.5.0</span>
+        <span className="headerbar-version">{version}</span>
       </div>
 
       {/* Right: view tabs */}

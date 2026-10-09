@@ -11,6 +11,7 @@ const noop = () => Promise.resolve({});
 
 // Catalog
 window.ping = () => Promise.resolve({ status: "ok" });
+window.getVersion = () => Promise.resolve({ version: "0.0.0" });
 window.catalogQuery = () => Promise.resolve({ images: [], total: 0 });
 window.catalogGetThumbnail = () => Promise.resolve({ imgid: 0, mime: "image/jpeg", data: "" });
 window.catalogGetThumbnails = () => Promise.resolve({ thumbnails: [] });

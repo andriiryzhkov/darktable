@@ -285,6 +285,12 @@ static void on_ping(const char *id, const char *req, void *arg)
   _ipc_passthrough(arg, id, "system.ping", "{}");
 }
 
+static void on_get_version(const char *id, const char *req, void *arg)
+{
+  (void)req;
+  _ipc_passthrough(arg, id, "system.get_version", "{}");
+}
+
 static void on_catalog_query(const char *id, const char *req, void *arg)
 {
   dt_webview_ctx_t *ctx = arg;
@@ -3301,6 +3307,7 @@ void dt_webview_register_bindings(dt_webview_ctx_t *ctx)
   ctx->frame_server = _frame_server_start(ctx);
 
   webview_bind(ctx->webview, "ping", on_ping, ctx);
+  webview_bind(ctx->webview, "getVersion", on_get_version, ctx);
   webview_bind(ctx->webview, "catalogQuery", on_catalog_query, ctx);
   webview_bind(ctx->webview, "catalogGetThumbnail", on_catalog_get_thumbnail, ctx);
   webview_bind(ctx->webview, "catalogGetThumbnails", on_catalog_get_thumbnails, ctx);
