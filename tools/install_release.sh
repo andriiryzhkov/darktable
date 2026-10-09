@@ -7,10 +7,12 @@
 #   ./install_release.sh --list           # what releases are available
 #   ./install_release.sh --help           # every option
 #
-# Or run it straight from GitHub without downloading it first. The "-s --" is
-# what carries the options past bash to the script:
+# Or run it straight from GitHub without downloading it first:
 #
-#   curl -fsSL https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh | bash -s -- --enable-ai
+#   curl -fsSL https://raw.githubusercontent.com/andriiryzhkov/darktable/refs/heads/install_tools/tools/install_release.sh | bash
+#
+# Options go after "bash -s --", which carries them past bash to the script,
+# e.g. "| bash -s -- --user".
 #
 # It still asks before installing packages or replacing an install, because it
 # prompts on /dev/tty rather than stdin, which is the script itself when piped.
@@ -24,8 +26,14 @@
 # refused: this script decides when to install and when to use root.
 #
 # Left alone, cmake enables whatever it autodetects, so a missing dependency
-# quietly drops the feature. Asking for one explicitly makes cmake stop instead,
-# which is why --enable-ai is worth passing if you want AI.
+# quietly drops the feature. Asking for one explicitly makes cmake stop instead.
+#
+# Features in DEFAULT_FEATURES are the exception, for now only AI: cmake
+# leaves it off unless asked, so this script asks, as darktable's CI and its
+# AppImage do. If the configure step then fails, the build is retried once
+# without them and says so; for AI that is when ONNX Runtime or libarchive can
+# be neither found nor fetched. --disable-ai leaves it out from the start, and
+# --enable-ai makes a missing dependency an error instead.
 #
 # WHY BUILD FROM SOURCE
 #
@@ -68,6 +76,9 @@
 # but a genuinely missing dependency then surfaces later as a cmake error.
 # Corrections welcome. Any other distribution: install them yourself and use
 # --skip-deps.
+#
+# ONNX Runtime, for AI, is packaged by Ubuntu from 26.04, by Fedora and by Arch.
+# Where it is not, darktable's cmake downloads Microsoft's build from GitHub.
 #
 # REMOVING IT
 #
@@ -115,6 +126,10 @@ SKIP_DEPS=0 SKIP_LENSFUN=0 ASSUME_YES=0 KEEP_SRC=0
 ACTION=install
 EXPLICIT_TARGET=0
 TAG="" PASSTHROUGH=()
+# build.sh features turned on unless the command line decides either way,
+# for what cmake leaves off but darktable's own builds turn on: AI is on in
+# its CI (.ci/ci-script.sh) and its AppImage (tools/appimage-build-script.sh)
+DEFAULT_FEATURES="ai"
 
 # Debian and Ubuntu packages, taken from what darktable's own CI installs
 # (.github/workflows/ci.yml). Other distributions are a best-effort mapping
@@ -149,6 +164,7 @@ RPM_PACKAGES="
   lua-devel opencv-devel OpenEXR-devel openjpeg2-devel osm-gps-map-devel
   portmidi-devel potrace-devel pugixml-devel SDL2-devel sqlite-devel
   zlib-devel libcmocka-devel python3-jsonschema
+  libarchive-devel onnxruntime-devel
 "
 
 ARCH_PACKAGES="
@@ -158,7 +174,7 @@ ARCH_PACKAGES="
   lensfun libavif curl libgphoto2 libheif libjpeg-turbo libpng librsvg
   libsecret libtiff libwebp libxml2 libxslt json-glib lua opencv openexr
   openjpeg2 osm-gps-map portmidi potrace pugixml sdl2 sqlite zlib cmocka
-  python-jsonschema
+  python-jsonschema onnxruntime-cpu
 "
 
 die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -694,9 +710,11 @@ Actual actions:
    --clean                    Remove source trees left by failed builds
 
 Additional build.sh and cmake options:
-Anything not listed above is passed to build.sh, so --enable-ai,
---disable-opencl and -j work; "build.sh --help" lists them. build.sh's
---install and --sudo are refused.
+Anything not listed above is passed to build.sh, so --disable-ai,
+--disable-opencl and -j work; "build.sh --help" lists them. AI is built
+by default, and without it if it cannot be configured; --disable-ai
+leaves it out, --enable-ai makes it required. build.sh's --install
+and --sudo are refused.
 
 Environment:
    DT_SRC                     Source tree to keep and reuse
@@ -751,6 +769,18 @@ main() {
                       TAG="$1" ;;
     esac
     shift
+  done
+  # a default feature is added unless the line already decides it, either way
+  # and wherever: as build.sh's switch or as the cmake option it stands for
+  local feature arg decided defaulted=()
+  for feature in $DEFAULT_FEATURES; do
+    decided=0
+    for arg in "${PASSTHROUGH[@]}"; do
+      case "$arg" in
+        --enable-"$feature"|--disable-"$feature"|-DUSE_"${feature^^}"=*) decided=1 ;;
+      esac
+    done
+    [ "$decided" = 1 ] || defaulted+=("$feature")
   done
 
   # --list before any of the setup below: asking what releases exist is worth
@@ -862,7 +892,26 @@ main() {
   # compile before touching the prefix, so a failed build leaves whatever is
   # already installed there working
   note "compiling"
-  ./build.sh --prefix "$PREFIX" "${PASSTHROUGH[@]}"
+  # the switches go first: PASSTHROUGH may hold a "--", and build.sh hands
+  # whatever follows it to cmake untouched
+  local build_args=() dropped=0
+  for feature in "${defaulted[@]}"; do build_args+=(--enable-"$feature"); done
+  build_args+=("${PASSTHROUGH[@]}")
+  # logged to tell a failed configure step from a failed compile: only the
+  # first can be down to a feature this script asked for, and a compile error
+  # must not be retried without it and hidden
+  local log="$SRC/install_release.log"
+  if ! ./build.sh --prefix "$PREFIX" "${build_args[@]}" 2>&1 | tee "$log"; then
+    [ "${#defaulted[@]}" -gt 0 ] &&
+      grep -q 'Configuring incomplete, errors occurred' "$log" ||
+      die "the build failed: see above"
+    note "warning: configuring failed, see above; building again without ${defaulted[*]}"
+    build_args=()
+    for feature in "${defaulted[@]}"; do build_args+=(--disable-"$feature"); done
+    build_args+=("${PASSTHROUGH[@]}")
+    dropped=1
+    ./build.sh --prefix "$PREFIX" "${build_args[@]}"
+  fi
 
   clean_prefix
 
@@ -877,7 +926,8 @@ main() {
   # that is no longer there
   local recover="--uninstall --prefix $PREFIX"
   [ "$USER_MODE" = 0 ] || recover="$recover --user"
-  ./build.sh --prefix "$PREFIX" --install "${elevate[@]}" "${PASSTHROUGH[@]}" ||
+  # the same switches as the build, or AI would be configured back in
+  ./build.sh --prefix "$PREFIX" --install "${elevate[@]}" "${build_args[@]}" ||
     die "the install failed; run '$0 $recover' to clear what the previous one left behind"
 
   [ -x "$PREFIX/bin/darktable" ] ||
@@ -888,6 +938,9 @@ main() {
   update_lensfun
 
   note "installed: $("$PREFIX/bin/darktable" --version | head -1)"
+  # again here: the warning came before the long compile and scrolled past
+  [ "$dropped" = 0 ] ||
+    note "warning: built without ${defaulted[*]}, which could not be configured; install what it needs and re-run to get it"
   # exit non-zero: an install nothing on PATH can find is not what was asked
   # for, and the warning above scrolls past on a build this long
   [ "$unlinked" = 0 ] ||
